@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ProxPulse</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">◈</div>
+        <div>
+          <div class="brand-name">PROX<span>PULSE</span></div>
+          <div class="brand-sub">proxy checker // v0.1</div>
+        </div>
+      </div>
+      <div class="top-stats">
+        <div class="stat"><label>Всего</label><b id="st-total">0</b></div>
+        <div class="stat ok"><label>Живые</label><b id="st-alive">0</b></div>
+        <div class="stat bad"><label>Мёртвые</label><b id="st-dead">0</b></div>
+        <div class="stat"><label>Ср. пинг</label><b id="st-ping">—</b></div>
+      </div>
+      <div class="top-status">
+        <span id="net-dot" class="dot idle"></span>
+        <span id="net-text">idle</span>
+      </div>
+    </header>
+
+    <div class="progress-wrap"><div id="progress" class="progress"></div></div>
+
+    <main class="layout">
+      <section class="panel left">
+        <div class="panel-head">
+          <span class="ph-title">▸ Источник</span>
+          <span id="src-count" class="count">0</span>
+        </div>
+        <textarea
+          id="proxy-input"
+          spellcheck="false"
+          placeholder="Вставь прокси, каждый с новой строки:&#10;127.0.0.1:8080&#10;user:pass@127.0.0.1:8080&#10;socks5://127.0.0.1:1080&#10;127.0.0.1:8080:user:pass"
+        ></textarea>
+
+        <div class="row2">
+          <button id="btn-sample" class="btn ghost" title="Вставить пример формата">Пример</button>
+          <button id="btn-clear-in" class="btn ghost">Очистить</button>
+          <label class="btn ghost file">Файл<input id="file-input" type="file" accept=".txt,.csv,.log" hidden /></label>
+        </div>
+
+        <div class="panel-head" style="margin-top:14px">
+          <span class="ph-title">▸ Настройки</span>
+        </div>
+
+        <div class="settings">
+          <label class="fld">
+            <span>Тестовый URL</span>
+            <select id="test-url">
+              <option value="https://www.google.com/generate_204" selected>google generate_204 (быстро)</option>
+              <option value="https://api.ipify.org">api.ipify.org (покажет IP)</option>
+              <option value="https://httpbin.org/ip">httpbin.org/ip (покажет IP)</option>
+              <option value="https://example.com">example.com</option>
+            </select>
+          </label>
+          <input id="test-url-custom" placeholder="или свой URL https://..." />
+
+          <div class="grid2">
+            <label class="fld"><span>Таймаут, мс</span><input id="timeout" type="number" value="8000" min="1000" max="30000" step="500" /></label>
+            <label class="fld"><span>Потоки</span><input id="concurrency" type="number" value="50" min="1" max="500" /></label>
+          </div>
+
+          <label class="fld">
+            <span>Тип без схемы</span>
+            <select id="default-proto">
+              <option value="http" selected>HTTP</option>
+              <option value="socks5">SOCKS5</option>
+              <option value="socks4">SOCKS4</option>
+            </select>
+          </label>
+
+          <div class="row2">
+            <button id="btn-direct" class="btn ghost">Проверить связь</button>
+            <span id="direct-res" class="hint"></span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="btn-start" class="btn primary">▶ Старт</button>
+          <button id="btn-stop" class="btn danger" disabled>■ Стоп</button>
+        </div>
+        <div id="status-line" class="status-line">Готов к проверке.</div>
+      </section>
+
+      <section class="panel right">
+        <div class="panel-head">
+          <span class="ph-title">▸ Результат</span>
+          <div class="filters">
+            <button data-f="all" class="chip active">Все <b id="f-all">0</b></button>
+            <button data-f="alive" class="chip ok">Живые <b id="f-alive">0</b></button>
+            <button data-f="dead" class="chip bad">Мёртвые <b id="f-dead">0</b></button>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <input id="search" placeholder="Фильтр: 1.2.3.4, :8080, socks..." />
+          <button id="btn-copy" class="btn ghost">Копировать живые</button>
+          <button id="btn-export" class="btn ghost">Экспорт .txt</button>
+          <button id="btn-clear-out" class="btn ghost">Очистить</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>#</th><th>Прокси</th><th>Тип</th><th>Статус</th><th>Пинг</th><th>IP / Ошибка</th></tr>
+            </thead>
+            <tbody id="tbody">
+              <tr class="empty"><td colspan="6">Пока пусто — вставь список слева и жми Старт.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>PROXPULSE // tauri + rust // black/red hitech</span>
+      <span id="foot-info"></span>
+    </footer>
+  </body>
+</html>
