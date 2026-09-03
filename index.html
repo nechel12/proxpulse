@@ -16,7 +16,7 @@
         <div class="brand-mark">◈</div>
         <div>
           <div class="brand-name">PROX<span>PULSE</span></div>
-          <div class="brand-sub">proxy checker // v0.1</div>
+          <div class="brand-sub">proxy checker // v0.2</div>
         </div>
       </div>
       <div class="top-stats">
@@ -42,14 +42,14 @@
         <textarea
           id="proxy-input"
           spellcheck="false"
-          placeholder="Вставь прокси, каждый с новой строки:&#10;127.0.0.1:8080&#10;user:pass@127.0.0.1:8080&#10;socks5://127.0.0.1:1080&#10;127.0.0.1:8080:user:pass"
+          placeholder="Вставь прокси в любом формате:&#10;127.0.0.1:8080&#10;user:pass@127.0.0.1:8080&#10;socks5://127.0.0.1:1080&#10;127.0.0.1:8080:user:pass&#10;user:pass:127.0.0.1:8080&#10;127.0.0.1,8080,user,pass"
         ></textarea>
 
         <div class="row2">
-          <button id="btn-sample" class="btn ghost" title="Вставить пример формата">Пример</button>
           <button id="btn-clear-in" class="btn ghost">Очистить</button>
-          <label class="btn ghost file">Файл<input id="file-input" type="file" accept=".txt,.csv,.log" hidden /></label>
+          <label class="btn ghost file">Импорт<input id="file-input" type="file" hidden /></label>
         </div>
+        <div class="hint" style="margin-top:6px">Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.</div>
 
         <div class="panel-head" style="margin-top:14px">
           <span class="ph-title">▸ Настройки</span>
@@ -60,9 +60,10 @@
             <span>Тестовый URL</span>
             <select id="test-url">
               <option value="https://www.google.com/generate_204" selected>google generate_204 (быстро)</option>
+              <option value="https://cp.cloudflare.com/generate_204">cloudflare generate_204 (быстро)</option>
               <option value="https://api.ipify.org">api.ipify.org (покажет IP)</option>
               <option value="https://httpbin.org/ip">httpbin.org/ip (покажет IP)</option>
-              <option value="https://example.com">example.com</option>
+              <option value="https://ip-api.com/json">ip-api.com/json (IP + гео)</option>
             </select>
           </label>
           <input id="test-url-custom" placeholder="или свой URL https://..." />
@@ -72,14 +73,25 @@
             <label class="fld"><span>Потоки</span><input id="concurrency" type="number" value="50" min="1" max="500" /></label>
           </div>
 
-          <label class="fld">
-            <span>Тип без схемы</span>
-            <select id="default-proto">
-              <option value="http" selected>HTTP</option>
-              <option value="socks5">SOCKS5</option>
-              <option value="socks4">SOCKS4</option>
-            </select>
-          </label>
+          <div class="grid2">
+            <label class="fld"><span>Замеры (стабильность)</span><input id="repeats" type="number" value="3" min="1" max="5" step="1" /></label>
+            <label class="fld">
+              <span>Тип без схемы</span>
+              <select id="default-proto">
+                <option value="http" selected>HTTP</option>
+                <option value="socks5">SOCKS5</option>
+                <option value="socks4">SOCKS4</option>
+                <option value="http+socks5">HTTP + SOCKS5</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="checks">
+            <label class="chk"><input id="chk-geo" type="checkbox" checked /><span>Гео и тип IP</span></label>
+            <label class="chk"><input id="chk-anon" type="checkbox" checked /><span>Анонимность</span></label>
+            <label class="chk"><input id="chk-tamper" type="checkbox" checked /><span>Целостность</span></label>
+          </div>
+          <div class="hint">Глубокие проверки медленнее: гео идёт через ip-api, анонимность — через httpbin, целостность — сверка с example.com.</div>
 
           <div class="row2">
             <button id="btn-direct" class="btn ghost">Проверить связь</button>
@@ -105,19 +117,26 @@
         </div>
 
         <div class="toolbar">
-          <input id="search" placeholder="Фильтр: 1.2.3.4, :8080, socks..." />
-          <button id="btn-copy" class="btn ghost">Копировать живые</button>
-          <button id="btn-export" class="btn ghost">Экспорт .txt</button>
+          <input id="search" placeholder="Фильтр: 1.2.3.4, :8080, socks, страна, isp..." />
+          <div class="dropdown">
+            <button id="btn-export" class="btn ghost">Экспорт ▾</button>
+            <div id="export-menu" class="menu hidden">
+              <button data-exp="txt">.txt — только живые</button>
+              <button data-exp="json">.json — все результаты</button>
+              <button data-exp="csv">.csv — таблица</button>
+              <button data-exp="copy">Скопировать живые</button>
+            </div>
+          </div>
           <button id="btn-clear-out" class="btn ghost">Очистить</button>
         </div>
 
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>#</th><th>Прокси</th><th>Тип</th><th>Статус</th><th>Пинг</th><th>IP / Ошибка</th></tr>
+              <tr><th>#</th><th>Прокси</th><th>Тип</th><th>Статус</th><th>Пинг</th><th>Джиттер/SR</th><th>Анон</th><th>Гео</th><th>Тип IP</th><th>Инфо</th></tr>
             </thead>
             <tbody id="tbody">
-              <tr class="empty"><td colspan="6">Пока пусто — вставь список слева и жми Старт.</td></tr>
+              <tr class="empty"><td colspan="10">Пока пусто — вставь список слева и жми Старт.</td></tr>
             </tbody>
           </table>
         </div>
@@ -125,7 +144,6 @@
     </main>
 
     <footer class="foot">
-      <span>PROXPULSE // tauri + rust // black/red hitech</span>
       <span id="foot-info"></span>
     </footer>
   </body>
