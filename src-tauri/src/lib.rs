@@ -9,7 +9,12 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::{
+    State,
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Semaphore};
@@ -1393,6 +1398,7 @@ struct DispatchStatus {
     running: bool,
     port: u16,
     mode: String,
+    listener: String,
     upstreams: usize,
     current: Option<String>,
     requests: u64,
@@ -1404,6 +1410,7 @@ struct DispatchInner {
     running: AtomicBool,
     port: Mutex<u16>,
     mode: Mutex<String>,
+    listener: Mutex<String>,
     pool: Mutex<Vec<Upstream>>,
     rr: AtomicUsize,
     requests: AtomicU64,
@@ -1424,6 +1431,7 @@ impl Default for DispatchState {
                 running: AtomicBool::new(false),
                 port: Mutex::new(1080),
                 mode: Mutex::new("round-robin".to_string()),
+                listener: Mutex::new("both".to_string()),
                 pool: Mutex::new(Vec::new()),
                 rr: AtomicUsize::new(0),
                 requests: AtomicU64::new(0),
@@ -1472,7 +1480,17 @@ fn parse_target(method: &str, target: &str) -> Option<(String, u16)> {
     }
 }
 
-async fn handle_client(mut client: TcpStream, st: Arc<DispatchInner>) {
+async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
+    let pool = st.pool.lock().await;
+    if pool.is_empty() {
+        return vec![];
+    }
+    let mode = st.mode.lock().await.clone();
+    let order = pick_order(pool.len(), &mode, &pool, &st.rr);
+    order.iter().map(|&i| pool[i].clone()).collect()
+}
+
+async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
     // read request head
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
@@ -1509,22 +1527,13 @@ async fn handle_client(mut client: TcpStream, st: Arc<DispatchInner>) {
     };
     let is_connect = method.eq_ignore_ascii_case("CONNECT");
 
-    let (mode, order) = {
-        let pool = st.pool.lock().await;
-        if pool.is_empty() {
-            drop(pool);
-            let _ = client
-                .write_all(b"HTTP/1.1 502 No upstreams\r\n\r\n")
-                .await;
-            return;
-        }
-        let mode = st.mode.lock().await.clone();
-        let order = pick_order(pool.len(), &mode, &pool, &st.rr);
-        let ups: Vec<Upstream> = order.iter().map(|&i| pool[i].clone()).collect();
-        drop(pool);
-        (mode, ups)
-    };
-    let _ = mode;
+    let order = take_upstreams(&st).await;
+    if order.is_empty() {
+        let _ = client
+            .write_all(b"HTTP/1.1 502 No upstreams\r\n\r\n")
+            .await;
+        return;
+    }
 
     let mut last_err = String::new();
     for up in &order {
@@ -1568,6 +1577,135 @@ async fn handle_client(mut client: TcpStream, st: Arc<DispatchInner>) {
         .await;
 }
 
+async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>) {
+    let d = Duration::from_secs(10);
+    let mut hdr = [0u8; 2];
+    if read_exact_t(&mut client, &mut hdr, d).await.is_err() || hdr[0] != 0x05 {
+        return;
+    }
+    let n = hdr[1] as usize;
+    if n == 0 || n > 16 {
+        return;
+    }
+    let mut methods = vec![0u8; n];
+    if read_exact_t(&mut client, &mut methods, d).await.is_err() {
+        return;
+    }
+    if write_all_t(&mut client, &[0x05, 0x00], d).await.is_err() {
+        return;
+    }
+    let mut rh = [0u8; 4];
+    if read_exact_t(&mut client, &mut rh, d).await.is_err() {
+        return;
+    }
+    if rh[0] != 0x05 || rh[1] != 0x01 {
+        let _ = write_all_t(&mut client, &[0x05, 0x07, 0, 1, 0, 0, 0, 0, 0, 0], d).await;
+        return;
+    }
+    let (t_host, t_port) = match rh[3] {
+        0x01 => {
+            let mut b = [0u8; 6];
+            if read_exact_t(&mut client, &mut b, d).await.is_err() {
+                return;
+            }
+            (
+                format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3]),
+                u16::from_be_bytes([b[4], b[5]]),
+            )
+        }
+        0x03 => {
+            let mut l = [0u8; 1];
+            if read_exact_t(&mut client, &mut l, d).await.is_err() {
+                return;
+            }
+            let mut b = vec![0u8; l[0] as usize + 2];
+            if read_exact_t(&mut client, &mut b, d).await.is_err() {
+                return;
+            }
+            let dl = l[0] as usize;
+            (
+                String::from_utf8_lossy(&b[..dl]).to_string(),
+                u16::from_be_bytes([b[dl], b[dl + 1]]),
+            )
+        }
+        0x04 => {
+            let mut b = [0u8; 18];
+            if read_exact_t(&mut client, &mut b, d).await.is_err() {
+                return;
+            }
+            let segs: Vec<String> = b[..16]
+                .chunks(2)
+                .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
+                .collect();
+            (
+                segs.join(":"),
+                u16::from_be_bytes([b[16], b[17]]),
+            )
+        }
+        _ => {
+            let _ = write_all_t(&mut client, &[0x05, 0x08, 0, 1, 0, 0, 0, 0, 0, 0], d).await;
+            return;
+        }
+    };
+
+    let order = take_upstreams(&st).await;
+    if order.is_empty() {
+        let _ = write_all_t(&mut client, &[0x05, 0x02, 0, 1, 0, 0, 0, 0, 0, 0], d).await;
+        return;
+    }
+    let mut last_err = String::new();
+    for up in &order {
+        match connect_via(up, &t_host, t_port, Duration::from_secs(8)).await {
+            Ok(mut u) => {
+                *st.current.lock().await = Some(up.raw.clone());
+                st.requests.fetch_add(1, Ordering::Relaxed);
+                if write_all_t(&mut client, &[0x05, 0x00, 0x00, 1, 0, 0, 0, 0, 0, 0], d)
+                    .await
+                    .is_err()
+                {
+                    st.errors.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+                let _ = tokio::io::copy_bidirectional(&mut client, &mut u).await;
+                return;
+            }
+            Err(e) => {
+                last_err = e.to_string();
+            }
+        }
+    }
+    st.errors.fetch_add(1, Ordering::Relaxed);
+    *st.last_error.lock().await =
+        Some(format!("socks {t_host}:{t_port}: {last_err}"));
+    let _ = write_all_t(&mut client, &[0x05, 0x05, 0, 1, 0, 0, 0, 0, 0, 0], d).await;
+}
+
+async fn handle_conn(client: TcpStream, st: Arc<DispatchInner>) {
+    let lmode = st.listener.lock().await.clone();
+    if lmode != "http" {
+        // SOCKS5 handshake starts with 0x05, HTTP with ASCII method
+        let mut one = [0u8; 1];
+        match tokio::time::timeout(Duration::from_secs(10), client.peek(&mut one)).await {
+            Ok(Ok(1)) if one[0] == 0x05 => {
+                handle_socks5(client, st).await;
+                return;
+            }
+            Ok(Ok(_)) => {}
+            _ => {
+                if lmode == "socks5" {
+                    handle_socks5(client, st).await;
+                }
+                return;
+            }
+        }
+        if lmode == "socks5" {
+            handle_socks5(client, st).await;
+            return;
+        }
+    }
+    handle_http(client, st).await;
+}
+
 async fn run_server(listener: TcpListener, st: Arc<DispatchInner>) {
     loop {
         let (stream, _) = match listener.accept().await {
@@ -1576,7 +1714,7 @@ async fn run_server(listener: TcpListener, st: Arc<DispatchInner>) {
         };
         let stc = st.clone();
         tokio::spawn(async move {
-            handle_client(stream, stc).await;
+            handle_conn(stream, stc).await;
         });
     }
 }
@@ -1620,6 +1758,7 @@ async fn set_dispatch_pool(
 async fn start_local_proxy(
     port: u16,
     mode: String,
+    listener: Option<String>,
     state: State<'_, DispatchState>,
 ) -> Result<String, String> {
     if port == 0 {
@@ -1634,7 +1773,18 @@ async fn start_local_proxy(
             return Err("pool is empty".to_string());
         }
     }
-    let listener = TcpListener::bind(("127.0.0.1", port))
+    let listener = listener.unwrap_or_else(|| "both".to_string());
+    let listener = match listener.as_str() {
+        "http" | "socks5" => listener,
+        _ => "both".to_string(),
+    };
+    let listener_desc = match listener.as_str() {
+        "http" => "http",
+        "socks5" => "socks5",
+        _ => "http+socks5",
+    }
+    .to_string();
+    let tcp = TcpListener::bind(("127.0.0.1", port))
         .await
         .map_err(|e| format!("bind 127.0.0.1:{port}: {e}"))?;
     *state.inner.port.lock().await = port;
@@ -1643,13 +1793,14 @@ async fn start_local_proxy(
         _ => "round-robin".to_string(),
     };
     *state.inner.mode.lock().await = mode.clone();
+    *state.inner.listener.lock().await = listener;
     state.inner.running.store(true, Ordering::SeqCst);
     let inner = state.inner.clone();
     let h = tokio::spawn(async move {
-        run_server(listener, inner).await;
+        run_server(tcp, inner).await;
     });
     *state.inner.handle.lock().await = Some(h);
-    Ok(format!("127.0.0.1:{port} ({mode})"))
+    Ok(format!("127.0.0.1:{port} ({mode}, {listener_desc})"))
 }
 
 #[tauri::command]
@@ -1668,12 +1819,79 @@ async fn local_proxy_status(state: State<'_, DispatchState>) -> Result<DispatchS
         running: state.inner.running.load(Ordering::SeqCst),
         port: *state.inner.port.lock().await,
         mode: state.inner.mode.lock().await.clone(),
+        listener: state.inner.listener.lock().await.clone(),
         upstreams: pool_n,
         current: state.inner.current.lock().await.clone(),
         requests: state.inner.requests.load(Ordering::SeqCst),
         errors: state.inner.errors.load(Ordering::SeqCst),
         last_error: state.inner.last_error.lock().await.clone(),
     })
+}
+
+#[tauri::command]
+async fn send_webhook(
+    url: String,
+    format: String,
+    items: Vec<DispatchItem>,
+) -> Result<String, String> {
+    let url = url.trim().to_string();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("bad webhook url".to_string());
+    }
+    let (body, ctype) = match format.as_str() {
+        "json" => {
+            let arr: Vec<serde_json::Value> = items
+                .iter()
+                .map(|i| serde_json::json!({"proxy": i.raw, "latency_ms": i.latency}))
+                .collect();
+            (
+                serde_json::to_string(&arr).map_err(|e| e.to_string())?,
+                "application/json",
+            )
+        }
+        "csv" => {
+            let mut s = String::from("proxy,latency_ms\n");
+            for i in &items {
+                s.push_str(&format!(
+                    "{},{}\n",
+                    i.raw,
+                    i.latency.map(|v| v.to_string()).unwrap_or_default()
+                ));
+            }
+            (s, "text/csv")
+        }
+        _ => (
+            items
+                .iter()
+                .map(|i| i.raw.clone())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "text/plain",
+        ),
+    };
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent("ProxPulse/0.3")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let r = client
+        .post(url)
+        .header("Content-Type", ctype)
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| short_error(&e.to_string()))?;
+    let code = r.status().as_u16();
+    let txt = r.text().await.unwrap_or_default();
+    let short: String = txt.chars().take(80).collect();
+    Ok(format!("http {code} {short}"))
+}
+
+#[tauri::command]
+fn hide_to_tray(app: tauri::AppHandle) -> Result<(), String> {
+    app.get_webview_window("main")
+        .ok_or_else(|| "no window".to_string())
+        .and_then(|w| w.hide().map_err(|e| e.to_string()))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1689,8 +1907,58 @@ pub fn run() {
             set_dispatch_pool,
             start_local_proxy,
             stop_local_proxy,
-            local_proxy_status
+            local_proxy_status,
+            send_webhook,
+            hide_to_tray
         ])
+        .setup(|app| {
+            if let Some(icon) = app.default_window_icon().cloned() {
+                let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+                let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+                TrayIconBuilder::new()
+                    .icon(icon)
+                    .tooltip("ProxPulse")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "hide" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.hide();
+                            }
+                        }
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(w) = app.get_webview_window("main") {
+                                if w.is_visible().unwrap_or(true) {
+                                    let _ = w.hide();
+                                } else {
+                                    let _ = w.show();
+                                    let _ = w.set_focus();
+                                }
+                            }
+                        }
+                    })
+                    .build(app)?;
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -76,6 +76,23 @@ const I18N: Record<Lang, Record<string, string>> = {
     pool_empty: "Пусто — запусти проверку.", pool_synced: "Пул: {n}.",
     srv_on: "Сервер на {addr}.", srv_off: "Сервер выключен.",
     srv_err_empty: "Пул пуст — сначала проверь прокси.", srv_err: "Ошибка сервера: {e}",
+    tray_hide: "Скрыть в трей", tab_auto: "Авто", tab_info: "Инфо",
+    srv_listener: "Протокол сервера", lis_both: "HTTP + SOCKS5",
+    lis_http: "Только HTTP", lis_socks: "Только SOCKS5",
+    disp_auto_title: "▸ Автопроверка", auto_on: "Вкл", auto_every: "Каждые, мин",
+    auto_title: "▸ Авторежим",
+    auto_hint: "Общий рабочий пул перепроверяется по таймеру, мёртвые вылетают, живые уходят на вебхук.",
+    auto_now: "Проверить сейчас",
+    webhook_title: "▸ Вебхук", webhook_url: "URL вебхука", webhook_format: "Формат",
+    webhook_send: "Отправить сейчас",
+    webhook_hint: "После каждой автопроверки список уходит POST-запросом. Пусто — отправки нет.",
+    info_title: "▸ О приложении",
+    info_about: "Быстрый чекер прокси: проверка живости, гео, анонимности и TLS, локальный диспетчер и авторассылка пула на вебхук.",
+    auto_running: "Автопроверка {n} шт...",
+    auto_pruned: "Автопроверка: живых {alive}/{total}.",
+    auto_skip: "Пропуск: идёт другая проверка.",
+    webhook_sent: "Вебхук: {r}", webhook_fail: "Вебхук не ушёл: {e}",
+    webhook_empty: "Пул пуст, отправлять нечего.",
   },
   en: {
     stat_total: "Total", stat_alive: "Alive", stat_dead: "Dead", stat_ping: "Avg ping",
@@ -125,6 +142,23 @@ const I18N: Record<Lang, Record<string, string>> = {
     pool_empty: "Empty — run a check.", pool_synced: "Pool: {n}.",
     srv_on: "Server on {addr}.", srv_off: "Server off.",
     srv_err_empty: "Pool is empty — check proxies first.", srv_err: "Server error: {e}",
+    tray_hide: "Hide to tray", tab_auto: "Auto", tab_info: "Info",
+    srv_listener: "Server protocol", lis_both: "HTTP + SOCKS5",
+    lis_http: "HTTP only", lis_socks: "SOCKS5 only",
+    disp_auto_title: "▸ Auto-check", auto_on: "On", auto_every: "Every, min",
+    auto_title: "▸ Auto mode",
+    auto_hint: "Shared alive pool is re-checked on a timer; dead drop out, alive go to the webhook.",
+    auto_now: "Check now",
+    webhook_title: "▸ Webhook", webhook_url: "Webhook URL", webhook_format: "Format",
+    webhook_send: "Send now",
+    webhook_hint: "After each auto-check the list is POSTed. Empty — no send.",
+    info_title: "▸ About",
+    info_about: "Fast proxy checker: liveness, geo, anonymity and TLS checks, local dispatcher and pool auto-posting to a webhook.",
+    auto_running: "Auto-checking {n}...",
+    auto_pruned: "Auto-check: {alive}/{total} alive.",
+    auto_skip: "Skipped: another check is running.",
+    webhook_sent: "Webhook: {r}", webhook_fail: "Webhook failed: {e}",
+    webhook_empty: "Pool is empty, nothing to send.",
   },
 };
 
@@ -151,6 +185,9 @@ let running = false;
 let includeDead = false;
 let dispatchPool: { raw: string; latency: number | null }[] = [];
 let pollTimer: number | undefined;
+let autoBusy = false;
+let dispAutoTimer: number | undefined;
+let autoTimer: number | undefined;
 
 // ---------- proxy extraction (many formats) ----------
 
@@ -373,6 +410,8 @@ function updateCounts() {
   ($("foot-info") as HTMLElement).textContent =
     results.length === 0 ? "" : `alive ${alive}/${results.length}`;
   ($("pool-count") as HTMLElement).textContent = String(dispatchPool.length);
+  const apc = document.getElementById("auto-pool-count");
+  if (apc) apc.textContent = String(dispatchPool.length);
 }
 
 function pingClass(ms: number | null): string {
@@ -475,15 +514,15 @@ function render() {
   });
 }
 
-function renderPool() {
-  const pb = document.getElementById("pool-body") as HTMLTableSectionElement | null;
+function renderPoolInto(tbodyId: string) {
+  const pb = document.getElementById(tbodyId) as HTMLTableSectionElement | null;
   if (!pb) return;
   pb.innerHTML = "";
   if (dispatchPool.length === 0) {
     const tr = document.createElement("tr");
     tr.className = "empty";
     const td = document.createElement("td");
-    td.colSpan = 4;
+    td.colSpan = tbodyId === "pool-body" ? 4 : 3;
     td.textContent = t("pool_empty");
     tr.appendChild(td);
     pb.appendChild(tr);
@@ -493,20 +532,91 @@ function renderPool() {
     const tr = document.createElement("tr");
     const ping = p.latency == null ? "—" : `${p.latency} ms`;
     tr.innerHTML = `<td>${i + 1}</td><td>${escapeHtml(p.raw)}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
-    const td = document.createElement("td");
-    const b = document.createElement("button");
-    b.className = "btn ghost";
-    b.textContent = "✕";
-    b.addEventListener("click", () => {
-      dispatchPool.splice(i, 1);
-      void syncPool(false);
-      renderPool();
-      updateCounts();
-    });
-    td.appendChild(b);
-    tr.appendChild(td);
+    if (tbodyId === "pool-body") {
+      const td = document.createElement("td");
+      const b = document.createElement("button");
+      b.className = "btn ghost";
+      b.textContent = "✕";
+      b.addEventListener("click", () => {
+        dispatchPool.splice(i, 1);
+        void syncPool(false);
+        renderPool();
+        updateCounts();
+      });
+      td.appendChild(b);
+      tr.appendChild(td);
+    }
     pb.appendChild(tr);
   });
+}
+
+function renderPool() {
+  renderPoolInto("pool-body");
+  renderPoolInto("auto-pool-body");
+}
+
+/** merge: keep existing entries, add new ones, refresh latency */
+function mergePool(items: { raw: string; latency: number | null }[]) {
+  const idx = new Map(dispatchPool.map((p, i) => [p.raw, i]));
+  for (const it of items) {
+    const at = idx.get(it.raw);
+    if (at == null) {
+      idx.set(it.raw, dispatchPool.length);
+      dispatchPool.push({ raw: it.raw, latency: it.latency });
+    } else if (it.latency != null) {
+      dispatchPool[at].latency = it.latency;
+    }
+  }
+}
+
+function readCheckSettings() {
+  return {
+    testUrl: effectiveTestUrl(),
+    timeoutMs: Math.max(1000, Math.min(30000, Number(($("timeout") as HTMLInputElement).value) || 8000)),
+    concurrency: Math.max(1, Math.min(500, Number(($("concurrency") as HTMLInputElement).value) || 50)),
+    repeats: Math.max(1, Math.min(5, Number(($("repeats") as HTMLInputElement).value) || 3)),
+    defaultProto: ($("default-proto") as HTMLSelectElement).value,
+    withGeo: ($("chk-geo") as HTMLInputElement).checked,
+    withAnonymity: ($("chk-anon") as HTMLInputElement).checked,
+    withTamper: ($("chk-tamper") as HTMLInputElement).checked,
+    withTls: ($("chk-tls") as HTMLInputElement).checked,
+    precheck: ($("chk-precheck") as HTMLInputElement).checked,
+    precheckTimeoutMs: Math.max(300, Math.min(10000, Number(($("precheck-timeout") as HTMLInputElement).value) || 1500)),
+  };
+}
+
+async function runCheckList(list: string[], onProgress?: (done: number, total: number) => void): Promise<ProxyResult[]> {
+  const s = readCheckSettings();
+  if (!/^https?:\/\//i.test(s.testUrl)) throw new Error("badurl");
+  const out: ProxyResult[] = [];
+  const CHUNK = 120;
+  for (let i = 0; i < list.length; i += CHUNK) {
+    if (stopFlag) break;
+    const chunk = list.slice(i, i + CHUNK);
+    try {
+      const part = await invoke<ProxyResult[]>("check_proxies", {
+        proxies: chunk,
+        testUrl: s.testUrl,
+        timeoutMs: s.timeoutMs,
+        concurrency: s.concurrency,
+        defaultProto: s.defaultProto,
+        repeats: s.repeats,
+        withGeo: s.withGeo,
+        withAnonymity: s.withAnonymity,
+        withTamper: s.withTamper,
+        withTls: s.withTls,
+        precheck: s.precheck,
+        precheckTimeoutMs: s.precheckTimeoutMs,
+      });
+      out.push(...part);
+    } catch (e) {
+      const msg = String(e);
+      for (const p of chunk) out.push(deadStub(p, msg));
+    }
+    onProgress?.(Math.min(list.length, i + CHUNK), list.length);
+  }
+  out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
+  return out;
 }
 
 function escapeHtml(s: string): string {
@@ -534,28 +644,83 @@ async function syncPool(notify: boolean): Promise<number> {
   }
 }
 
+/** full re-check of the shared pool; dead are pruned. if sendHook, POST pool to webhook after. */
+async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
+  const el = document.getElementById(statusEl) as HTMLElement | null;
+  if (running || autoBusy) {
+    if (el) el.textContent = t("auto_skip");
+    return;
+  }
+  if (dispatchPool.length === 0) {
+    if (el) el.textContent = t("pool_empty");
+    return;
+  }
+  autoBusy = true;
+  stopFlag = false;
+  try {
+    if (el) el.textContent = t("auto_running", { n: dispatchPool.length });
+    const res = await runCheckList(dispatchPool.map((p) => p.raw));
+    const alive = res.filter((r) => r.alive);
+    dispatchPool = alive.map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
+    renderPool();
+    updateCounts();
+    await syncPool(false);
+    if (el) el.textContent = `${t("auto_pruned", { alive: alive.length, total: res.length })} ${new Date().toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US")}`;
+    if (sendHook) await sendWebhook(false);
+  } finally {
+    autoBusy = false;
+  }
+}
+
+function armTimers() {
+  window.clearInterval(dispAutoTimer);
+  window.clearInterval(autoTimer);
+  if (($("disp-auto-on") as HTMLInputElement)?.checked) {
+    const mins = Math.max(1, Math.min(1440, Number(($("disp-auto-min") as HTMLInputElement).value) || 30));
+    dispAutoTimer = window.setInterval(() => void autoCycle("disp-auto-status", false), mins * 60_000);
+  }
+  if (($("auto-on") as HTMLInputElement)?.checked) {
+    const mins = Math.max(1, Math.min(1440, Number(($("auto-min") as HTMLInputElement).value) || 30));
+    autoTimer = window.setInterval(() => void autoCycle("auto-status", true), mins * 60_000);
+  }
+}
+
+async function sendWebhook(manual: boolean): Promise<void> {
+  const url = (($("webhook-url") as HTMLInputElement).value || "").trim();
+  const statusEl = $("webhook-status") as HTMLElement;
+  if (!url) {
+    if (manual) statusEl.textContent = t("webhook_hint");
+    return;
+  }
+  if (dispatchPool.length === 0) {
+    statusEl.textContent = t("webhook_empty");
+    return;
+  }
+  const format = ($("webhook-format") as HTMLSelectElement).value;
+  statusEl.textContent = "...";
+  try {
+    const r = await invoke<string>("send_webhook", {
+      url,
+      format,
+      items: dispatchPool.map((p) => ({ raw: p.raw, latency: p.latency })),
+    });
+    statusEl.textContent = t("webhook_sent", { r });
+  } catch (e) {
+    statusEl.textContent = t("webhook_fail", { e: String(e).slice(0, 120) });
+  }
+}
+
 async function start() {
-  if (running) return;
+  if (running || autoBusy) return;
   const list = parseInput(($("proxy-input") as HTMLTextAreaElement).value);
   if (list.length === 0) {
     setStatusT("st_empty");
     return;
   }
-  const testUrl = effectiveTestUrl();
-  if (!/^https?:\/\//i.test(testUrl)) {
+  if (!/^https?:\/\//i.test(effectiveTestUrl())) {
     setStatusT("st_badurl");
     return;
   }
-  const timeoutMs = Math.max(1000, Math.min(30000, Number(($("timeout") as HTMLInputElement).value) || 8000));
-  const concurrency = Math.max(1, Math.min(500, Number(($("concurrency") as HTMLInputElement).value) || 50));
-  const repeats = Math.max(1, Math.min(5, Number(($("repeats") as HTMLInputElement).value) || 3));
-  const defaultProto = ($("default-proto") as HTMLSelectElement).value;
-  const withGeo = ($("chk-geo") as HTMLInputElement).checked;
-  const withAnonymity = ($("chk-anon") as HTMLInputElement).checked;
-  const withTamper = ($("chk-tamper") as HTMLInputElement).checked;
-  const withTls = ($("chk-tls") as HTMLInputElement).checked;
-  const precheck = ($("chk-precheck") as HTMLInputElement).checked;
-  const precheckTimeoutMs = Math.max(300, Math.min(10000, Number(($("precheck-timeout") as HTMLInputElement).value) || 1500));
 
   running = true;
   stopFlag = false;
@@ -566,42 +731,21 @@ async function start() {
   ($("btn-stop") as HTMLButtonElement).disabled = false;
   setNet("work", "checking");
   setProgress(0, list.length);
-
-  const CHUNK = 120;
-  let done = 0;
   const t0 = performance.now();
 
-  for (let i = 0; i < list.length; i += CHUNK) {
-    if (stopFlag) break;
-    const chunk = list.slice(i, i + CHUNK);
-    lastStatus = { key: "st_checking", params: { done: Math.min(i + CHUNK, list.length), total: list.length } };
-    $("status-line").textContent = t("st_checking", lastStatus.params);
-    try {
-      const part = await invoke<ProxyResult[]>("check_proxies", {
-        proxies: chunk,
-        testUrl,
-        timeoutMs,
-        concurrency,
-        defaultProto,
-        repeats,
-        withGeo,
-        withAnonymity,
-        withTamper,
-        withTls,
-        precheck,
-        precheckTimeoutMs,
-      });
-      results.push(...part);
-    } catch (e) {
-      const msg = String(e);
-      for (const p of chunk) results.push(deadStub(p, msg));
-    }
-    done = Math.min(list.length, i + CHUNK);
-    results.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
-    render();
-    updateCounts();
-    setProgress(done, list.length);
+  try {
+    results = await runCheckList(list, (done, total) => {
+      lastStatus = { key: "st_checking", params: { done, total } };
+      $("status-line").textContent = t("st_checking", lastStatus.params);
+      render();
+      updateCounts();
+      setProgress(done, total);
+    });
+  } catch {
+    results = [];
   }
+  render();
+  updateCounts();
 
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   const alive = results.filter((r) => r.alive).length;
@@ -612,8 +756,8 @@ async function start() {
   ($("btn-stop") as HTMLButtonElement).disabled = true;
   running = false;
 
-  // auto-export alive into dispatcher pool
-  dispatchPool = results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
+  // merge alive into dispatcher pool (existing entries kept)
+  mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms })));
   renderPool();
   updateCounts();
   await syncPool(false);
@@ -886,7 +1030,7 @@ window.addEventListener("DOMContentLoaded", () => {
   ($("srv-port") as HTMLInputElement).addEventListener("input", refreshSrvAddr);
   refreshSrvAddr();
   ($("btn-pool-sync") as HTMLButtonElement).addEventListener("click", async () => {
-    dispatchPool = results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
+    mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms })));
     renderPool();
     updateCounts();
     const n = await syncPool(false);
@@ -901,15 +1045,16 @@ window.addEventListener("DOMContentLoaded", () => {
   ($("btn-srv-start") as HTMLButtonElement).addEventListener("click", async () => {
     const port = Math.max(1, Math.min(65535, Number(($("srv-port") as HTMLInputElement).value) || 1080));
     const mode = ($("srv-mode") as HTMLSelectElement).value;
+    const listener = ($("srv-listener") as HTMLSelectElement).value;
     ($("srv-status") as HTMLElement).textContent = "...";
     try {
       if (dispatchPool.length === 0) {
-        dispatchPool = results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
+        mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms })));
         renderPool();
         updateCounts();
       }
       await syncPool(false);
-      const addr = await invoke<string>("start_local_proxy", { port, mode });
+      const addr = await invoke<string>("start_local_proxy", { port, mode, listener });
       ($("srv-status") as HTMLElement).textContent = t("srv_on", { addr });
       refreshSrvAddr();
       void pollDispatch();
@@ -928,5 +1073,20 @@ window.addEventListener("DOMContentLoaded", () => {
     void pollDispatch();
   });
 
+  // tray
+  $("btn-tray").addEventListener("click", async () => {
+    try {
+      await invoke("hide_to_tray");
+    } catch { /* ignore */ }
+  });
+
+  // auto timers + webhook
+  for (const id of ["disp-auto-on", "disp-auto-min", "auto-on", "auto-min"]) {
+    document.getElementById(id)?.addEventListener("change", armTimers);
+  }
+  ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => void autoCycle("auto-status", true));
+  ($("btn-webhook-send") as HTMLButtonElement).addEventListener("click", () => void sendWebhook(true));
+
   applyI18n();
+  armTimers();
 });

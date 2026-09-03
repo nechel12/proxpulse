@@ -29,6 +29,7 @@
         <button data-lang="ru" class="active">RU</button>
         <button data-lang="en">EN</button>
       </div>
+      <button id="btn-tray" class="icon-btn" data-i18n-title="tray_hide">⇲</button>
       <div class="top-status">
         <span id="net-dot" class="dot idle"></span>
         <span id="net-text">idle</span>
@@ -38,6 +39,8 @@
     <nav class="tabs">
       <button class="tab active" data-tab="check" data-i18n="tab_check">Проверка</button>
       <button class="tab" data-tab="dispatch" data-i18n="tab_dispatch">Диспетчер</button>
+      <button class="tab" data-tab="auto" data-i18n="tab_auto">Авто</button>
+      <button class="tab" data-tab="info" data-i18n="tab_info">Инфо</button>
     </nav>
 
     <div class="progress-wrap"><div id="progress" class="progress"></div></div>
@@ -117,11 +120,6 @@
             <button id="btn-direct" class="btn ghost" data-i18n="btn_direct">Проверить связь</button>
             <span id="direct-res" class="hint"></span>
           </div>
-
-          <div class="gh-card" id="gh-card" title="github.com/nechel12/proxpulse">
-            <span class="gh-logo">⬢</span>
-            <span class="gh-text"><b>nechel12/proxpulse</b><i>GitHub →</i></span>
-          </div>
         </div>
 
         <div class="actions">
@@ -190,6 +188,13 @@
               </select>
             </label>
           </div>
+          <label class="fld" style="margin-top:8px"><span data-i18n="srv_listener">Протокол сервера</span>
+            <select id="srv-listener">
+              <option value="both" data-i18n="lis_both" selected>HTTP + SOCKS5</option>
+              <option value="http" data-i18n="lis_http">Только HTTP</option>
+              <option value="socks5" data-i18n="lis_socks">Только SOCKS5</option>
+            </select>
+          </label>
           <div class="actions">
             <button id="btn-srv-start" class="btn primary" data-i18n="srv_start">Включить</button>
             <button id="btn-srv-stop" class="btn danger" data-i18n="srv_stop" disabled>Выключить</button>
@@ -202,6 +207,14 @@
           <div class="fld"><span data-i18n="stat_cur">Текущий апстрим</span><div id="srv-cur" class="mono-box">—</div></div>
           <div id="srv-status" class="status-line">—</div>
           <div class="hint" data-i18n="browser_hint">Вставь в браузер как HTTP-прокси: 127.0.0.1 и порт выше.</div>
+          <div class="panel-head" style="margin-top:14px">
+            <span class="ph-title" data-i18n="disp_auto_title">▸ Автопроверка</span>
+          </div>
+          <div class="checks">
+            <label class="chk"><input id="disp-auto-on" type="checkbox" /><span data-i18n="auto_on">Вкл</span></label>
+            <label class="fld" style="flex:1"><span data-i18n="auto_every">Каждые, мин</span><input id="disp-auto-min" type="number" value="30" min="1" max="1440" /></label>
+          </div>
+          <div id="disp-auto-status" class="status-line">—</div>
         </div>
       </section>
 
@@ -224,6 +237,83 @@
               <tr class="empty"><td colspan="4" data-i18n="pool_empty">Пусто — запусти проверку.</td></tr>
             </tbody>
           </table>
+        </div>
+      </section>
+    </div>
+    </main>
+
+    <!-- ============ SCREEN: AUTO ============ -->
+    <main id="screen-auto" class="screen hidden">
+    <div class="layout">
+      <section class="panel left">
+        <div class="panel-head">
+          <span class="ph-title" data-i18n="auto_title">▸ Авторежим</span>
+        </div>
+        <div class="hint" data-i18n="auto_hint">Общий рабочий пул перепроверяется по таймеру, мёртвые вылетают, живые уходят на вебхук.</div>
+        <div class="settings">
+          <div class="checks">
+            <label class="chk"><input id="auto-on" type="checkbox" /><span data-i18n="auto_on">Вкл</span></label>
+            <label class="fld" style="flex:1"><span data-i18n="auto_every">Каждые, мин</span><input id="auto-min" type="number" value="30" min="1" max="1440" /></label>
+          </div>
+          <button id="btn-auto-now" class="btn ghost" data-i18n="auto_now">Проверить сейчас</button>
+          <div id="auto-status" class="status-line">—</div>
+          <div class="panel-head" style="margin-top:14px">
+            <span class="ph-title" data-i18n="webhook_title">▸ Вебхук</span>
+          </div>
+          <label class="fld"><span data-i18n="webhook_url">URL вебхука</span><input id="webhook-url" placeholder="https://..." /></label>
+          <div class="grid2">
+            <label class="fld"><span data-i18n="webhook_format">Формат</span>
+              <select id="webhook-format">
+                <option value="txt">txt</option>
+                <option value="json">json</option>
+                <option value="csv">csv</option>
+              </select>
+            </label>
+            <div class="fld"><span>&nbsp;</span><button id="btn-webhook-send" class="btn ghost" data-i18n="webhook_send">Отправить сейчас</button></div>
+          </div>
+          <div class="hint" data-i18n="webhook_hint">После каждой автопроверки список уходит POST-запросом. Пусто — отправки нет.</div>
+          <div id="webhook-status" class="status-line">—</div>
+        </div>
+      </section>
+
+      <section class="panel right">
+        <div class="panel-head">
+          <span class="ph-title" data-i18n="pool_title">▸ Пул живых</span>
+          <span id="auto-pool-count" class="count">0</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>#</th><th data-i18n="th_proxy">Прокси</th><th data-i18n="th_ping">Пинг</th></tr>
+            </thead>
+            <tbody id="auto-pool-body">
+              <tr class="empty"><td colspan="3" data-i18n="pool_empty">Пусто — запусти проверку.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    </main>
+
+    <!-- ============ SCREEN: INFO ============ -->
+    <main id="screen-info" class="screen hidden">
+    <div class="layout-single">
+      <section class="panel">
+        <div class="panel-head">
+          <span class="ph-title" data-i18n="info_title">▸ О приложении</span>
+        </div>
+        <div class="brand" style="margin-bottom:12px">
+          <div class="brand-mark">◈</div>
+          <div>
+            <div class="brand-name">PROX<span>PULSE</span></div>
+            <div class="brand-sub">proxy checker // v0.3</div>
+          </div>
+        </div>
+        <p class="hint" data-i18n="info_about">Быстрый чекер прокси: проверка живости, гео, анонимности и TLS, локальный диспетчер и авторассылка пула на вебхук.</p>
+        <p class="hint">Tauri 2 · Rust (tokio, reqwest, rustls) · Vite + TypeScript</p>
+        <div class="gh-card" id="gh-card" title="github.com/nechel12/proxpulse">
+          <span class="gh-logo">⬢</span>
+          <span class="gh-text"><b>nechel12/proxpulse</b><i>GitHub →</i></span>
         </div>
       </section>
     </div>

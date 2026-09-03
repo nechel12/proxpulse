@@ -87,6 +87,16 @@ body {
   border-radius: 6px;
 }
 .lang button.active { color: #fff; border-color: var(--red); background: var(--red-dim); }
+.icon-btn {
+  background: var(--panel2); border: 1px solid var(--line); color: var(--mut);
+  border-radius: 8px; padding: 5px 10px; cursor: pointer; font-size: 14px;
+}
+.icon-btn:hover { border-color: var(--red); color: #fff; }
+
+.layout-single {
+  padding: 14px 18px; height: calc(100vh - 196px); overflow-y: auto;
+  max-width: 720px;
+}
 
 .layout {
   display: grid; grid-template-columns: 380px 1fr; gap: 14px;
@@ -103,7 +113,7 @@ body {
 .count { font-family: var(--mono); background: var(--red-dim); border: 1px solid rgba(255,30,45,.35); color: #ffb3b9; padding: 1px 9px; border-radius: 20px; font-size: 12px; }
 
 #proxy-input {
-  height: 220px; resize: vertical; background: #060608; color: var(--txt);
+  height: 220px; min-height: 140px; flex: none; resize: vertical; background: #060608; color: var(--txt);
   border: 1px solid var(--line); border-radius: 9px; padding: 10px;
   font-family: var(--mono); font-size: 12.5px; line-height: 1.5; outline: none;
 }
