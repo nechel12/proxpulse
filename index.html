@@ -16,14 +16,18 @@
         <div class="brand-mark">◈</div>
         <div>
           <div class="brand-name">PROX<span>PULSE</span></div>
-          <div class="brand-sub">proxy checker // v0.2</div>
+          <div class="brand-sub">proxy checker // v0.3</div>
         </div>
       </div>
       <div class="top-stats">
-        <div class="stat"><label>Всего</label><b id="st-total">0</b></div>
-        <div class="stat ok"><label>Живые</label><b id="st-alive">0</b></div>
-        <div class="stat bad"><label>Мёртвые</label><b id="st-dead">0</b></div>
-        <div class="stat"><label>Ср. пинг</label><b id="st-ping">—</b></div>
+        <div class="stat"><label data-i18n="stat_total">Всего</label><b id="st-total">0</b></div>
+        <div class="stat ok"><label data-i18n="stat_alive">Живые</label><b id="st-alive">0</b></div>
+        <div class="stat bad"><label data-i18n="stat_dead">Мёртвые</label><b id="st-dead">0</b></div>
+        <div class="stat"><label data-i18n="stat_ping">Ср. пинг</label><b id="st-ping">—</b></div>
+      </div>
+      <div class="lang">
+        <button data-lang="ru" class="active">RU</button>
+        <button data-lang="en">EN</button>
       </div>
       <div class="top-status">
         <span id="net-dot" class="dot idle"></span>
@@ -31,54 +35,63 @@
       </div>
     </header>
 
+    <nav class="tabs">
+      <button class="tab active" data-tab="check" data-i18n="tab_check">Проверка</button>
+      <button class="tab" data-tab="dispatch" data-i18n="tab_dispatch">Диспетчер</button>
+    </nav>
+
     <div class="progress-wrap"><div id="progress" class="progress"></div></div>
 
-    <main class="layout">
+    <!-- ============ SCREEN: CHECK ============ -->
+    <main id="screen-check" class="screen">
+    <div class="layout">
       <section class="panel left">
         <div class="panel-head">
-          <span class="ph-title">▸ Источник</span>
+          <span class="ph-title" data-i18n="src_title">▸ Источник</span>
           <span id="src-count" class="count">0</span>
         </div>
         <textarea
           id="proxy-input"
           spellcheck="false"
-          placeholder="Вставь прокси в любом формате:&#10;127.0.0.1:8080&#10;user:pass@127.0.0.1:8080&#10;socks5://127.0.0.1:1080&#10;127.0.0.1:8080:user:pass&#10;user:pass:127.0.0.1:8080&#10;127.0.0.1,8080,user,pass"
+          data-i18n-ph="src_ph"
+          placeholder="Вставь прокси в любом формате"
         ></textarea>
 
         <div class="row2">
-          <button id="btn-clear-in" class="btn ghost">Очистить</button>
-          <label class="btn ghost file">Импорт<input id="file-input" type="file" hidden /></label>
+          <button id="btn-clear-in" class="btn ghost" data-i18n="btn_clear">Очистить</button>
+          <label class="btn ghost file"><span data-i18n="btn_import">Импорт</span><input id="file-input" type="file" multiple hidden /></label>
         </div>
-        <div class="hint" style="margin-top:6px">Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.</div>
+        <div class="hint" style="margin-top:6px" data-i18n="import_hint">Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.</div>
 
         <div class="panel-head" style="margin-top:14px">
-          <span class="ph-title">▸ Настройки</span>
+          <span class="ph-title" data-i18n="set_title">▸ Настройки</span>
         </div>
 
         <div class="settings">
           <label class="fld">
-            <span>Тестовый URL</span>
+            <span data-i18n="f_testurl">Тестовый URL</span>
             <select id="test-url">
-              <option value="https://www.google.com/generate_204" selected>google generate_204 (быстро)</option>
-              <option value="https://cp.cloudflare.com/generate_204">cloudflare generate_204 (быстро)</option>
-              <option value="https://api.ipify.org">api.ipify.org (покажет IP)</option>
-              <option value="https://httpbin.org/ip">httpbin.org/ip (покажет IP)</option>
-              <option value="https://ip-api.com/json">ip-api.com/json (IP + гео)</option>
+              <option value="https://www.google.com/generate_204" data-i18n="opt_google" selected>google generate_204 (быстро)</option>
+              <option value="https://cp.cloudflare.com/generate_204" data-i18n="opt_cf">cloudflare generate_204 (быстро)</option>
+              <option value="https://api.ipify.org" data-i18n="opt_ipify">api.ipify.org (покажет IP)</option>
+              <option value="https://httpbin.org/ip" data-i18n="opt_httpbin">httpbin.org/ip (покажет IP)</option>
+              <option value="https://ip-api.com/json" data-i18n="opt_ipapi">ip-api.com/json (IP + гео)</option>
+              <option value="https://example.com" data-i18n="opt_example">example.com</option>
             </select>
           </label>
-          <input id="test-url-custom" placeholder="или свой URL https://..." />
+          <input id="test-url-custom" data-i18n-ph="custom_ph" placeholder="или свой URL https://..." />
 
           <div class="grid2">
-            <label class="fld"><span>Таймаут, мс</span><input id="timeout" type="number" value="8000" min="1000" max="30000" step="500" /></label>
-            <label class="fld"><span>Потоки</span><input id="concurrency" type="number" value="50" min="1" max="500" /></label>
+            <label class="fld"><span data-i18n="f_timeout">Таймаут, мс</span><input id="timeout" type="number" value="8000" min="1000" max="30000" step="500" /></label>
+            <label class="fld"><span data-i18n="f_threads">Потоки</span><input id="concurrency" type="number" value="50" min="1" max="500" /></label>
           </div>
 
           <div class="grid2">
-            <label class="fld"><span>Замеры (стабильность)</span><input id="repeats" type="number" value="3" min="1" max="5" step="1" /></label>
+            <label class="fld"><span data-i18n="f_repeats">Замеры</span><input id="repeats" type="number" value="3" min="1" max="5" step="1" /></label>
             <label class="fld">
-              <span>Тип без схемы</span>
+              <span data-i18n="f_protonoscheme">Тип без схемы</span>
               <select id="default-proto">
-                <option value="http" selected>HTTP</option>
+                <option value="http" data-i18n="opt_http" selected>HTTP</option>
                 <option value="socks5">SOCKS5</option>
                 <option value="socks4">SOCKS4</option>
                 <option value="http+socks5">HTTP + SOCKS5</option>
@@ -87,60 +100,133 @@
           </div>
 
           <div class="checks">
-            <label class="chk"><input id="chk-geo" type="checkbox" checked /><span>Гео и тип IP</span></label>
-            <label class="chk"><input id="chk-anon" type="checkbox" checked /><span>Анонимность</span></label>
-            <label class="chk"><input id="chk-tamper" type="checkbox" checked /><span>Целостность</span></label>
+            <label class="chk"><input id="chk-geo" type="checkbox" checked /><span data-i18n="chk_geo">Гео и тип IP</span></label>
+            <label class="chk"><input id="chk-anon" type="checkbox" checked /><span data-i18n="chk_anon">Анонимность</span></label>
+            <label class="chk"><input id="chk-tamper" type="checkbox" checked /><span data-i18n="chk_tamper">Целостность</span></label>
+            <label class="chk"><input id="chk-tls" type="checkbox" checked /><span data-i18n="chk_tls">TLS-интегрити</span></label>
           </div>
-          <div class="hint">Глубокие проверки медленнее: гео идёт через ip-api, анонимность — через httpbin, целостность — сверка с example.com.</div>
+          <div class="hint" data-i18n="deep_hint">Глубокие проверки медленнее: гео — через ip-api, анонимность — через httpbin, целостность — сверка с example.com, TLS — сверка сертификата.</div>
+
+          <div class="checks" style="margin-top:8px">
+            <label class="chk"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Пречек порта</span></label>
+            <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" /></label>
+          </div>
+          <div class="hint" data-i18n="precheck_hint">Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.</div>
 
           <div class="row2">
-            <button id="btn-direct" class="btn ghost">Проверить связь</button>
+            <button id="btn-direct" class="btn ghost" data-i18n="btn_direct">Проверить связь</button>
             <span id="direct-res" class="hint"></span>
+          </div>
+
+          <div class="gh-card" id="gh-card" title="github.com/nechel12/proxpulse">
+            <span class="gh-logo">⬢</span>
+            <span class="gh-text"><b>nechel12/proxpulse</b><i>GitHub →</i></span>
           </div>
         </div>
 
         <div class="actions">
-          <button id="btn-start" class="btn primary">▶ Старт</button>
-          <button id="btn-stop" class="btn danger" disabled>■ Стоп</button>
+          <button id="btn-start" class="btn primary" data-i18n="btn_start">▶ Старт</button>
+          <button id="btn-stop" class="btn danger" disabled data-i18n="btn_stop">■ Стоп</button>
         </div>
         <div id="status-line" class="status-line">Готов к проверке.</div>
       </section>
 
       <section class="panel right">
         <div class="panel-head">
-          <span class="ph-title">▸ Результат</span>
+          <span class="ph-title" data-i18n="res_title">▸ Результат</span>
           <div class="filters">
-            <button data-f="all" class="chip active">Все <b id="f-all">0</b></button>
-            <button data-f="alive" class="chip ok">Живые <b id="f-alive">0</b></button>
-            <button data-f="dead" class="chip bad">Мёртвые <b id="f-dead">0</b></button>
+            <button data-f="all" class="chip active"><span data-i18n="chip_all">Все</span> <b id="f-all">0</b></button>
+            <button data-f="alive" class="chip ok"><span data-i18n="chip_alive">Живые</span> <b id="f-alive">0</b></button>
+            <button data-f="dead" class="chip bad"><span data-i18n="chip_dead">Мёртвые</span> <b id="f-dead">0</b></button>
           </div>
         </div>
 
         <div class="toolbar">
-          <input id="search" placeholder="Фильтр: 1.2.3.4, :8080, socks, страна, isp..." />
+          <input id="search" data-i18n-ph="search_ph" placeholder="Фильтр..." />
           <div class="dropdown">
-            <button id="btn-export" class="btn ghost">Экспорт ▾</button>
+            <button id="btn-export" class="btn ghost"><span data-i18n="export_btn">Экспорт</span> ▾</button>
             <div id="export-menu" class="menu hidden">
-              <button data-exp="txt">.txt — только живые</button>
-              <button data-exp="json">.json — все результаты</button>
-              <button data-exp="csv">.csv — таблица</button>
-              <button data-exp="copy">Скопировать живые</button>
+              <button data-exp="txt">.txt</button>
+              <button data-exp="json">.json</button>
+              <button data-exp="csv">.csv</button>
+              <button data-exp="copy" data-i18n="exp_copy">Скопировать</button>
             </div>
           </div>
-          <button id="btn-clear-out" class="btn ghost">Очистить</button>
+          <button id="chk-dead" class="sqchk" aria-pressed="false" data-i18n-title="include_dead_t"><span class="sq"></span><span data-i18n="include_dead">мёртвые</span></button>
+          <button id="btn-clear-out" class="btn ghost" data-i18n="btn_clear">Очистить</button>
         </div>
 
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>#</th><th>Прокси</th><th>Тип</th><th>Статус</th><th>Пинг</th><th>Джиттер/SR</th><th>Анон</th><th>Гео</th><th>Тип IP</th><th>Инфо</th></tr>
+              <tr><th>#</th><th data-i18n="th_proxy">Прокси</th><th data-i18n="th_type">Тип</th><th data-i18n="th_status">Статус</th><th data-i18n="th_ping">Пинг</th><th data-i18n="th_stab">Джиттер/SR</th><th data-i18n="th_anon">Анон</th><th data-i18n="th_geo">Гео</th><th data-i18n="th_iptype">Тип IP</th><th>TLS</th><th data-i18n="th_info">Инфо</th></tr>
             </thead>
             <tbody id="tbody">
-              <tr class="empty"><td colspan="10">Пока пусто — вставь список слева и жми Старт.</td></tr>
+              <tr class="empty"><td colspan="11" data-i18n="empty_idle">Пока пусто — вставь список слева и жми Старт.</td></tr>
             </tbody>
           </table>
         </div>
       </section>
+    </div>
+    </main>
+
+    <!-- ============ SCREEN: DISPATCH ============ -->
+    <main id="screen-dispatch" class="screen hidden">
+    <div class="layout">
+      <section class="panel left">
+        <div class="panel-head">
+          <span class="ph-title" data-i18n="srv_title">▸ Локальный сервер</span>
+          <span id="srv-pill" class="pill dead">OFF</span>
+        </div>
+        <div class="hint" data-i18n="srv_hint">Поднимает прокси 127.0.0.1:порт и гоняет трафик через живые из проверки.</div>
+        <div class="settings">
+          <div class="grid2">
+            <label class="fld"><span data-i18n="srv_port">Порт</span><input id="srv-port" type="number" value="1080" min="1" max="65535" /></label>
+            <label class="fld"><span data-i18n="srv_mode">Режим</span>
+              <select id="srv-mode">
+                <option value="round-robin" data-i18n="mode_rr" selected>Ротация</option>
+                <option value="fastest" data-i18n="mode_fastest">Самый быстрый</option>
+                <option value="failover" data-i18n="mode_failover">Замена при падении</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions">
+            <button id="btn-srv-start" class="btn primary" data-i18n="srv_start">Включить</button>
+            <button id="btn-srv-stop" class="btn danger" data-i18n="srv_stop" disabled>Выключить</button>
+          </div>
+          <div class="srv-addr"><code id="srv-addr">127.0.0.1:1080</code><button id="btn-srv-copy" class="btn ghost" data-i18n="btn_copy">Копировать</button></div>
+          <div class="srv-stats">
+            <div><label data-i18n="stat_req">Запросы</label><b id="srv-req">0</b></div>
+            <div><label data-i18n="stat_err">Ошибки</label><b id="srv-err">0</b></div>
+          </div>
+          <div class="fld"><span data-i18n="stat_cur">Текущий апстрим</span><div id="srv-cur" class="mono-box">—</div></div>
+          <div id="srv-status" class="status-line">—</div>
+          <div class="hint" data-i18n="browser_hint">Вставь в браузер как HTTP-прокси: 127.0.0.1 и порт выше.</div>
+        </div>
+      </section>
+
+      <section class="panel right">
+        <div class="panel-head">
+          <span class="ph-title" data-i18n="pool_title">▸ Пул живых</span>
+          <span id="pool-count" class="count">0</span>
+        </div>
+        <div class="toolbar">
+          <button id="btn-pool-sync" class="btn ghost" data-i18n="pool_sync">Синхронизировать</button>
+          <button id="btn-pool-clear" class="btn ghost" data-i18n="btn_clear">Очистить</button>
+        </div>
+        <div class="hint" style="margin-bottom:8px" data-i18n="pool_hint">Пул пополняется автоматически после каждой проверки.</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>#</th><th data-i18n="th_proxy">Прокси</th><th data-i18n="th_ping">Пинг</th><th></th></tr>
+            </thead>
+            <tbody id="pool-body">
+              <tr class="empty"><td colspan="4" data-i18n="pool_empty">Пусто — запусти проверку.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
     </main>
 
     <footer class="foot">

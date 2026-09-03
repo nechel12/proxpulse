@@ -18,8 +18,128 @@ type ProxyResult = {
   ip_type: string | null;
   anonymity: string | null;
   tamper: string | null;
+  tls: string | null;
+  tls_info: string | null;
   error: string | null;
 };
+
+type Lang = "ru" | "en";
+
+// ================= i18n =================
+
+const I18N: Record<Lang, Record<string, string>> = {
+  ru: {
+    stat_total: "Всего", stat_alive: "Живые", stat_dead: "Мёртвые", stat_ping: "Ср. пинг",
+    tab_check: "Проверка", tab_dispatch: "Диспетчер",
+    src_title: "▸ Источник",
+    src_ph: "Вставь прокси в любом формате",
+    btn_clear: "Очистить", btn_import: "Импорт", btn_copy: "Копировать",
+    import_hint: "Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.",
+    set_title: "▸ Настройки", f_testurl: "Тестовый URL",
+    opt_google: "google generate_204 (быстро)", opt_cf: "cloudflare generate_204 (быстро)",
+    opt_ipify: "api.ipify.org (покажет IP)", opt_httpbin: "httpbin.org/ip (покажет IP)",
+    opt_ipapi: "ip-api.com/json (IP + гео)", opt_example: "example.com",
+    custom_ph: "или свой URL https://...",
+    f_timeout: "Таймаут, мс", f_threads: "Потоки", f_repeats: "Замеры",
+    f_protonoscheme: "Тип без схемы", opt_http: "HTTP",
+    chk_geo: "Гео и тип IP", chk_anon: "Анонимность", chk_tamper: "Целостность", chk_tls: "TLS-интегрити",
+    deep_hint: "Глубокие проверки медленнее: гео — через ip-api, анонимность — через httpbin, целостность — сверка с example.com, TLS — сверка сертификата.",
+    precheck_label: "Пречек порта", precheck_hint: "Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.",
+    btn_direct: "Проверить связь", btn_start: "▶ Старт", btn_stop: "■ Стоп",
+    res_title: "▸ Результат", chip_all: "Все", chip_alive: "Живые", chip_dead: "Мёртвые",
+    search_ph: "Фильтр: 1.2.3.4, :8080, socks, страна, isp...",
+    export_btn: "Экспорт", exp_copy: "Скопировать",
+    include_dead: "мёртвые", include_dead_t: "Включать мёртвые в экспорт",
+    th_proxy: "Прокси", th_type: "Тип", th_status: "Статус", th_ping: "Пинг",
+    th_stab: "Джиттер/SR", th_anon: "Анон", th_geo: "Гео", th_iptype: "Тип IP", th_info: "Инфо",
+    empty_idle: "Пока пусто — вставь список слева и жми Старт.",
+    empty_filter: "Ничего не найдено под фильтр.",
+    pill_alive: "ALIVE", pill_dead: "DEAD",
+    st_ready: "Готов к проверке.", st_empty: "Список пуст — вставь прокси.",
+    st_badurl: "Тестовый URL должен начинаться с http(s)://",
+    st_checking: "Проверка {done}/{total} ...", st_done: "Готово за {secs}с. Живых: {alive}/{total}.",
+    st_stopped: "Остановлено. Живых: {alive}/{total}.", st_stopping: "Останавливаю...",
+    st_cleared: "Результат очищен.", st_nocopy: "Нечего копировать.",
+    st_copied: "Скопировано: {n}.", st_nothing: "Нечего экспортировать.",
+    st_saved: "Сохранено: {path}", st_downloaded: "Скачано: {name} (браузерный режим).",
+    direct_ok: "прямой доступ OK {ms}ms", direct_fail: "связи нет: {e}",
+    file_loaded: "Импортировано: {n} из {f} ф.", file_none: "В {name} прокси не найдены.",
+    file_fail: "Не удалось прочитать {name}.",
+    srv_title: "▸ Локальный сервер", srv_hint: "Поднимает прокси 127.0.0.1:порт и гоняет трафик через живые из проверки.",
+    srv_port: "Порт", srv_mode: "Режим",
+    mode_rr: "Ротация", mode_fastest: "Самый быстрый", mode_failover: "Замена при падении",
+    srv_start: "Включить", srv_stop: "Выключить",
+    stat_req: "Запросы", stat_err: "Ошибки", stat_cur: "Текущий апстрим",
+    browser_hint: "Вставь в браузер как HTTP-прокси: 127.0.0.1 и порт выше.",
+    pool_title: "▸ Пул живых", pool_sync: "Синхронизировать",
+    pool_hint: "Пул пополняется автоматически после каждой проверки.",
+    pool_empty: "Пусто — запусти проверку.", pool_synced: "Пул: {n}.",
+    srv_on: "Сервер на {addr}.", srv_off: "Сервер выключен.",
+    srv_err_empty: "Пул пуст — сначала проверь прокси.", srv_err: "Ошибка сервера: {e}",
+  },
+  en: {
+    stat_total: "Total", stat_alive: "Alive", stat_dead: "Dead", stat_ping: "Avg ping",
+    tab_check: "Check", tab_dispatch: "Dispatcher",
+    src_title: "▸ Source",
+    src_ph: "Paste proxies in any format",
+    btn_clear: "Clear", btn_import: "Import", btn_copy: "Copy",
+    import_hint: "Import: txt, csv, json, log and anything else — formats are auto-detected.",
+    set_title: "▸ Settings", f_testurl: "Test URL",
+    opt_google: "google generate_204 (fast)", opt_cf: "cloudflare generate_204 (fast)",
+    opt_ipify: "api.ipify.org (shows IP)", opt_httpbin: "httpbin.org/ip (shows IP)",
+    opt_ipapi: "ip-api.com/json (IP + geo)", opt_example: "example.com",
+    custom_ph: "or custom URL https://...",
+    f_timeout: "Timeout, ms", f_threads: "Threads", f_repeats: "Samples",
+    f_protonoscheme: "No-scheme type", opt_http: "HTTP",
+    chk_geo: "Geo & IP type", chk_anon: "Anonymity", chk_tamper: "Integrity", chk_tls: "TLS integrity",
+    deep_hint: "Deep checks are slower: geo via ip-api, anonymity via httpbin, integrity vs example.com, TLS vs certificate.",
+    precheck_label: "Port precheck", precheck_hint: "Fast TCP precheck drops dead hosts before the full check.",
+    btn_direct: "Test connection", btn_start: "▶ Start", btn_stop: "■ Stop",
+    res_title: "▸ Results", chip_all: "All", chip_alive: "Alive", chip_dead: "Dead",
+    search_ph: "Filter: 1.2.3.4, :8080, socks, country, isp...",
+    export_btn: "Export", exp_copy: "Copy",
+    include_dead: "dead", include_dead_t: "Include dead in export",
+    th_proxy: "Proxy", th_type: "Type", th_status: "Status", th_ping: "Ping",
+    th_stab: "Jitter/SR", th_anon: "Anon", th_geo: "Geo", th_iptype: "IP type", th_info: "Info",
+    empty_idle: "Empty — paste a list on the left and hit Start.",
+    empty_filter: "Nothing matches the filter.",
+    pill_alive: "ALIVE", pill_dead: "DEAD",
+    st_ready: "Ready.", st_empty: "List is empty — paste proxies.",
+    st_badurl: "Test URL must start with http(s)://",
+    st_checking: "Checking {done}/{total} ...", st_done: "Done in {secs}s. Alive: {alive}/{total}.",
+    st_stopped: "Stopped. Alive: {alive}/{total}.", st_stopping: "Stopping...",
+    st_cleared: "Results cleared.", st_nocopy: "Nothing to copy.",
+    st_copied: "Copied: {n}.", st_nothing: "Nothing to export.",
+    st_saved: "Saved: {path}", st_downloaded: "Downloaded: {name} (browser mode).",
+    direct_ok: "direct OK {ms}ms", direct_fail: "no connection: {e}",
+    file_loaded: "Imported: {n} from {f} file(s).", file_none: "No proxies found in {name}.",
+    file_fail: "Failed to read {name}.",
+    srv_title: "▸ Local server", srv_hint: "Serves a proxy on 127.0.0.1:port routed through alive proxies from checks.",
+    srv_port: "Port", srv_mode: "Mode",
+    mode_rr: "Rotation", mode_fastest: "Fastest", mode_failover: "Failover",
+    srv_start: "Enable", srv_stop: "Disable",
+    stat_req: "Requests", stat_err: "Errors", stat_cur: "Current upstream",
+    browser_hint: "Put it into your browser as HTTP proxy: 127.0.0.1 and the port above.",
+    pool_title: "▸ Alive pool", pool_sync: "Sync",
+    pool_hint: "Pool auto-fills after every check.",
+    pool_empty: "Empty — run a check.", pool_synced: "Pool: {n}.",
+    srv_on: "Server on {addr}.", srv_off: "Server off.",
+    srv_err_empty: "Pool is empty — check proxies first.", srv_err: "Server error: {e}",
+  },
+};
+
+let lang: Lang = (localStorage.getItem("pp-lang") as Lang) || "ru";
+if (lang !== "ru" && lang !== "en") lang = "ru";
+
+function t(key: string, params?: Record<string, string | number>): string {
+  let s = I18N[lang][key] ?? I18N.ru[key] ?? key;
+  if (params) {
+    for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v));
+  }
+  return s;
+}
+
+let lastStatus: { key: string; params?: Record<string, string | number> } = { key: "st_ready" };
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -28,6 +148,9 @@ let results: ProxyResult[] = [];
 let filter: "all" | "alive" | "dead" = "all";
 let stopFlag = false;
 let running = false;
+let includeDead = false;
+let dispatchPool: { raw: string; latency: number | null }[] = [];
+let pollTimer: number | undefined;
 
 // ---------- proxy extraction (many formats) ----------
 
@@ -82,14 +205,12 @@ function proxiesFromJson(v: unknown, out: string[]): void {
       const built = buildFromParts(host, port, getKey(o, USER_KEYS), getKey(o, PASS_KEYS), getKey(o, PROTO_KEYS));
       if (built) out.push(built);
     }
-    // common list wrappers
     for (const k of ["proxies", "proxy", "data", "list", "items", "results", "rows"]) {
       if (Array.isArray(o[k])) {
         for (const el of o[k] as unknown[]) proxiesFromJson(el, out);
         return;
       }
     }
-    // fallback: scan all values
     if (!host) {
       for (const val of Object.values(o)) {
         if (typeof val === "string" || Array.isArray(val) || (val && typeof val === "object")) {
@@ -101,7 +222,6 @@ function proxiesFromJson(v: unknown, out: string[]): void {
 }
 
 function tryCsvLine(line: string): string | null {
-  // split by , ; | tab (keep : and @ intact)
   let parts: string[] | null = null;
   if (/[,;|\t]/.test(line)) {
     parts = line.split(/[,;|\t]/).map((s) => s.trim().replace(/^["'`]+|["'`]+$/g, "")).filter(Boolean);
@@ -119,8 +239,8 @@ function tryCsvLine(line: string): string | null {
     return null;
   }
   if (parts.length === 4) {
-    if (isPort(parts[1])) return `${parts[2]}:${parts[3]}@${parts[0]}:${parts[1]}`; // host,port,user,pass
-    if (isPort(parts[3])) return `${parts[0]}:${parts[1]}@${parts[2]}:${parts[3]}`; // user,pass,host,port
+    if (isPort(parts[1])) return `${parts[2]}:${parts[3]}@${parts[0]}:${parts[1]}`;
+    if (isPort(parts[3])) return `${parts[0]}:${parts[1]}@${parts[2]}:${parts[3]}`;
     return null;
   }
   if (parts.length === 5 && isProto(parts[0]) && isPort(parts[2])) {
@@ -146,7 +266,6 @@ export function extractProxiesFromText(text: string): string[] {
     out.push(s);
   };
 
-  // 1) whole-text JSON
   try {
     const j = JSON.parse(text);
     const tmp: string[] = [];
@@ -157,7 +276,6 @@ export function extractProxiesFromText(text: string): string[] {
     }
   } catch { /* not json */ }
 
-  // 2) line based
   const lines = text.split(/\r?\n/);
   for (let raw of lines) {
     let line = raw.trim();
@@ -171,17 +289,13 @@ export function extractProxiesFromText(text: string): string[] {
     const urls = line.match(SCHEME_URL_RE);
     if (urls && urls.length > 0) {
       urls.forEach(push);
-      // line may also contain trailing user:pass part? push remainder check below
       continue;
     }
-    // strip inline comments
     const hashIdx = line.indexOf(" #");
     if (hashIdx > 0) line = line.slice(0, hashIdx).trim();
     push(line);
   }
 
-  // 3) global scan fallback: catch ip:port buried in logs/tables
-  // skip candidates already covered by a longer entry (e.g. bare host:port inside user:pass@host:port)
   if (out.length < 5) {
     const found = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\b/g);
     if (found) {
@@ -207,14 +321,38 @@ function effectiveTestUrl(): string {
   return custom || sel;
 }
 
-function setStatus(t: string) {
-  $("status-line").textContent = t;
+function setStatusT(key: string, params?: Record<string, string | number>) {
+  lastStatus = { key, params };
+  $("status-line").textContent = t(key, params);
 }
 
 function setNet(state: "idle" | "work" | "done", text: string) {
   const dot = $("net-dot");
   dot.className = "dot " + state;
   $("net-text").textContent = text;
+}
+
+function applyI18n() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const k = (el as HTMLElement).dataset.i18n as string;
+    (el as HTMLElement).textContent = t(k);
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach((el) => {
+    const k = (el as HTMLElement).dataset.i18nPh as string;
+    (el as HTMLInputElement).placeholder = t(k);
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    const k = (el as HTMLElement).dataset.i18nTitle as string;
+    (el as HTMLElement).title = t(k);
+  });
+  document.querySelectorAll(".lang button").forEach((b) => {
+    b.classList.toggle("active", (b as HTMLElement).dataset.lang === lang);
+  });
+  $("status-line").textContent = t(lastStatus.key, lastStatus.params);
+  render();
+  renderPool();
+  updateCounts();
 }
 
 function updateCounts() {
@@ -234,6 +372,7 @@ function updateCounts() {
   ($("f-dead") as HTMLElement).textContent = String(dead);
   ($("foot-info") as HTMLElement).textContent =
     results.length === 0 ? "" : `alive ${alive}/${results.length}`;
+  ($("pool-count") as HTMLElement).textContent = String(dispatchPool.length);
 }
 
 function pingClass(ms: number | null): string {
@@ -243,12 +382,18 @@ function pingClass(ms: number | null): string {
   return "ping-slow";
 }
 
-function anonShort(a: string | null): { t: string; c: string } {
-  if (!a) return { t: "—", c: "" };
-  if (a === "elite") return { t: "elite", c: "anon-elite" };
-  if (a === "anonymous") return { t: "anon", c: "anon-anon" };
-  if (a === "transparent") return { t: "transp", c: "anon-trans" };
-  return { t: a, c: "" };
+function anonShort(a: string | null): { txt: string; cls: string } {
+  if (!a) return { txt: "—", cls: "" };
+  if (a === "elite") return { txt: "elite", cls: "anon-elite" };
+  if (a === "anonymous") return { txt: "anon", cls: "anon-anon" };
+  if (a === "transparent") return { txt: "transp", cls: "anon-trans" };
+  return { txt: a, cls: "" };
+}
+
+function tlsShort(v: string | null): { txt: string; cls: string } {
+  if (v === "ok") return { txt: "ok", cls: "anon-elite" };
+  if (v === "modified") return { txt: "mod", cls: "anon-trans" };
+  return { txt: "—", cls: "" };
 }
 
 function geoShort(r: ProxyResult): string {
@@ -276,19 +421,22 @@ function rowTitle(r: ProxyResult): string {
   if (r.ip_type) parts.push(`type ${r.ip_type}`);
   if (r.anonymity) parts.push(`anon ${r.anonymity}`);
   if (r.tamper) parts.push(`tamper ${r.tamper}`);
+  if (r.tls) parts.push(`tls ${r.tls}${r.tls_info ? ` (${r.tls_info})` : ""}`);
+  else if (r.tls_info) parts.push(`tls ? (${r.tls_info})`);
   if (r.error) parts.push(r.error);
   return parts.join(" | ");
 }
 
 function render() {
-  const q = (($("search") as HTMLInputElement).value || "").toLowerCase().trim();
+  const searchEl = document.getElementById("search") as HTMLInputElement | null;
+  const q = (searchEl?.value || "").toLowerCase().trim();
   const tb = $("tbody") as HTMLTableSectionElement;
   tb.innerHTML = "";
   const rows = results.filter((r) => {
     if (filter === "alive" && !r.alive) return false;
     if (filter === "dead" && r.alive) return false;
     if (q) {
-      const hay = [r.proxy, r.proto, r.error ?? "", r.ip ?? "", r.country ?? "", r.country_code ?? "", r.city ?? "", r.isp ?? "", r.org ?? "", r.asn ?? "", r.ip_type ?? "", r.anonymity ?? ""].join(" ").toLowerCase();
+      const hay = [r.proxy, r.proto, r.error ?? "", r.ip ?? "", r.country ?? "", r.country_code ?? "", r.city ?? "", r.isp ?? "", r.org ?? "", r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tls ?? ""].join(" ").toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -297,28 +445,67 @@ function render() {
     const tr = document.createElement("tr");
     tr.className = "empty";
     const td = document.createElement("td");
-    td.colSpan = 10;
-    td.textContent = results.length === 0 ? "Пока пусто — вставь список слева и жми Старт." : "Ничего не найдено под фильтр.";
+    td.colSpan = 11;
+    td.textContent = t(results.length === 0 ? "empty_idle" : "empty_filter");
     tr.appendChild(td);
     tb.appendChild(tr);
     return;
   }
   rows.forEach((r, i) => {
     const tr = document.createElement("tr");
-    const pill = r.alive ? `<span class="pill alive">ALIVE</span>` : `<span class="pill dead">DEAD</span>`;
+    const pill = r.alive ? `<span class="pill alive">${t("pill_alive")}</span>` : `<span class="pill dead">${t("pill_dead")}</span>`;
     const ping = r.latency_ms == null ? "—" : `${r.latency_ms} ms`;
     const an = anonShort(r.anonymity);
-    const tamperMark = r.tamper === "modified" ? ` <span class="anon-trans" title="Трафик модифицируется">⚠mod</span>` : "";
-    const info = r.alive ? `${escapeHtml(r.ip ?? "ok")}${tamperMark}` : escapeHtml(r.error ?? "fail");
+    const tls = tlsShort(r.tls);
+    const marks = [
+      r.tamper === "modified" ? `<span class="anon-trans" title="tamper">⚠mod</span>` : "",
+      r.tls === "modified" ? `<span class="anon-trans" title="tls">⚠tls</span>` : "",
+    ].join(" ");
+    const info = r.alive ? `${escapeHtml(r.ip ?? "ok")} ${marks}` : escapeHtml(r.error ?? "fail");
     const infoTitle = escapeHtml(rowTitle(r));
     tr.innerHTML =
       `<td>${i + 1}</td><td>${escapeHtml(r.proxy)}</td><td>${escapeHtml(r.proto)}</td>` +
       `<td>${pill}</td><td class="${pingClass(r.latency_ms)}">${ping}</td>` +
-      `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.c}">${escapeHtml(an.t)}</td>` +
+      `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.cls}">${escapeHtml(an.txt)}</td>` +
       `<td class="cell-geo" title="${infoTitle}">${escapeHtml(geoShort(r))}</td>` +
       `<td>${escapeHtml(r.ip_type ?? "—")}</td>` +
+      `<td class="${tls.cls}" title="${infoTitle}">${escapeHtml(tls.txt)}</td>` +
       `<td class="cell-err" title="${infoTitle}">${info}</td>`;
     tb.appendChild(tr);
+  });
+}
+
+function renderPool() {
+  const pb = document.getElementById("pool-body") as HTMLTableSectionElement | null;
+  if (!pb) return;
+  pb.innerHTML = "";
+  if (dispatchPool.length === 0) {
+    const tr = document.createElement("tr");
+    tr.className = "empty";
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.textContent = t("pool_empty");
+    tr.appendChild(td);
+    pb.appendChild(tr);
+    return;
+  }
+  dispatchPool.forEach((p, i) => {
+    const tr = document.createElement("tr");
+    const ping = p.latency == null ? "—" : `${p.latency} ms`;
+    tr.innerHTML = `<td>${i + 1}</td><td>${escapeHtml(p.raw)}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
+    const td = document.createElement("td");
+    const b = document.createElement("button");
+    b.className = "btn ghost";
+    b.textContent = "✕";
+    b.addEventListener("click", () => {
+      dispatchPool.splice(i, 1);
+      void syncPool(false);
+      renderPool();
+      updateCounts();
+    });
+    td.appendChild(b);
+    tr.appendChild(td);
+    pb.appendChild(tr);
   });
 }
 
@@ -332,19 +519,31 @@ function setProgress(done: number, total: number) {
 }
 
 function deadStub(proxy: string, msg: string): ProxyResult {
-  return { proxy, proto: "ERR", alive: false, latency_ms: null, jitter_ms: null, success_rate: 0, attempts: 0, ip: null, country: null, country_code: null, city: null, isp: null, org: null, asn: null, ip_type: null, anonymity: null, tamper: null, error: msg.slice(0, 120) };
+  return { proxy, proto: "ERR", alive: false, latency_ms: null, jitter_ms: null, success_rate: 0, attempts: 0, ip: null, country: null, country_code: null, city: null, isp: null, org: null, asn: null, ip_type: null, anonymity: null, tamper: null, tls: null, tls_info: null, error: msg.slice(0, 120) };
+}
+
+async function syncPool(notify: boolean): Promise<number> {
+  try {
+    const n = await invoke<number>("set_dispatch_pool", {
+      items: dispatchPool.map((p) => ({ raw: p.raw, latency: p.latency })),
+    });
+    if (notify) setStatusT("pool_synced", { n });
+    return n;
+  } catch {
+    return 0;
+  }
 }
 
 async function start() {
   if (running) return;
   const list = parseInput(($("proxy-input") as HTMLTextAreaElement).value);
   if (list.length === 0) {
-    setStatus("Список пуст — вставь прокси.");
+    setStatusT("st_empty");
     return;
   }
   const testUrl = effectiveTestUrl();
   if (!/^https?:\/\//i.test(testUrl)) {
-    setStatus("Тестовый URL должен начинаться с http(s)://");
+    setStatusT("st_badurl");
     return;
   }
   const timeoutMs = Math.max(1000, Math.min(30000, Number(($("timeout") as HTMLInputElement).value) || 8000));
@@ -354,6 +553,9 @@ async function start() {
   const withGeo = ($("chk-geo") as HTMLInputElement).checked;
   const withAnonymity = ($("chk-anon") as HTMLInputElement).checked;
   const withTamper = ($("chk-tamper") as HTMLInputElement).checked;
+  const withTls = ($("chk-tls") as HTMLInputElement).checked;
+  const precheck = ($("chk-precheck") as HTMLInputElement).checked;
+  const precheckTimeoutMs = Math.max(300, Math.min(10000, Number(($("precheck-timeout") as HTMLInputElement).value) || 1500));
 
   running = true;
   stopFlag = false;
@@ -372,7 +574,8 @@ async function start() {
   for (let i = 0; i < list.length; i += CHUNK) {
     if (stopFlag) break;
     const chunk = list.slice(i, i + CHUNK);
-    setStatus(`Проверка ${Math.min(i + CHUNK, list.length)}/${list.length} ...`);
+    lastStatus = { key: "st_checking", params: { done: Math.min(i + CHUNK, list.length), total: list.length } };
+    $("status-line").textContent = t("st_checking", lastStatus.params);
     try {
       const part = await invoke<ProxyResult[]>("check_proxies", {
         proxies: chunk,
@@ -384,6 +587,9 @@ async function start() {
         withGeo,
         withAnonymity,
         withTamper,
+        withTls,
+        precheck,
+        precheckTimeoutMs,
       });
       results.push(...part);
     } catch (e) {
@@ -399,17 +605,24 @@ async function start() {
 
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   const alive = results.filter((r) => r.alive).length;
-  setStatus(stopFlag ? `Остановлено. Живых: ${alive}/${results.length}.` : `Готово за ${secs}с. Живых: ${alive}/${results.length}.`);
+  if (stopFlag) setStatusT("st_stopped", { alive, total: results.length });
+  else setStatusT("st_done", { secs, alive, total: results.length });
   setNet("done", stopFlag ? "stopped" : "done");
   ($("btn-start") as HTMLButtonElement).disabled = false;
   ($("btn-stop") as HTMLButtonElement).disabled = true;
   running = false;
+
+  // auto-export alive into dispatcher pool
+  dispatchPool = results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
+  renderPool();
+  updateCounts();
+  await syncPool(false);
 }
 
 // ---------- export ----------
 
-function aliveList(): string[] {
-  return results.filter((r) => r.alive).map((r) => r.proxy);
+function exportScope(): ProxyResult[] {
+  return includeDead ? results : results.filter((r) => r.alive);
 }
 
 function csvCell(v: unknown): string {
@@ -417,23 +630,24 @@ function csvCell(v: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function buildTxt(): string {
-  return aliveList().join("\n");
+function buildTxt(list: ProxyResult[]): string {
+  return list.map((r) => r.proxy).join("\n");
 }
 
-function buildJson(): string {
-  return JSON.stringify(results, null, 2);
+function buildJson(list: ProxyResult[]): string {
+  return JSON.stringify(list, null, 2);
 }
 
-function buildCsv(): string {
-  const head = ["proxy", "proto", "alive", "latency_ms", "jitter_ms", "success_rate", "attempts", "ip", "country_code", "country", "city", "isp", "org", "asn", "ip_type", "anonymity", "tamper", "error"];
+function buildCsv(list: ProxyResult[]): string {
+  const head = ["proxy", "proto", "alive", "latency_ms", "jitter_ms", "success_rate", "attempts", "ip", "country_code", "country", "city", "isp", "org", "asn", "ip_type", "anonymity", "tamper", "tls", "tls_info", "error"];
   const lines = [head.join(",")];
-  for (const r of results) {
+  for (const r of list) {
     lines.push([
       r.proxy, r.proto, r.alive ? 1 : 0, r.latency_ms ?? "", r.jitter_ms ?? "",
       Math.round((r.success_rate ?? 0) * 100), r.attempts ?? "", r.ip ?? "",
       r.country_code ?? "", r.country ?? "", r.city ?? "", r.isp ?? "", r.org ?? "",
-      r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tamper ?? "", r.error ?? "",
+      r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tamper ?? "",
+      r.tls ?? "", r.tls_info ?? "", r.error ?? "",
     ].map(csvCell).join(","));
   }
   return lines.join("\n");
@@ -451,52 +665,128 @@ function browserDownload(name: string, text: string, mime = "text/plain;charset=
 }
 
 async function saveViaDialog(suggested: string, text: string, filters: { name: string; extensions: string[] }[]) {
-  // Tauri: диалог + запись через бэкенд; браузер: обычное скачивание
   try {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({ defaultPath: suggested, filters });
-    if (!path) return; // отмена
+    if (!path) return;
     await invoke("write_text_file", { path, contents: text });
-    setStatus(`Сохранено: ${path}`);
+    lastStatus = { key: "st_saved", params: { path: String(path) } };
+    $("status-line").textContent = t("st_saved", { path: String(path) });
   } catch {
     browserDownload(suggested, text);
-    setStatus(`Скачано: ${suggested} (браузерный режим).`);
+    lastStatus = { key: "st_downloaded", params: { name: suggested } };
+    $("status-line").textContent = t("st_downloaded", { name: suggested });
   }
 }
 
 async function doExport(kind: "txt" | "json" | "csv" | "copy") {
+  const list = exportScope();
   if (kind === "copy") {
-    const t = buildTxt();
-    if (!t) { setStatus("Нет живых для копирования."); return; }
+    const txt = buildTxt(list);
+    if (!txt) { lastStatus = { key: "st_nocopy" }; $("status-line").textContent = t("st_nocopy"); return; }
     try {
-      await navigator.clipboard.writeText(t);
-      setStatus(`Скопировано живых: ${t.split("\n").length}.`);
+      await navigator.clipboard.writeText(txt);
+      lastStatus = { key: "st_copied", params: { n: txt.split("\n").length } };
+      $("status-line").textContent = t("st_copied", { n: txt.split("\n").length });
     } catch {
-      setStatus("Не удалось скопировать.");
+      lastStatus = { key: "st_nocopy" };
+      $("status-line").textContent = t("st_nocopy");
     }
     return;
   }
-  if (results.length === 0) { setStatus("Нечего экспортировать."); return; }
+  if (list.length === 0) {
+    lastStatus = { key: "st_nothing" };
+    $("status-line").textContent = t("st_nothing");
+    return;
+  }
   if (kind === "txt") {
-    const t = buildTxt();
-    if (!t) { setStatus("Нет живых для экспорта."); return; }
-    await saveViaDialog("proxpulse-alive.txt", t, [{ name: "Text", extensions: ["txt"] }]);
+    await saveViaDialog("proxpulse-alive.txt", buildTxt(list), [{ name: "Text", extensions: ["txt"] }]);
   } else if (kind === "json") {
-    await saveViaDialog("proxpulse-results.json", buildJson(), [{ name: "JSON", extensions: ["json"] }]);
+    await saveViaDialog("proxpulse.json", buildJson(list), [{ name: "JSON", extensions: ["json"] }]);
   } else {
-    await saveViaDialog("proxpulse-results.csv", buildCsv(), [{ name: "CSV", extensions: ["csv"] }]);
+    await saveViaDialog("proxpulse.csv", buildCsv(list), [{ name: "CSV", extensions: ["csv"] }]);
+  }
+}
+
+// ---------- dispatcher ----------
+
+type DispatchStatus = {
+  running: boolean;
+  port: number;
+  mode: string;
+  upstreams: number;
+  current: string | null;
+  requests: number;
+  errors: number;
+  last_error: string | null;
+};
+
+function refreshSrvAddr() {
+  const port = ($("srv-port") as HTMLInputElement).value || "1080";
+  ($("srv-addr") as HTMLElement).textContent = `127.0.0.1:${port}`;
+}
+
+async function pollDispatch() {
+  try {
+    const s = await invoke<DispatchStatus>("local_proxy_status");
+    ($("srv-req") as HTMLElement).textContent = String(s.requests);
+    ($("srv-err") as HTMLElement).textContent = String(s.errors);
+    ($("srv-cur") as HTMLElement).textContent = s.current ?? "—";
+    const pill = $("srv-pill");
+    pill.textContent = s.running ? "ON" : "OFF";
+    pill.className = s.running ? "pill alive on" : "pill dead";
+    ($("btn-srv-start") as HTMLButtonElement).disabled = s.running;
+    ($("btn-srv-stop") as HTMLButtonElement).disabled = !s.running;
+    if (s.last_error && !s.running) {
+      ($("srv-status") as HTMLElement).textContent = s.last_error;
+    }
+  } catch { /* ignore */ }
+}
+
+function setPolling(on: boolean) {
+  window.clearInterval(pollTimer);
+  if (on) {
+    void pollDispatch();
+    pollTimer = window.setInterval(() => void pollDispatch(), 2000);
   }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  // lang
+  document.querySelectorAll(".lang button").forEach((b) => {
+    b.addEventListener("click", () => {
+      lang = (b as HTMLElement).dataset.lang as Lang;
+      localStorage.setItem("pp-lang", lang);
+      applyI18n();
+    });
+  });
+
+  // tabs
+  document.querySelectorAll(".tab").forEach((tb) => {
+    tb.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+      tb.classList.add("active");
+      const name = (tb as HTMLElement).dataset.tab;
+      document.querySelectorAll(".screen").forEach((s) => s.classList.add("hidden"));
+      const scr = document.getElementById(`screen-${name}`);
+      scr?.classList.remove("hidden");
+      setPolling(name === "dispatch");
+      if (name === "dispatch") {
+        refreshSrvAddr();
+        renderPool();
+        void pollDispatch();
+      }
+    });
+  });
+
   const input = $("proxy-input") as HTMLTextAreaElement;
   const upd = () => { ($("src-count") as HTMLElement).textContent = String(parseInput(input.value).length); };
   let updT: number | undefined;
   input.addEventListener("input", () => { window.clearTimeout(updT); updT = window.setTimeout(upd, 250); });
   upd();
 
-  $("btn-start").addEventListener("click", start);
-  $("btn-stop").addEventListener("click", () => { stopFlag = true; setStatus("Останавливаю..."); });
+  $("btn-start").addEventListener("click", () => void start());
+  $("btn-stop").addEventListener("click", () => { stopFlag = true; lastStatus = { key: "st_stopping" }; $("status-line").textContent = t("st_stopping"); });
   $("search").addEventListener("input", render);
   document.querySelectorAll(".chip").forEach((c) => {
     c.addEventListener("click", () => {
@@ -508,29 +798,40 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   $("btn-clear-in").addEventListener("click", () => { input.value = ""; upd(); });
+  ($("btn-pool-clear") as HTMLButtonElement).addEventListener("click", () => {
+    dispatchPool = [];
+    void syncPool(false);
+    renderPool();
+    updateCounts();
+  });
   $("file-input").addEventListener("change", async (e) => {
     const files = (e.target as HTMLInputElement).files;
     if (!files || files.length === 0) return;
     const parts: string[] = [];
     for (const f of Array.from(files)) {
       try {
-        const t = await f.text();
-        const found = extractProxiesFromText(t);
+        const txt = await f.text();
+        const found = extractProxiesFromText(txt);
         if (found.length > 0) parts.push(...found);
-        else setStatus(`В ${f.name} прокси не найдены.`);
+        else {
+          lastStatus = { key: "file_none", params: { name: f.name } };
+          $("status-line").textContent = t("file_none", { name: f.name });
+        }
       } catch {
-        setStatus(`Не удалось прочитать ${f.name}.`);
+        lastStatus = { key: "file_fail", params: { name: f.name } };
+        $("status-line").textContent = t("file_fail", { name: f.name });
       }
     }
     if (parts.length > 0) {
       input.value = (input.value ? input.value.replace(/\s+$/, "") + "\n" : "") + parts.join("\n");
       upd();
-      setStatus(`Импортировано: ${parts.length} из ${files.length} ф.`);
+      lastStatus = { key: "file_loaded", params: { n: parts.length, f: files.length } };
+      $("status-line").textContent = t("file_loaded", { n: parts.length, f: files.length });
     }
     (e.target as HTMLInputElement).value = "";
   });
 
-  // export dropdown
+  // export dropdown + dead toggle
   const menu = $("export-menu");
   $("btn-export").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -547,11 +848,16 @@ window.addEventListener("DOMContentLoaded", () => {
       void doExport((b as HTMLElement).dataset.exp as "txt" | "json" | "csv" | "copy");
     });
   });
+  $("chk-dead").addEventListener("click", () => {
+    includeDead = !includeDead;
+    ($("chk-dead") as HTMLButtonElement).setAttribute("aria-pressed", String(includeDead));
+  });
 
   $("btn-clear-out").addEventListener("click", () => {
     results = [];
     render(); updateCounts(); setProgress(0, 1);
-    setStatus("Результат очищен.");
+    lastStatus = { key: "st_cleared" };
+    $("status-line").textContent = t("st_cleared");
   });
 
   $("btn-direct").addEventListener("click", async () => {
@@ -559,9 +865,68 @@ window.addEventListener("DOMContentLoaded", () => {
     ($("direct-res") as HTMLElement).textContent = "...";
     try {
       const ms = await invoke<number>("check_direct", { testUrl: url, timeoutMs: 10000 });
-      ($("direct-res") as HTMLElement).textContent = `прямой доступ OK ${ms}ms`;
+      ($("direct-res") as HTMLElement).textContent = t("direct_ok", { ms });
     } catch (e) {
-      ($("direct-res") as HTMLElement).textContent = `связи нет: ${String(e).slice(0, 80)}`;
+      ($("direct-res") as HTMLElement).textContent = t("direct_fail", { e: String(e).slice(0, 80) });
     }
   });
+
+  // github card
+  $("gh-card").addEventListener("click", async () => {
+    const url = "https://github.com/nechel12/proxpulse";
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    } catch {
+      window.open(url, "_blank");
+    }
+  });
+
+  // dispatcher
+  ($("srv-port") as HTMLInputElement).addEventListener("input", refreshSrvAddr);
+  refreshSrvAddr();
+  ($("btn-pool-sync") as HTMLButtonElement).addEventListener("click", async () => {
+    dispatchPool = results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
+    renderPool();
+    updateCounts();
+    const n = await syncPool(false);
+    lastStatus = { key: "pool_synced", params: { n } };
+    ($("srv-status") as HTMLElement).textContent = t("pool_synced", { n });
+  });
+  ($("btn-srv-copy") as HTMLButtonElement).addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(($("srv-addr") as HTMLElement).textContent ?? "");
+    } catch { /* ignore */ }
+  });
+  ($("btn-srv-start") as HTMLButtonElement).addEventListener("click", async () => {
+    const port = Math.max(1, Math.min(65535, Number(($("srv-port") as HTMLInputElement).value) || 1080));
+    const mode = ($("srv-mode") as HTMLSelectElement).value;
+    ($("srv-status") as HTMLElement).textContent = "...";
+    try {
+      if (dispatchPool.length === 0) {
+        dispatchPool = results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
+        renderPool();
+        updateCounts();
+      }
+      await syncPool(false);
+      const addr = await invoke<string>("start_local_proxy", { port, mode });
+      ($("srv-status") as HTMLElement).textContent = t("srv_on", { addr });
+      refreshSrvAddr();
+      void pollDispatch();
+    } catch (e) {
+      const msg = String(e);
+      ($("srv-status") as HTMLElement).textContent = msg.includes("pool is empty")
+        ? t("srv_err_empty")
+        : t("srv_err", { e: msg.slice(0, 120) });
+    }
+  });
+  ($("btn-srv-stop") as HTMLButtonElement).addEventListener("click", async () => {
+    try {
+      await invoke("stop_local_proxy");
+    } catch { /* ignore */ }
+    ($("srv-status") as HTMLElement).textContent = t("srv_off");
+    void pollDispatch();
+  });
+
+  applyI18n();
 });
