@@ -1,5 +1,7 @@
 # ProxPulse
 
+[![GitHub release](https://img.shields.io/github/v/release/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/releases) [![Release build](https://github.com/nechel12/proxpulse/actions/workflows/release.yml/badge.svg)](https://github.com/nechel12/proxpulse/actions/workflows/release.yml) [![License](https://img.shields.io/github/license/nechel12/proxpulse)](LICENSE)
+
 *[English version](README_EN.md)*
 
 Десктопный чекер прокси с живым интерфейсом: проверка живости, пинга,
@@ -166,6 +168,12 @@ src-tauri/src/main.rs # точка входа
 - [proxpulse-judge](https://github.com/nechel12/proxpulse-judge) —
   self-hosted backend для проверок (Rust/axum, Docker). Публичный инстанс
   встроен в чекер по умолчанию.
+
+## Как помочь
+
+Баг-репорты и PR приветствуются. Перед отправкой прогони проверки
+из «Быстрого старта»: `npm run build`, `npm test`,
+`cargo test --manifest-path src-tauri/Cargo.toml`.
 
 ## Лицензия
 

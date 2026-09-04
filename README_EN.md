@@ -1,5 +1,7 @@
 # ProxPulse
 
+[![GitHub release](https://img.shields.io/github/v/release/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/releases) [![Release build](https://github.com/nechel12/proxpulse/actions/workflows/release.yml/badge.svg)](https://github.com/nechel12/proxpulse/actions/workflows/release.yml) [![License](https://img.shields.io/github/license/nechel12/proxpulse)](LICENSE)
+
 *[Русская версия](README.md)*
 
 Desktop proxy checker with a live UI: liveness, ping, geo, anonymity,
@@ -165,6 +167,12 @@ src-tauri/src/main.rs # entry point
 - [proxpulse-judge](https://github.com/nechel12/proxpulse-judge) —
   self-hosted check backend (Rust/axum, Docker). The public instance
   is embedded in the checker by default.
+
+## Contributing
+
+Bug reports and PRs are welcome. Before sending, run the checks
+from Quickstart: `npm run build`, `npm test`,
+`cargo test --manifest-path src-tauri/Cargo.toml`.
 
 ## License
 
