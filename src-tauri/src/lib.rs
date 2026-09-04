@@ -610,7 +610,10 @@ fn short_error(e: &str) -> String {
 fn build_client(proxy_url: Option<&str>, timeout: Duration) -> Result<reqwest::Client, String> {
     let mut b = reqwest::Client::builder()
         .timeout(timeout)
-        .user_agent(concat!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxPulse/", env!("CARGO_PKG_VERSION")));
+        .user_agent(concat!(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxPulse/",
+            env!("CARGO_PKG_VERSION")
+        ));
     if let Some(u) = proxy_url {
         let p = reqwest::Proxy::all(u).map_err(|e| short_error(&e.to_string()))?;
         b = b.proxy(p);
@@ -2330,6 +2333,74 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
+async fn fetch_url_text(url: String) -> Result<String, String> {
+    let url = url.trim().to_string();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("bad url".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(concat!("ProxPulse/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let r = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| short_error(&e.to_string()))?;
+    if !r.status().is_success() {
+        return Err(format!("http {}", r.status().as_u16()));
+    }
+    let b = r.bytes().await.map_err(|e| short_error(&e.to_string()))?;
+    if b.len() > 2_097_152 {
+        return Err("too big (2MB max)".to_string());
+    }
+    String::from_utf8(b.to_vec()).map_err(|_| "not text".to_string())
+}
+
+#[derive(Serialize)]
+struct UpdateInfo {
+    available: bool,
+    version: Option<String>,
+    current: String,
+    notes: Option<String>,
+}
+
+#[tauri::command]
+async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let current = app.package_info().version.to_string();
+    let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
+    match updater.check().await.map_err(|e| e.to_string())? {
+        Some(u) => Ok(UpdateInfo {
+            available: true,
+            version: Some(u.version.clone()),
+            current,
+            notes: u.body.clone(),
+        }),
+        None => Ok(UpdateInfo {
+            available: false,
+            version: None,
+            current,
+            notes: None,
+        }),
+    }
+}
+
+#[tauri::command]
+async fn install_app_update(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Err("no update".to_string());
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn hide_to_tray(app: tauri::AppHandle) -> Result<(), String> {
     app.get_webview_window("main")
         .ok_or_else(|| "no window".to_string())
@@ -2341,6 +2412,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(DispatchState::default())
         .manage(CheckState::default())
         .manage(TrayState::default())
@@ -2349,6 +2421,7 @@ pub fn run() {
             cancel_check,
             check_direct,
             write_text_file,
+            fetch_url_text,
             set_dispatch_pool,
             start_local_proxy,
             stop_local_proxy,
@@ -2356,6 +2429,8 @@ pub fn run() {
             send_webhook,
             hide_to_tray,
             app_version,
+            check_app_update,
+            install_app_update,
             update_tray_status
         ])
         .setup(|app| {

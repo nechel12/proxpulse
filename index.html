@@ -64,6 +64,10 @@
           <button id="btn-clear-in" class="btn ghost" data-i18n="btn_clear">Очистить</button>
           <label class="btn ghost file"><span data-i18n="btn_import">Импорт</span><input id="file-input" type="file" multiple hidden /></label>
         </div>
+        <div class="row2">
+          <input id="import-url" data-i18n-ph="import_url_ph" placeholder="https://… — список прокси" style="flex:1" />
+          <button id="btn-import-url" class="btn ghost" data-i18n="import_url_btn">Загрузить</button>
+        </div>
         <div class="hint" style="margin-top:6px" data-i18n="import_hint">Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.</div>
 
         <div class="panel-head" style="margin-top:14px">
@@ -84,6 +88,12 @@
             </select>
           </label>
           <input id="test-url-custom" data-i18n-ph="custom_ph" placeholder="или свой URL https://..." />
+          <label class="fld" style="margin-top:8px"><span data-i18n="profile">Профиль</span></label>
+          <div class="row2" style="margin-top:0">
+            <select id="profile-sel" style="flex:1"></select>
+            <button id="btn-profile-save" class="btn ghost" data-i18n="profile_save">Сохранить</button>
+            <button id="btn-profile-del" class="btn ghost" data-i18n="profile_del" disabled>Удалить</button>
+          </div>
 
           <div class="grid2">
             <label class="fld"><span data-i18n="f_timeout">Таймаут, мс</span><input id="timeout" type="number" value="5000" min="1000" max="30000" step="500" /></label>
@@ -159,6 +169,7 @@
           <button id="btn-clear-out" class="btn ghost" data-i18n="btn_clear">Очистить</button>
         </div>
 
+        <div class="graph-wrap"><svg id="ping-graph" viewBox="0 0 100 34" preserveAspectRatio="none" data-i18n-title="graph_title"></svg></div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -232,6 +243,12 @@
         <div class="toolbar">
           <button id="btn-pool-sync" class="btn ghost" data-i18n="pool_sync">Синхронизировать</button>
           <button id="btn-pool-clear" class="btn ghost" data-i18n="btn_clear">Очистить</button>
+          <input class="pool-filter" data-pool-filter="pool-body" data-i18n-ph="pool_filter_ph" placeholder="Страна, IP…" />
+          <select class="pool-sort" data-pool-sort="pool-body">
+            <option value="added" data-i18n="pool_sort_added">Порядок</option>
+            <option value="ping" data-i18n="pool_sort_ping">Пинг</option>
+            <option value="country" data-i18n="pool_sort_country">Страна</option>
+          </select>
         </div>        <div class="hint" style="margin-bottom:8px" data-i18n="pool_hint">Пул пополняется автоматически после каждой проверки.</div>
         <div class="table-wrap">
           <table>
@@ -294,6 +311,12 @@
         <div class="toolbar">
           <button id="btn-auto-pool-sync" class="btn ghost" data-i18n="pool_sync">Синхронизировать</button>
           <button id="btn-auto-pool-clear" class="btn ghost" data-i18n="btn_clear">Очистить</button>
+          <input class="pool-filter" data-pool-filter="auto-pool-body" data-i18n-ph="pool_filter_ph" placeholder="Страна, IP…" />
+          <select class="pool-sort" data-pool-sort="auto-pool-body">
+            <option value="added" data-i18n="pool_sort_added">Порядок</option>
+            <option value="ping" data-i18n="pool_sort_ping">Пинг</option>
+            <option value="country" data-i18n="pool_sort_country">Страна</option>
+          </select>
         </div>
         <div class="table-wrap">
           <table>
@@ -339,6 +362,7 @@
         <div class="hint"><span data-i18n="diag_ver">Версия</span>: <b id="app-ver">—</b></div>
         <div class="row2">
           <button id="btn-check-upd" class="btn ghost" data-i18n="diag_upd">Проверить обновления</button>
+          <button id="btn-install-upd" class="btn ghost hidden" data-i18n="upd_install">Установить</button>
           <button id="btn-open-rel" class="btn ghost hidden" data-i18n="upd_open">Открыть релиз</button>
           <button id="btn-copy-diag" class="btn ghost" data-i18n="diag_copy">Копировать</button>
         </div>

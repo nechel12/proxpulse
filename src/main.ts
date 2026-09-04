@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { extractProxiesFromText, parseInput } from "./parse.ts";
 
 type ProxyResult = {
   proxy: string;
@@ -35,6 +36,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     src_ph: "Вставь прокси в любом формате",
     btn_clear: "Очистить", btn_import: "Импорт", btn_copy: "Копировать",
     import_hint: "Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.",
+    import_url_ph: "https://… — список прокси", import_url_btn: "Загрузить",
+    url_loaded: "Импортировано по ссылке: {n}.", url_fail: "Не удалось загрузить ссылку",
     set_title: "▸ Настройки", f_testurl: "Тестовый URL",
     opt_google: "google generate_204 (быстро)", opt_cf: "cloudflare generate_204 (быстро)",
     opt_ipify: "api.ipify.org (покажет IP)", opt_httpbin: "httpbin.org/ip (покажет IP)",
@@ -43,6 +46,9 @@ const I18N: Record<Lang, Record<string, string>> = {
     custom_ph: "или свой URL https://...",
     custom_judge_ph: "свой judge, например https://...",
     judge_fast: "Быстрая", judge_full: "Полная",
+    profile: "Профиль", profile_save: "Сохранить", profile_del: "Удалить",
+    profile_none: "— пресет —", profile_name: "Название профиля",
+    prof_fast: "Быстрый", prof_deep: "Глубокий", prof_judge: "Judge",
     f_timeout: "Таймаут, мс", f_threads: "Потоки", f_repeats: "Замеры",
     f_protonoscheme: "Тип без схемы", opt_http: "HTTP",
     chk_geo: "Гео и тип IP", chk_anon: "Анонимность", chk_tamper: "Целостность", chk_tls: "TLS-интегрити",
@@ -76,6 +82,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     stat_req: "Запросы", stat_err: "Ошибки", stat_cur: "Текущий апстрим",
     browser_hint: "Вставь в браузер как HTTP-прокси: 127.0.0.1 и порт выше.",
     pool_title: "▸ Пул живых", pool_sync: "Синхронизировать",
+    pool_filter_ph: "Страна, IP…", pool_sort_added: "Порядок",
+    pool_sort_ping: "Пинг", pool_sort_country: "Страна",
     pool_hint: "Пул пополняется автоматически после каждой проверки.",
     pool_empty: "Пусто — запусти проверку.", pool_synced: "Пул: {n}.",
     srv_on: "Сервер на {addr}.", srv_off: "Сервер выключен.",
@@ -95,10 +103,13 @@ const I18N: Record<Lang, Record<string, string>> = {
     info_title: "▸ О приложении",
     info_about: "Быстрый чекер прокси: проверка живости, гео, анонимности и TLS, локальный диспетчер и авторассылка пула на вебхук.",
     show_more: "Показать ещё ({n})",
+    graph_title: "Средний пинг живых по проверкам",
     diag_title: "▸ Диагностика", diag_ver: "Версия", diag_copy: "Копировать",
     diag_upd: "Проверить обновления", upd_open: "Открыть релиз",
     upd_latest: "Установлена последняя ({v})", upd_found: "Доступна {v} (у тебя {cur})",
     upd_none: "Релизов пока нет", upd_fail: "Не удалось проверить",
+    upd_install: "Установить", upd_confirm: "Установить {v}? Приложение перезапустится.",
+    upd_installing: "Установка…", upd_restart: "Установлено, перезапусти приложение",
     auto_running: "Автопроверка {n} шт...",
     auto_pruned: "Автопроверка: живых {alive}/{total}.",
     auto_skip: "Пропуск: идёт другая проверка.",
@@ -112,6 +123,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     src_ph: "Paste proxies in any format",
     btn_clear: "Clear", btn_import: "Import", btn_copy: "Copy",
     import_hint: "Import: txt, csv, json, log and anything else — formats are auto-detected.",
+    import_url_ph: "https://… — proxy list", import_url_btn: "Load",
+    url_loaded: "Imported from URL: {n}.", url_fail: "URL fetch failed",
     set_title: "▸ Settings", f_testurl: "Test URL",
     opt_google: "google generate_204 (fast)", opt_cf: "cloudflare generate_204 (fast)",
     opt_ipify: "api.ipify.org (shows IP)", opt_httpbin: "httpbin.org/ip (shows IP)",
@@ -120,6 +133,9 @@ const I18N: Record<Lang, Record<string, string>> = {
     custom_ph: "or custom URL https://...",
     custom_judge_ph: "custom judge, e.g. https://...",
     judge_fast: "Fast", judge_full: "Full",
+    profile: "Profile", profile_save: "Save", profile_del: "Delete",
+    profile_none: "— preset —", profile_name: "Profile name",
+    prof_fast: "Fast", prof_deep: "Deep", prof_judge: "Judge",
     f_timeout: "Timeout, ms", f_threads: "Threads", f_repeats: "Samples",
     f_protonoscheme: "No-scheme type", opt_http: "HTTP",
     chk_geo: "Geo & IP type", chk_anon: "Anonymity", chk_tamper: "Integrity", chk_tls: "TLS integrity",
@@ -153,6 +169,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     stat_req: "Requests", stat_err: "Errors", stat_cur: "Current upstream",
     browser_hint: "Put it into your browser as HTTP proxy: 127.0.0.1 and the port above.",
     pool_title: "▸ Alive pool", pool_sync: "Sync",
+    pool_filter_ph: "Country, IP…", pool_sort_added: "Added",
+    pool_sort_ping: "Ping", pool_sort_country: "Country",
     pool_hint: "Pool auto-fills after every check.",
     pool_empty: "Empty — run a check.", pool_synced: "Pool: {n}.",
     srv_on: "Server on {addr}.", srv_off: "Server off.",
@@ -172,10 +190,13 @@ const I18N: Record<Lang, Record<string, string>> = {
     info_title: "▸ About",
     info_about: "Fast proxy checker: liveness, geo, anonymity and TLS checks, local dispatcher and pool auto-posting to a webhook.",
     show_more: "Show more ({n})",
+    graph_title: "Alive avg ping per check",
     diag_title: "▸ Diagnostics", diag_ver: "Version", diag_copy: "Copy",
     diag_upd: "Check for updates", upd_open: "Open release",
     upd_latest: "Up to date ({v})", upd_found: "Available {v} (yours {cur})",
     upd_none: "No releases yet", upd_fail: "Check failed",
+    upd_install: "Install", upd_confirm: "Install {v}? The app will restart.",
+    upd_installing: "Installing…", upd_restart: "Installed — restart the app",
     auto_running: "Auto-checking {n}...",
     auto_pruned: "Auto-check: {alive}/{total} alive.",
     auto_skip: "Skipped: another check is running.",
@@ -207,7 +228,8 @@ const RENDER_STEP = 250;
 let stopFlag = false;
 let running = false;
 let includeDead = false;
-let dispatchPool: { raw: string; latency: number | null }[] = [];
+type PoolItem = { raw: string; latency: number | null; country: string | null };
+let dispatchPool: PoolItem[] = [];
 let pollTimer: number | undefined;
 let autoBusy = false;
 let dispAutoTimer: number | undefined;
@@ -216,167 +238,6 @@ const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
 let judgeFull = true;
 let dispAutoOn = false;
 let autoOn = false;
-
-// ---------- proxy extraction (many formats) ----------
-
-const PROTO_KEYS = ["protocol", "proto", "type", "scheme"];
-const HOST_KEYS = ["host", "hostname", "ip", "server", "address", "addr"];
-const PORT_KEYS = ["port", "port_number", "portnumber"];
-const USER_KEYS = ["user", "username", "login", "usr", "name"];
-const PASS_KEYS = ["pass", "password", "pwd", "passw", "passwd", "secret"];
-
-function getKey(obj: Record<string, unknown>, keys: string[]): string | null {
-  const lower: Record<string, unknown> = {};
-  for (const k of Object.keys(obj)) lower[k.toLowerCase()] = obj[k];
-  for (const k of keys) {
-    const v = lower[k];
-    if (v != null && String(v).trim() !== "") return String(v).trim();
-  }
-  return null;
-}
-
-function buildFromParts(host: string, port: string, user?: string | null, pass?: string | null, proto?: string | null): string | null {
-  host = host.trim().replace(/\/+$/, "");
-  port = port.trim();
-  if (!host || !/^\d{1,5}$/.test(port)) return null;
-  const p = Number(port);
-  if (p < 1 || p > 65535) return null;
-  let prefix = "";
-  if (proto && proto.trim()) {
-    const s = proto.trim().toLowerCase();
-    prefix = s.includes("://") ? s : `${s}://`;
-  }
-  if (user && pass) return `${prefix}${user}:${pass}@${host}:${port}`;
-  if (user) return `${prefix}${user}@${host}:${port}`;
-  return `${prefix}${host}:${port}`;
-}
-
-function proxiesFromJson(v: unknown, out: string[]): void {
-  if (v == null) return;
-  if (typeof v === "string") {
-    const s = v.trim();
-    if (s.length > 2) out.push(s);
-    return;
-  }
-  if (Array.isArray(v)) {
-    for (const el of v) proxiesFromJson(el, out);
-    return;
-  }
-  if (typeof v === "object") {
-    const o = v as Record<string, unknown>;
-    const host = getKey(o, HOST_KEYS);
-    const port = getKey(o, PORT_KEYS);
-    if (host && port) {
-      const built = buildFromParts(host, port, getKey(o, USER_KEYS), getKey(o, PASS_KEYS), getKey(o, PROTO_KEYS));
-      if (built) out.push(built);
-    }
-    for (const k of ["proxies", "proxy", "data", "list", "items", "results", "rows"]) {
-      if (Array.isArray(o[k])) {
-        for (const el of o[k] as unknown[]) proxiesFromJson(el, out);
-        return;
-      }
-    }
-    if (!host) {
-      for (const val of Object.values(o)) {
-        if (typeof val === "string" || Array.isArray(val) || (val && typeof val === "object")) {
-          proxiesFromJson(val, out);
-        }
-      }
-    }
-  }
-}
-
-function tryCsvLine(line: string): string | null {
-  let parts: string[] | null = null;
-  if (/[,;|\t]/.test(line)) {
-    parts = line.split(/[,;|\t]/).map((s) => s.trim().replace(/^["'`]+|["'`]+$/g, "")).filter(Boolean);
-  } else if (!line.includes("://") && !line.includes("@")) {
-    const ws = line.split(/\s+/).filter(Boolean);
-    if (ws.length >= 2 && ws.length <= 5) parts = ws;
-  }
-  if (!parts || parts.length < 2 || parts.length > 5) return null;
-  const isPort = (s: string) => /^\d{2,5}$/.test(s) && Number(s) >= 1 && Number(s) <= 65535;
-  const isProto = (s: string) => /^(https?|socks5h?|socks4a?|socks)$/i.test(s.trim());
-  if (parts.length === 2 && isPort(parts[1])) return `${parts[0]}:${parts[1]}`;
-  if (parts.length === 3) {
-    if (isPort(parts[1]) && isProto(parts[2])) return `${parts[2]}://${parts[0]}:${parts[1]}`;
-    if (isProto(parts[0]) && isPort(parts[2])) return `${parts[0]}://${parts[1]}:${parts[2]}`;
-    return null;
-  }
-  if (parts.length === 4) {
-    if (isPort(parts[1])) return `${parts[2]}:${parts[3]}@${parts[0]}:${parts[1]}`;
-    if (isPort(parts[3])) return `${parts[0]}:${parts[1]}@${parts[2]}:${parts[3]}`;
-    return null;
-  }
-  if (parts.length === 5 && isProto(parts[0]) && isPort(parts[2])) {
-    return `${parts[0]}://${parts[3]}:${parts[4]}@${parts[1]}:${parts[2]}`;
-  }
-  return null;
-}
-
-const SCHEME_URL_RE = /\b(?:socks5h?|socks4a?|socks|https?)\:\/\/[^\s"'<>,;()\[\]]+/gi;
-
-function cleanTail(s: string): string {
-  return s.replace(/[.,;!?)\]}>]+$/, "").replace(/^[(<{]+/, "").trim();
-}
-
-export function extractProxiesFromText(text: string): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const push = (s: string) => {
-    s = cleanTail(s.trim().replace(/^["'`]+|["'`]+$/g, ""));
-    if (s.length < 3 || s.length > 512 || s.startsWith("#") || s.startsWith("//")) return;
-    if (seen.has(s)) return;
-    seen.add(s);
-    out.push(s);
-  };
-
-  try {
-    const j = JSON.parse(text);
-    const tmp: string[] = [];
-    proxiesFromJson(j, tmp);
-    if (tmp.length > 0) {
-      tmp.forEach(push);
-      return out;
-    }
-  } catch { /* not json */ }
-
-  const lines = text.split(/\r?\n/);
-  for (let raw of lines) {
-    let line = raw.trim();
-    if (!line || line.startsWith("#") || line.startsWith("//")) continue;
-    line = line.replace(/^(\d{1,6}[).\-:]\s+|[-*•>]\s+|\[\s*[xX✓]?\s*\]\s*)/, "").trim();
-    if (!line) continue;
-
-    const csv = tryCsvLine(line);
-    if (csv) { push(csv); continue; }
-
-    const urls = line.match(SCHEME_URL_RE);
-    if (urls && urls.length > 0) {
-      urls.forEach(push);
-      continue;
-    }
-    const hashIdx = line.indexOf(" #");
-    if (hashIdx > 0) line = line.slice(0, hashIdx).trim();
-    push(line);
-  }
-
-  if (out.length < 5) {
-    const found = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\b/g);
-    if (found) {
-      for (const f of found) {
-        if (seen.has(f)) continue;
-        if (out.some((s) => s.includes(f))) continue;
-        push(f);
-      }
-    }
-  }
-  return out;
-}
-
-function parseInput(text: string): string[] {
-  return extractProxiesFromText(text);
-}
 
 // ---------- ui helpers ----------
 
@@ -412,6 +273,147 @@ function updateJudgeUI(): void {
   ($("test-url-custom") as HTMLInputElement).placeholder = t(j ? "custom_judge_ph" : "custom_ph");
 }
 
+function setJudgeFull(full: boolean): void {
+  judgeFull = full;
+  ($("judge-fast") as HTMLButtonElement).classList.toggle("active", !full);
+  ($("judge-full") as HTMLButtonElement).classList.toggle("active", full);
+}
+
+// ---------- settings profiles ----------
+
+type ProfileData = {
+  testUrlSel: string;
+  customUrl: string;
+  timeout: string;
+  concurrency: string;
+  repeats: string;
+  defaultProto: string;
+  geo: boolean;
+  anon: boolean;
+  tamper: boolean;
+  tls: boolean;
+  precheck: boolean;
+  precheckTimeout: string;
+  judgeFull: boolean;
+};
+
+const BUILTIN_PROFILES: { id: string; nameKey: string; data: ProfileData }[] = [
+  {
+    id: "builtin:fast", nameKey: "prof_fast",
+    data: {
+      testUrlSel: "https://www.google.com/generate_204", customUrl: "",
+      timeout: "5000", concurrency: "100", repeats: "1", defaultProto: "http",
+      geo: false, anon: false, tamper: false, tls: false,
+      precheck: true, precheckTimeout: "1500", judgeFull: false,
+    },
+  },
+  {
+    id: "builtin:deep", nameKey: "prof_deep",
+    data: {
+      testUrlSel: "https://ip-api.com/json", customUrl: "",
+      timeout: "8000", concurrency: "50", repeats: "3", defaultProto: "http",
+      geo: true, anon: true, tamper: true, tls: true,
+      precheck: true, precheckTimeout: "1500", judgeFull: false,
+    },
+  },
+  {
+    id: "builtin:judge", nameKey: "prof_judge",
+    data: {
+      testUrlSel: "judge", customUrl: "",
+      timeout: "5000", concurrency: "50", repeats: "1", defaultProto: "http",
+      geo: false, anon: false, tamper: false, tls: false,
+      precheck: true, precheckTimeout: "1500", judgeFull: true,
+    },
+  },
+];
+
+let customProfiles: { name: string; data: ProfileData }[] = [];
+let currentProfileId = "";
+
+function snapshotProfile(): ProfileData {
+  const val = (id: string) => ($(id) as HTMLInputElement).value;
+  const chk = (id: string) => ($(id) as HTMLInputElement).checked;
+  return {
+    testUrlSel: ($("test-url") as HTMLSelectElement).value,
+    customUrl: val("test-url-custom"),
+    timeout: val("timeout"), concurrency: val("concurrency"), repeats: val("repeats"),
+    defaultProto: ($("default-proto") as HTMLSelectElement).value,
+    geo: chk("chk-geo"), anon: chk("chk-anon"), tamper: chk("chk-tamper"), tls: chk("chk-tls"),
+    precheck: chk("chk-precheck"), precheckTimeout: val("precheck-timeout"),
+    judgeFull,
+  };
+}
+
+function applyProfile(d: ProfileData): void {
+  const setVal = (id: string, v: string) => { ($(id) as HTMLInputElement).value = v; };
+  const setChk = (id: string, v: boolean) => { ($(id) as HTMLInputElement).checked = v; };
+  ($("test-url") as HTMLSelectElement).value = d.testUrlSel;
+  setVal("test-url-custom", d.customUrl);
+  setVal("timeout", d.timeout);
+  setVal("concurrency", d.concurrency);
+  setVal("repeats", d.repeats);
+  ($("default-proto") as HTMLSelectElement).value = d.defaultProto;
+  setChk("chk-geo", d.geo);
+  setChk("chk-anon", d.anon);
+  setChk("chk-tamper", d.tamper);
+  setChk("chk-tls", d.tls);
+  setChk("chk-precheck", d.precheck);
+  setVal("precheck-timeout", d.precheckTimeout);
+  setJudgeFull(d.judgeFull);
+  updateJudgeUI();
+}
+
+function loadProfiles(): void {
+  try {
+    const raw = localStorage.getItem("pp-profiles");
+    const arr = raw ? JSON.parse(raw) : null;
+    customProfiles = Array.isArray(arr)
+      ? arr.filter((p) => p && typeof p.name === "string" && p.data && typeof p.data === "object").slice(0, 20)
+      : [];
+  } catch {
+    customProfiles = [];
+  }
+}
+
+function saveProfiles(): void {
+  try {
+    localStorage.setItem("pp-profiles", JSON.stringify(customProfiles.slice(0, 20)));
+  } catch { /* ignore */ }
+}
+
+function renderProfileList(): void {
+  const sel = $("profile-sel") as HTMLSelectElement;
+  sel.innerHTML = "";
+  const ph = document.createElement("option");
+  ph.value = "";
+  ph.textContent = t("profile_none");
+  sel.appendChild(ph);
+  for (const b of BUILTIN_PROFILES) {
+    const o = document.createElement("option");
+    o.value = b.id;
+    o.textContent = t(b.nameKey);
+    sel.appendChild(o);
+  }
+  for (const c of customProfiles) {
+    const o = document.createElement("option");
+    o.value = "custom:" + c.name;
+    o.textContent = c.name;
+    sel.appendChild(o);
+  }
+  sel.value = currentProfileId;
+  ($("btn-profile-del") as HTMLButtonElement).disabled = !currentProfileId.startsWith("custom:");
+}
+
+function findProfile(id: string): ProfileData | null {
+  const b = BUILTIN_PROFILES.find((x) => x.id === id);
+  if (b) return b.data;
+  if (id.startsWith("custom:")) {
+    const c = customProfiles.find((x) => "custom:" + x.name === id);
+    if (c) return c.data;
+  }
+  return null;
+}
+
 function setStatusT(key: string, params?: Record<string, string | number>) {
   lastStatus = { key, params };
   $("status-line").textContent = t(key, params);
@@ -443,6 +445,7 @@ function applyI18n() {
   $("status-line").textContent = t(lastStatus.key, lastStatus.params);
   render();
   renderPool();
+  renderProfileList();
   updateCounts();
   updateJudgeUI();
 }
@@ -585,31 +588,48 @@ function render() {
   }
 }
 
+function getPoolView(tbodyId: string) {
+  const f = (document.querySelector(`[data-pool-filter="${tbodyId}"]`) as HTMLInputElement | null)?.value.toLowerCase().trim() ?? "";
+  const s = (document.querySelector(`[data-pool-sort="${tbodyId}"]`) as HTMLSelectElement | null)?.value ?? "added";
+  let rows = dispatchPool.map((p, i) => ({ ...p, i }));
+  if (f) {
+    rows = rows.filter((r) =>
+      r.raw.toLowerCase().includes(f) || (r.country ?? "").toLowerCase().includes(f)
+    );
+  }
+  if (s === "ping") rows.sort((a, b) => (a.latency ?? 1e12) - (b.latency ?? 1e12));
+  else if (s === "country") rows.sort((a, b) => (a.country ?? "~~~").localeCompare(b.country ?? "~~~"));
+  return rows;
+}
+
 function renderPoolInto(tbodyId: string) {
   const pb = document.getElementById(tbodyId) as HTMLTableSectionElement | null;
   if (!pb) return;
   pb.innerHTML = "";
-  if (dispatchPool.length === 0) {
+  const rows = getPoolView(tbodyId);
+  if (rows.length === 0) {
     const tr = document.createElement("tr");
     tr.className = "empty";
     const td = document.createElement("td");
     td.colSpan = tbodyId === "pool-body" ? 4 : 3;
-    td.textContent = t("pool_empty");
+    td.textContent = t(dispatchPool.length === 0 ? "pool_empty" : "empty_filter");
     tr.appendChild(td);
     pb.appendChild(tr);
     return;
   }
-  dispatchPool.forEach((p, i) => {
+  rows.forEach((p, n) => {
     const tr = document.createElement("tr");
     const ping = p.latency == null ? "—" : `${p.latency} ms`;
-    tr.innerHTML = `<td>${i + 1}</td><td>${escapeHtml(p.raw)}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
+    const geo = p.country ? ` <span class="geo-tag">${escapeHtml(p.country)}</span>` : "";
+    tr.innerHTML = `<td>${n + 1}</td><td>${escapeHtml(p.raw)}${geo}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
     if (tbodyId === "pool-body") {
       const td = document.createElement("td");
       const b = document.createElement("button");
       b.className = "btn ghost";
       b.textContent = "✕";
       b.addEventListener("click", () => {
-        dispatchPool.splice(i, 1);
+        const at = dispatchPool.findIndex((x) => x.raw === p.raw);
+        if (at >= 0) dispatchPool.splice(at, 1);
         void syncPool(false);
         renderPool();
         updateCounts();
@@ -626,10 +646,14 @@ function renderPool() {
   renderPoolInto("auto-pool-body");
 }
 
+function poolCountry(r: ProxyResult): string | null {
+  return r.country_code ?? r.country ?? null;
+}
+
 /** merge: keep existing entries, add new ones, refresh latency.
  *  Entries over maxPingMs never enter the pool; re-checked entries
  *  that went over the limit are dropped. */
-function mergePool(items: { raw: string; latency: number | null }[]) {
+function mergePool(items: { raw: string; latency: number | null; country?: string | null }[]) {
   const idx = new Map(dispatchPool.map((p, i) => [p.raw, i]));
   const drop = new Set<number>();
   for (const it of items) {
@@ -640,9 +664,10 @@ function mergePool(items: { raw: string; latency: number | null }[]) {
     }
     if (at == null) {
       idx.set(it.raw, dispatchPool.length);
-      dispatchPool.push({ raw: it.raw, latency: it.latency });
-    } else if (it.latency != null) {
-      dispatchPool[at].latency = it.latency;
+      dispatchPool.push({ raw: it.raw, latency: it.latency, country: it.country ?? null });
+    } else {
+      if (it.latency != null) dispatchPool[at].latency = it.latency;
+      if (it.country != null) dispatchPool[at].country = it.country;
     }
   }
   if (drop.size > 0) {
@@ -821,6 +846,63 @@ function setProgress(done: number, total: number) {
   ($("progress") as HTMLElement).style.width = `${p}%`;
 }
 
+// ---------- alive ping history (sparkline) ----------
+
+type PingPoint = { t: number; avg: number | null; alive: number };
+let pingHist: PingPoint[] = [];
+const PING_HIST_MAX = 120;
+
+function loadPingHist(): void {
+  try {
+    const raw = localStorage.getItem("pp-pinghist");
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr)) {
+      pingHist = arr
+        .filter((p) => p && typeof p.t === "number")
+        .map((p) => ({ t: p.t, avg: typeof p.avg === "number" ? p.avg : null, alive: Number(p.alive) || 0 }))
+        .slice(-PING_HIST_MAX);
+    }
+  } catch { /* ignore */ }
+}
+
+function pushPingPoint(): void {
+  const alive = results.filter((r) => r.alive);
+  const lat = alive
+    .map((r) => r.latency_ms)
+    .filter((x): x is number => x != null);
+  pingHist.push({
+    t: Date.now(),
+    avg: lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null,
+    alive: alive.length,
+  });
+  if (pingHist.length > PING_HIST_MAX) pingHist.splice(0, pingHist.length - PING_HIST_MAX);
+  try {
+    localStorage.setItem("pp-pinghist", JSON.stringify(pingHist));
+  } catch { /* ignore */ }
+  renderPingGraph();
+}
+
+function renderPingGraph(): void {
+  const svg = document.getElementById("ping-graph") as unknown as SVGSVGElement | null;
+  if (!svg) return;
+  const pts = pingHist.filter((p) => p.avg != null);
+  if (pts.length < 2) {
+    svg.innerHTML = "";
+    return;
+  }
+  const vals = pts.map((p) => p.avg as number);
+  const min = Math.min(...vals);
+  const span = Math.max(1, Math.max(...vals) - min);
+  const n = pts.length;
+  const d = pts
+    .map((p, i) => `${((i / (n - 1)) * 100).toFixed(1)},${(30 - (((p.avg as number) - min) / span) * 26).toFixed(1)}`)
+    .join(" ");
+  const last = pts[pts.length - 1];
+  svg.innerHTML =
+    `<title>${last.avg} ms · alive ${last.alive} · ${new Date(last.t).toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US")}</title>` +
+    `<polyline points="${d}" />`;
+}
+
 function deadStub(proxy: string, msg: string): ProxyResult {
   return { proxy, proto: "ERR", alive: false, latency_ms: null, jitter_ms: null, success_rate: 0, attempts: 0, ip: null, country: null, country_code: null, city: null, isp: null, org: null, asn: null, ip_type: null, anonymity: null, tamper: null, tls: null, tls_info: null, error: msg.slice(0, 120) };
 }
@@ -855,10 +937,11 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
     const res = await runCheckList(dispatchPool.map((p) => p.raw));
     const alive = res.filter((r) => r.alive && passPing(r.latency_ms));
     learnGeo(res);
-    dispatchPool = alive.map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
+    dispatchPool = alive.map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) }));
     renderPool();
     updateCounts();
     await syncPool(false);
+    pushPingPoint();
     if (el) el.textContent = `${t("auto_pruned", { alive: alive.length, total: res.length })} ${new Date().toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US")}`;
     if (sendHook) await sendWebhook(false);
   } finally {
@@ -1043,10 +1126,11 @@ async function start() {
   running = false;
 
   // merge alive into dispatcher pool (existing entries kept)
-  mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms })));
+  mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) })));
   renderPool();
   updateCounts();
   await syncPool(false);
+  pushPingPoint();
 }
 
 // ---------- export ----------
@@ -1273,8 +1357,29 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   $("btn-clear-in").addEventListener("click", () => { input.value = ""; upd(); });
+  ($("btn-import-url") as HTMLButtonElement).addEventListener("click", async () => {
+    const u = (($("import-url") as HTMLInputElement).value || "").trim();
+    if (!u) return;
+    $("status-line").textContent = "…";
+    try {
+      const txt = await invoke<string>("fetch_url_text", { url: u });
+      const found = extractProxiesFromText(txt);
+      if (found.length === 0) {
+        lastStatus = { key: "file_none", params: { name: u.slice(0, 60) } };
+        $("status-line").textContent = t("file_none", { name: u.slice(0, 60) });
+        return;
+      }
+      input.value = (input.value ? input.value.replace(/\s+$/, "") + "\n" : "") + found.join("\n");
+      upd();
+      lastStatus = { key: "url_loaded", params: { n: found.length } };
+      $("status-line").textContent = t("url_loaded", { n: found.length });
+    } catch {
+      lastStatus = { key: "url_fail" };
+      $("status-line").textContent = t("url_fail");
+    }
+  });
   async function doPoolSync(statusElId: string): Promise<void> {
-    mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms })));
+    mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) })));
     renderPool();
     updateCounts();
     const n = await syncPool(false);
@@ -1371,13 +1476,36 @@ window.addEventListener("DOMContentLoaded", () => {
   $("gh-card").addEventListener("click", openGh("https://github.com/nechel12/proxpulse"));
   $("gh-card-judge").addEventListener("click", openGh("https://github.com/nechel12/proxpulse-judge"));
 
-  // judge mode UI
-  $("test-url").addEventListener("change", updateJudgeUI);
-  const setJudgeFull = (full: boolean) => {
-    judgeFull = full;
-    ($("judge-fast") as HTMLButtonElement).classList.toggle("active", !full);
-    ($("judge-full") as HTMLButtonElement).classList.toggle("active", full);
-  };
+  // settings profiles
+  loadProfiles();
+  renderProfileList();
+  ($("profile-sel") as HTMLSelectElement).addEventListener("change", (e) => {
+    const id = (e.target as HTMLSelectElement).value;
+    currentProfileId = id;
+    const d = findProfile(id);
+    if (d) applyProfile(d);
+    ($("btn-profile-del") as HTMLButtonElement).disabled = !id.startsWith("custom:");
+  });
+  ($("btn-profile-save") as HTMLButtonElement).addEventListener("click", () => {
+    const res = window.prompt(t("profile_name"));
+    if (res == null) return;
+    const name = res.trim();
+    if (!name) return;
+    const data = snapshotProfile();
+    const at = customProfiles.findIndex((c) => c.name === name);
+    if (at >= 0) customProfiles[at] = { name, data };
+    else customProfiles.push({ name, data });
+    saveProfiles();
+    currentProfileId = "custom:" + name;
+    renderProfileList();
+  });
+  ($("btn-profile-del") as HTMLButtonElement).addEventListener("click", () => {
+    if (!currentProfileId.startsWith("custom:")) return;
+    customProfiles = customProfiles.filter((c) => "custom:" + c.name !== currentProfileId);
+    saveProfiles();
+    currentProfileId = "";
+    renderProfileList();
+  });
   ($("judge-fast") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(false));
   ($("judge-full") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(true));
 
@@ -1409,7 +1537,7 @@ window.addEventListener("DOMContentLoaded", () => {
     ($("srv-status") as HTMLElement).textContent = "...";
     try {
       if (dispatchPool.length === 0) {
-        mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms })));
+        mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) })));
         renderPool();
         updateCounts();
       }
@@ -1470,30 +1598,50 @@ window.addEventListener("DOMContentLoaded", () => {
       await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     } catch { /* ignore */ }
   });
+  type UpdateInfo = {
+    available: boolean;
+    version: string | null;
+    current: string;
+    notes: string | null;
+  };
+  let pendingVersion = "";
   ($("btn-check-upd") as HTMLButtonElement).addEventListener("click", async () => {
     const el = $("upd-status") as HTMLElement;
     const openBtn = $("btn-open-rel") as HTMLButtonElement;
+    const instBtn = $("btn-install-upd") as HTMLButtonElement;
     openBtn.classList.add("hidden");
+    instBtn.classList.add("hidden");
+    pendingVersion = "";
     el.textContent = "...";
     try {
-      const cur = await invoke<string>("app_version");
-      const r = await fetch("https://api.github.com/nechel12/proxpulse/releases/latest");
-      if (r.status === 404) {
-        el.textContent = t("upd_none");
+      const u = await invoke<UpdateInfo>("check_app_update");
+      ($("app-ver") as HTMLElement).textContent = u.current;
+      if (!u.available || !u.version) {
+        el.textContent = t("upd_latest", { v: u.current });
         return;
       }
-      if (!r.ok) throw new Error("http " + r.status);
-      const j = (await r.json()) as { tag_name?: string; html_url?: string };
-      const tag = String(j.tag_name || "");
-      releaseUrl = String(j.html_url || "");
-      if (tag && tag.replace(/^v/, "") !== cur) {
-        el.textContent = t("upd_found", { v: tag, cur });
-        if (releaseUrl) openBtn.classList.remove("hidden");
-      } else {
-        el.textContent = t("upd_latest", { v: cur });
-      }
+      pendingVersion = u.version;
+      releaseUrl = "https://github.com/nechel12/proxpulse/releases";
+      el.textContent = t("upd_found", { v: u.version, cur: u.current });
+      openBtn.classList.remove("hidden");
+      instBtn.classList.remove("hidden");
     } catch (e) {
       logErr("update-check: " + String(e).slice(0, 200));
+      el.textContent = t("upd_fail");
+    }
+  });
+  ($("btn-install-upd") as HTMLButtonElement).addEventListener("click", async () => {
+    if (!pendingVersion) return;
+    const el = $("upd-status") as HTMLElement;
+    try {
+      const { confirm } = await import("@tauri-apps/plugin-dialog");
+      const ok = await confirm(t("upd_confirm", { v: pendingVersion }), { title: "ProxPulse", kind: "info" });
+      if (!ok) return;
+      el.textContent = t("upd_installing");
+      await invoke("install_app_update");
+      el.textContent = t("upd_restart");
+    } catch (e) {
+      logErr("update-install: " + String(e).slice(0, 200));
       el.textContent = t("upd_fail");
     }
   });
@@ -1513,6 +1661,14 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   loadMaxPing();
   syncMaxPingInputs();
+  document.querySelectorAll<HTMLInputElement>("[data-pool-filter]").forEach((el) => {
+    el.addEventListener("input", renderPool);
+  });
+  document.querySelectorAll<HTMLSelectElement>("[data-pool-sort]").forEach((el) => {
+    el.addEventListener("change", renderPool);
+  });
+  loadPingHist();
+  renderPingGraph();
   for (const id of ["disp-max-ping", "auto-max-ping"]) {
     document.getElementById(id)?.addEventListener("change", (e) => {
       const v = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0));
