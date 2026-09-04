@@ -9,8 +9,8 @@ timer-based auto-checks and posting alive proxies to webhooks.
 Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
 Dark theme with red accents, Russian and English UI.
 
-> Currently distributed as source (see build below). Installers will
-> appear under Releases — the app updates itself.
+> Ready Windows build — under [Releases](https://github.com/nechel12/proxpulse/releases):
+> installer and portable `.exe`. The app updates itself.
 
 ## Quick start
 
