@@ -91,6 +91,11 @@ const I18N: Record<Lang, Record<string, string>> = {
     webhook_hint: "После каждой автопроверки список уходит POST-запросом. Пусто — отправки нет.",
     info_title: "▸ О приложении",
     info_about: "Быстрый чекер прокси: проверка живости, гео, анонимности и TLS, локальный диспетчер и авторассылка пула на вебхук.",
+    show_more: "Показать ещё ({n})",
+    diag_title: "▸ Диагностика", diag_ver: "Версия", diag_copy: "Копировать",
+    diag_upd: "Проверить обновления", upd_open: "Открыть релиз",
+    upd_latest: "Установлена последняя ({v})", upd_found: "Доступна {v} (у тебя {cur})",
+    upd_none: "Релизов пока нет", upd_fail: "Не удалось проверить",
     auto_running: "Автопроверка {n} шт...",
     auto_pruned: "Автопроверка: живых {alive}/{total}.",
     auto_skip: "Пропуск: идёт другая проверка.",
@@ -160,6 +165,11 @@ const I18N: Record<Lang, Record<string, string>> = {
     webhook_hint: "After each auto-check the list is POSTed. Empty — no send.",
     info_title: "▸ About",
     info_about: "Fast proxy checker: liveness, geo, anonymity and TLS checks, local dispatcher and pool auto-posting to a webhook.",
+    show_more: "Show more ({n})",
+    diag_title: "▸ Diagnostics", diag_ver: "Version", diag_copy: "Copy",
+    diag_upd: "Check for updates", upd_open: "Open release",
+    upd_latest: "Up to date ({v})", upd_found: "Available {v} (yours {cur})",
+    upd_none: "No releases yet", upd_fail: "Check failed",
     auto_running: "Auto-checking {n}...",
     auto_pruned: "Auto-check: {alive}/{total} alive.",
     auto_skip: "Skipped: another check is running.",
@@ -186,6 +196,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
 
 let results: ProxyResult[] = [];
 let filter: "all" | "alive" | "dead" = "all";
+let renderLimit = 250;
+const RENDER_STEP = 250;
 let stopFlag = false;
 let running = false;
 let includeDead = false;
@@ -370,6 +382,11 @@ function judgeBase(): string {
   const custom = ($("test-url-custom") as HTMLInputElement).value.trim();
   const base = (custom || JUDGE_DEFAULT).replace(/\/+$/, "");
   if (/\/(judge|generate_204)$/.test(base)) return base;
+  try {
+    const u = new URL(base);
+    // custom path on a self-hosted judge (e.g. https://host/svc) → use as-is
+    if (u.pathname && u.pathname !== "/") return base;
+  } catch { /* invalid URL — backend will report it */ }
   return base + (judgeFull ? "/judge" : "/generate_204");
 }
 
@@ -522,7 +539,7 @@ function render() {
     tb.appendChild(tr);
     return;
   }
-  rows.forEach((r, i) => {
+  rows.slice(0, renderLimit).forEach((r, i) => {
     const tr = document.createElement("tr");
     const pill = r.alive ? `<span class="pill alive">${t("pill_alive")}</span>` : `<span class="pill dead">${t("pill_dead")}</span>`;
     const ping = r.latency_ms == null ? "—" : `${r.latency_ms} ms`;
@@ -544,6 +561,22 @@ function render() {
       `<td class="cell-err" title="${infoTitle}">${info}</td>`;
     tb.appendChild(tr);
   });
+  if (rows.length > renderLimit) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 11;
+    td.style.textAlign = "center";
+    const b = document.createElement("button");
+    b.className = "btn ghost";
+    b.textContent = t("show_more", { n: rows.length - renderLimit });
+    b.addEventListener("click", () => {
+      renderLimit += RENDER_STEP;
+      render();
+    });
+    td.appendChild(b);
+    tr.appendChild(td);
+    tb.appendChild(tr);
+  }
 }
 
 function renderPoolInto(tbodyId: string) {
@@ -601,6 +634,68 @@ function mergePool(items: { raw: string; latency: number | null }[]) {
   }
 }
 
+// ---------- geo cache (skip repeated geo lookups for unchanged exit IPs) ----------
+
+type GeoFields = {
+  ip: string | null;
+  country: string | null;
+  country_code: string | null;
+  city: string | null;
+  isp: string | null;
+  org: string | null;
+  asn: string | null;
+  ip_type: string | null;
+};
+
+let geoCache = new Map<string, GeoFields>();
+const GEO_CACHE_MAX = 2000;
+
+function loadGeoCache(): void {
+  try {
+    const raw = localStorage.getItem("pp-geocache");
+    if (!raw) return;
+    const arr = JSON.parse(raw) as [string, GeoFields][];
+    for (const [k, v] of arr.slice(-GEO_CACHE_MAX)) {
+      if (typeof k === "string" && v && typeof v === "object") geoCache.set(k, v);
+    }
+  } catch { /* ignore */ }
+}
+
+function persistGeoCache(): void {
+  try {
+    localStorage.setItem("pp-geocache", JSON.stringify([...geoCache.entries()].slice(-GEO_CACHE_MAX)));
+  } catch { /* ignore (quota) */ }
+}
+
+function learnGeo(list: ProxyResult[]): void {
+  let changed = false;
+  for (const r of list) {
+    if (!r.alive || r.ip == null) continue;
+    geoCache.set(r.proxy, {
+      ip: r.ip, country: r.country, country_code: r.country_code, city: r.city,
+      isp: r.isp, org: r.org, asn: r.asn, ip_type: r.ip_type,
+    });
+    changed = true;
+  }
+  if (changed) {
+    while (geoCache.size > GEO_CACHE_MAX) {
+      const first = geoCache.keys().next();
+      if (first.done) break;
+      geoCache.delete(first.value);
+    }
+    persistGeoCache();
+  }
+}
+
+function relevantGeoCache(list: string[]): (GeoFields & { proxy: string })[] {
+  const out: (GeoFields & { proxy: string })[] = [];
+  for (const p of list) {
+    const f = geoCache.get(p);
+    if (f) out.push({ proxy: p, ...f });
+  }
+  return out;
+}
+
 function readCheckSettings() {
   const judge = isJudgeMode();
   return {
@@ -642,6 +737,7 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
         precheck: s.precheck,
         precheckTimeoutMs: s.precheckTimeoutMs,
         judgeMode: s.judgeMode,
+        geoCache: relevantGeoCache(list),
       });
       out.push(...part);
     } catch (e) {
@@ -696,6 +792,7 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
     if (el) el.textContent = t("auto_running", { n: dispatchPool.length });
     const res = await runCheckList(dispatchPool.map((p) => p.raw));
     const alive = res.filter((r) => r.alive);
+    learnGeo(res);
     dispatchPool = alive.map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
     renderPool();
     updateCounts();
@@ -760,6 +857,7 @@ async function start() {
   running = true;
   stopFlag = false;
   results = [];
+  renderLimit = RENDER_STEP;
   render();
   updateCounts();
   ($("btn-start") as HTMLButtonElement).disabled = true;
@@ -779,6 +877,7 @@ async function start() {
   } catch {
     results = [];
   }
+  learnGeo(results);
   render();
   updateCounts();
 
@@ -930,6 +1029,45 @@ function setPolling(on: boolean) {
   }
 }
 
+// ---------- diagnostics + updates ----------
+
+type ErrItem = { t: string; msg: string };
+let errRing: ErrItem[] = [];
+let releaseUrl = "";
+
+function renderErrList(): void {
+  const el = document.getElementById("err-list");
+  if (!el) return;
+  el.textContent = errRing.length === 0
+    ? "—"
+    : errRing.slice(-10).reverse().map((e) => `${e.t} ${e.msg}`).join("\n");
+}
+
+function logErr(msg: string): void {
+  errRing.push({ t: new Date().toISOString(), msg: msg.slice(0, 300) });
+  if (errRing.length > 50) errRing.shift();
+  try {
+    localStorage.setItem("pp-errors", JSON.stringify(errRing.slice(-50)));
+  } catch { /* ignore */ }
+  renderErrList();
+}
+
+function loadErrRing(): void {
+  try {
+    const raw = localStorage.getItem("pp-errors");
+    if (!raw) return;
+    const arr = JSON.parse(raw) as ErrItem[];
+    if (Array.isArray(arr)) {
+      errRing = arr.filter((e) => e && typeof e.msg === "string").slice(-50);
+    }
+  } catch { /* ignore */ }
+}
+
+window.addEventListener("error", (e) => logErr("window: " + String(e.message || "error")));
+window.addEventListener("unhandledrejection", (e) =>
+  logErr("promise: " + String((e as PromiseRejectionEvent).reason ?? "rejection").slice(0, 300))
+);
+
 window.addEventListener("DOMContentLoaded", () => {
   // lang
   document.querySelectorAll(".lang button").forEach((b) => {
@@ -966,12 +1104,13 @@ window.addEventListener("DOMContentLoaded", () => {
 
   $("btn-start").addEventListener("click", () => void start());
   $("btn-stop").addEventListener("click", () => { stopFlag = true; lastStatus = { key: "st_stopping" }; $("status-line").textContent = t("st_stopping"); });
-  $("search").addEventListener("input", render);
+  $("search").addEventListener("input", () => { renderLimit = RENDER_STEP; render(); });
   document.querySelectorAll(".chip").forEach((c) => {
     c.addEventListener("click", () => {
       document.querySelectorAll(".chip").forEach((x) => x.classList.remove("active"));
       c.classList.add("active");
       filter = (c as HTMLElement).dataset.f as typeof filter;
+      renderLimit = RENDER_STEP;
       render();
     });
   });
@@ -1135,6 +1274,64 @@ window.addEventListener("DOMContentLoaded", () => {
     try {
       await invoke("hide_to_tray");
     } catch { /* ignore */ }
+  });
+
+  // diagnostics + updates
+  loadGeoCache();
+  loadErrRing();
+  renderErrList();
+  void invoke<string>("app_version")
+    .then((v) => { ($("app-ver") as HTMLElement).textContent = v; })
+    .catch(() => { /* ignore */ });
+  ($("btn-copy-diag") as HTMLButtonElement).addEventListener("click", async () => {
+    const data = {
+      app: ($("app-ver") as HTMLElement).textContent,
+      lang,
+      results: results.length,
+      alive: results.filter((r) => r.alive).length,
+      pool: dispatchPool.length,
+      judge: isJudgeMode() ? effectiveTestUrl() : null,
+      errors: errRing.slice(-20),
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+    } catch { /* ignore */ }
+  });
+  ($("btn-check-upd") as HTMLButtonElement).addEventListener("click", async () => {
+    const el = $("upd-status") as HTMLElement;
+    const openBtn = $("btn-open-rel") as HTMLButtonElement;
+    openBtn.classList.add("hidden");
+    el.textContent = "...";
+    try {
+      const cur = await invoke<string>("app_version");
+      const r = await fetch("https://api.github.com/nechel12/proxpulse/releases/latest");
+      if (r.status === 404) {
+        el.textContent = t("upd_none");
+        return;
+      }
+      if (!r.ok) throw new Error("http " + r.status);
+      const j = (await r.json()) as { tag_name?: string; html_url?: string };
+      const tag = String(j.tag_name || "");
+      releaseUrl = String(j.html_url || "");
+      if (tag && tag.replace(/^v/, "") !== cur) {
+        el.textContent = t("upd_found", { v: tag, cur });
+        if (releaseUrl) openBtn.classList.remove("hidden");
+      } else {
+        el.textContent = t("upd_latest", { v: cur });
+      }
+    } catch (e) {
+      logErr("update-check: " + String(e).slice(0, 200));
+      el.textContent = t("upd_fail");
+    }
+  });
+  ($("btn-open-rel") as HTMLButtonElement).addEventListener("click", async () => {
+    if (!releaseUrl) return;
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(releaseUrl);
+    } catch {
+      window.open(releaseUrl, "_blank");
+    }
   });
 
   // auto timers + webhook

@@ -87,12 +87,13 @@ struct JudgeBody {
     anonymity: Option<String>,
     ip_type: Option<String>,
     geo: Option<JudgeGeo>,
+    content_sha256: Option<String>,
 }
 
-fn try_parse_judge_body(res: &mut ProxyResult, body: &str) {
+fn try_parse_judge_body(res: &mut ProxyResult, body: &str) -> Option<String> {
     let jb: JudgeBody = match serde_json::from_str(body) {
         Ok(v) => v,
-        Err(_) => return,
+        Err(_) => return None,
     };
     if let Some(ip) = jb.ip {
         let t = ip.trim().to_string();
@@ -109,6 +110,48 @@ fn try_parse_judge_body(res: &mut ProxyResult, body: &str) {
         res.asn = g.asn.map(|n| n.to_string());
         res.org = g.aso;
     }
+    jb.content_sha256
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GeoCacheEntry {
+    proxy: String,
+    ip: Option<String>,
+    country: Option<String>,
+    country_code: Option<String>,
+    city: Option<String>,
+    isp: Option<String>,
+    org: Option<String>,
+    asn: Option<String>,
+    ip_type: Option<String>,
+}
+
+/// Base URL of a judge test URL: strips a trailing /judge|/generate_204.
+fn judge_base_url(test_url: &str) -> Option<String> {
+    let t = test_url.trim_end_matches('/');
+    for suffix in ["/judge", "/generate_204"] {
+        if let Some(base) = t.strip_suffix(suffix) {
+            if !base.is_empty() {
+                return Some(base.to_string());
+            }
+        }
+    }
+    None
+}
+
+async fn fetch_direct_judge_sha(base: &str, timeout: Duration) -> Option<String> {
+    let client = build_client(None, timeout).ok()?;
+    let r = client
+        .get(format!("{base}/judge"))
+        .send()
+        .await
+        .ok()?;
+    if !r.status().is_success() {
+        return None;
+    }
+    let body = r.text().await.ok()?;
+    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+    v.get("content_sha256")?.as_str().map(|s| s.to_string())
 }
 
 struct Baseline {
@@ -116,6 +159,7 @@ struct Baseline {
     example_len: Option<usize>,
     example_hash: Option<u64>,
     example_cert_fp: Option<String>,
+    judge_content_sha: Option<String>,
 }
 
 fn body_hash(s: &str) -> u64 {
@@ -1114,6 +1158,7 @@ async fn check_candidate(
     repeats: usize,
     flags: CheckFlags,
     baseline: Arc<Baseline>,
+    geo_cache: Arc<HashMap<String, GeoCacheEntry>>,
 ) -> ProxyResult {
     // stage 1: fast tcp precheck
     if flags.precheck {
@@ -1196,7 +1241,7 @@ async fn check_candidate(
     let success_rate = successes as f32 / attempts as f32;
 
     let mut res = ProxyResult {
-        proxy: raw,
+        proxy: raw.clone(),
         proto,
         alive: true,
         latency_ms: Some(avg),
@@ -1220,9 +1265,47 @@ async fn check_candidate(
 
     if let Some(b) = first_body {
         if flags.judge {
-            try_parse_judge_body(&mut res, &b);
+            let proxy_sha = try_parse_judge_body(&mut res, &b);
+            res.tamper = match (&baseline.judge_content_sha, &proxy_sha) {
+                (Some(a), Some(c)) => Some(if a == c {
+                    "ok".to_string()
+                } else {
+                    "modified".to_string()
+                }),
+                _ => None,
+            };
         } else {
             try_parse_test_body(&mut res, &test_url, &b);
+        }
+    }
+    // reuse previously seen geo when the exit IP is unchanged (saves a lookup)
+    if let Some(entry) = geo_cache.get(&raw) {
+        let same_ip = match (&res.ip, &entry.ip) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        };
+        if same_ip {
+            if res.country.is_none() {
+                res.country = entry.country.clone();
+            }
+            if res.country_code.is_none() {
+                res.country_code = entry.country_code.clone();
+            }
+            if res.city.is_none() {
+                res.city = entry.city.clone();
+            }
+            if res.isp.is_none() {
+                res.isp = entry.isp.clone();
+            }
+            if res.org.is_none() {
+                res.org = entry.org.clone();
+            }
+            if res.asn.is_none() {
+                res.asn = entry.asn.clone();
+            }
+            if res.ip_type.is_none() {
+                res.ip_type = entry.ip_type.clone();
+            }
         }
     }
     if flags.geo && !flags.judge {
@@ -1275,6 +1358,7 @@ async fn fetch_baseline() -> Baseline {
         example_len: len,
         example_hash: hash,
         example_cert_fp: cert,
+        judge_content_sha: None,
     }
 }
 
@@ -1293,6 +1377,7 @@ async fn check_proxies(
     precheck: Option<bool>,
     precheck_timeout_ms: Option<u64>,
     judge_mode: Option<bool>,
+    geo_cache: Option<Vec<GeoCacheEntry>>,
 ) -> Result<Vec<ProxyResult>, String> {
     let test_url = test_url.trim().to_string();
     if test_url.is_empty() {
@@ -1329,7 +1414,31 @@ async fn check_proxies(
         }
     }
 
-    let baseline = Arc::new(fetch_baseline().await);
+    let geo_map: Arc<HashMap<String, GeoCacheEntry>> = Arc::new(
+        geo_cache
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| (e.proxy.clone(), e))
+            .collect(),
+    );
+
+    // direct judge content hash (for tamper check in judge mode)
+    let judge_base = if flags.judge {
+        judge_base_url(&test_url)
+    } else {
+        None
+    };
+    let (mut baseline_inner, judge_sha) = tokio::join!(
+        fetch_baseline(),
+        async {
+            match &judge_base {
+                Some(b) => fetch_direct_judge_sha(b, timeout).await,
+                None => None,
+            }
+        }
+    );
+    baseline_inner.judge_content_sha = judge_sha;
+    let baseline = Arc::new(baseline_inner);
 
     let sem = Arc::new(Semaphore::new(conc));
     let mut set = tokio::task::JoinSet::new();
@@ -1343,6 +1452,7 @@ async fn check_proxies(
         let sem_c = sem.clone();
         let tu = test_url.clone();
         let base = baseline.clone();
+        let gc = geo_map.clone();
         set.spawn(async move {
             let _p = sem_c.acquire_owned().await.unwrap();
             if cands.len() == 1 {
@@ -1356,6 +1466,7 @@ async fn check_proxies(
                     repeats,
                     flags,
                     base,
+                    gc,
                 )
                 .await
             } else {
@@ -1369,6 +1480,7 @@ async fn check_proxies(
                     repeats,
                     flags,
                     base.clone(),
+                    gc.clone(),
                 )
                 .await;
                 if r1.alive {
@@ -1384,6 +1496,7 @@ async fn check_proxies(
                     repeats,
                     flags,
                     base,
+                    gc,
                 )
                 .await;
                 if r2.alive {
@@ -1947,6 +2060,11 @@ async fn send_webhook(
 }
 
 #[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
 fn hide_to_tray(app: tauri::AppHandle) -> Result<(), String> {
     app.get_webview_window("main")
         .ok_or_else(|| "no window".to_string())
@@ -1968,7 +2086,8 @@ pub fn run() {
             stop_local_proxy,
             local_proxy_status,
             send_webhook,
-            hide_to_tray
+            hide_to_tray,
+            app_version
         ])
         .setup(|app| {
             if let Some(icon) = app.default_window_icon().cloned() {

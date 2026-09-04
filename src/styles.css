@@ -243,6 +243,7 @@ tr.empty td { text-align: center; color: var(--mut); padding: 30px; font-family:
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.scroll-box { white-space: pre-wrap; word-break: break-all; max-height: 140px; overflow-y: auto; }
 #srv-pill.on { background: rgba(0,255,163,.12); color: var(--ok); border: 1px solid rgba(0,255,163,.4); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #26262e; border-radius: 6px; border: 2px solid #060608; }
