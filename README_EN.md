@@ -10,7 +10,9 @@ Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
 Dark theme with red accents, Russian and English UI.
 
 > Ready Windows build — under [Releases](https://github.com/nechel12/proxpulse/releases):
-> installer and portable `.exe`. The app updates itself.
+> installer (`-setup.exe` / `.msi`) and portable `.exe`. The installed version
+> updates itself (Info tab → check for updates), portable is updated
+> by downloading the new file manually.
 
 ## Quick start
 
