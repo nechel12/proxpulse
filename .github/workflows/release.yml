@@ -39,3 +39,13 @@ jobs:
           releaseBody: "See the assets below to download and install this version."
           releaseDraft: false
           prerelease: false
+
+      # Portable exe is not a Tauri bundle target — upload the raw binary.
+      # Runs after tauri-action created the release above.
+      - name: Upload portable exe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp src-tauri/target/release/proxpulse.exe "ProxPulse_${{ github.ref_name }}_portable.exe"
+          gh release upload "${{ github.ref_name }}" "ProxPulse_${{ github.ref_name }}_portable.exe" --clobber
