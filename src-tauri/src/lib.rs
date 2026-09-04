@@ -1028,8 +1028,18 @@ fn tls_client_config() -> Arc<rustls::ClientConfig> {
         .get_or_init(|| {
             let mut roots = rustls::RootCertStore::empty();
             roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            // NOTE: provider is pinned explicitly. Several rustls providers
+            // (ring + aws-lc-rs) are compiled into the dependency tree, so
+            // the feature-based auto-detect in ClientConfig::builder()
+            // panics — see CryptoProvider docs.
+            let provider = Arc::new(rustls::crypto::ring::default_provider());
             Arc::new(
-                rustls::ClientConfig::builder()
+                rustls::ClientConfig::builder_with_provider(provider)
+                    .with_protocol_versions(&[
+                        &rustls::version::TLS13,
+                        &rustls::version::TLS12,
+                    ])
+                    .expect("ring supports TLS 1.2/1.3")
                     .with_root_certificates(roots)
                     .with_no_client_auth(),
             )
@@ -2252,6 +2262,13 @@ mod tests {
 
     fn norm(raw: &str, def: &str) -> Option<(String, String)> {
         normalize_proxy(raw, def)
+    }
+
+    #[test]
+    fn tls_config_builds() {
+        // must not panic: with several rustls providers compiled in,
+        // auto-detect would blow up (see CryptoProvider docs)
+        let _ = tls_client_config();
     }
 
     #[test]
