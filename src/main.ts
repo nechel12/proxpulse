@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 type ProxyResult = {
   proxy: string;
@@ -714,14 +714,37 @@ function readCheckSettings() {
   };
 }
 
-async function runCheckList(list: string[], onProgress?: (done: number, total: number) => void): Promise<ProxyResult[]> {
+async function runCheckList(list: string[], onProgress?: (done: number, total: number) => void, onLive?: (live: ProxyResult[]) => void): Promise<ProxyResult[]> {
   const s = readCheckSettings();
   if (!/^https?:\/\//i.test(s.testUrl)) throw new Error("badurl");
   const out: ProxyResult[] = [];
+  const seen = new Set<string>();
+  const pushLive = (r: ProxyResult) => {
+    if (r.error === "cancelled" || seen.has(r.proxy)) return;
+    seen.add(r.proxy);
+    out.push(r);
+  };
+  let lastPaint = 0;
+  const paint = (done: number, total: number) => {
+    const now = performance.now();
+    if (now - lastPaint < 300 && done < total) return;
+    lastPaint = now;
+    out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
+    onLive?.([...out]);
+    render();
+    updateCounts();
+    setProgress(done, total);
+  };
   const CHUNK = 120;
   for (let i = 0; i < list.length; i += CHUNK) {
     if (stopFlag) break;
     const chunk = list.slice(i, i + CHUNK);
+    const baseCount = out.length;
+    const channel = new Channel<ProxyResult>();
+    channel.onmessage = (r) => {
+      pushLive(r);
+      paint(i + out.length - baseCount, list.length);
+    };
     try {
       const part = await invoke<ProxyResult[]>("check_proxies", {
         proxies: chunk,
@@ -738,11 +761,12 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
         precheckTimeoutMs: s.precheckTimeoutMs,
         judgeMode: s.judgeMode,
         geoCache: relevantGeoCache(list),
+        onResult: channel,
       });
-      out.push(...part);
+      for (const r of part) pushLive(r);
     } catch (e) {
       const msg = String(e);
-      for (const p of chunk) out.push(deadStub(p, msg));
+      for (const p of chunk) pushLive(deadStub(p, msg));
     }
     onProgress?.(Math.min(list.length, i + CHUNK), list.length);
   }
@@ -873,6 +897,8 @@ async function start() {
       render();
       updateCounts();
       setProgress(done, total);
+    }, (live) => {
+      results = live;
     });
   } catch {
     results = [];
@@ -1103,7 +1129,12 @@ window.addEventListener("DOMContentLoaded", () => {
   upd();
 
   $("btn-start").addEventListener("click", () => void start());
-  $("btn-stop").addEventListener("click", () => { stopFlag = true; lastStatus = { key: "st_stopping" }; $("status-line").textContent = t("st_stopping"); });
+  $("btn-stop").addEventListener("click", () => {
+    stopFlag = true;
+    lastStatus = { key: "st_stopping" };
+    $("status-line").textContent = t("st_stopping");
+    void invoke("cancel_check").catch(() => { /* backend may already be idle */ });
+  });
   $("search").addEventListener("input", () => { renderLimit = RENDER_STEP; render(); });
   document.querySelectorAll(".chip").forEach((c) => {
     c.addEventListener("click", () => {

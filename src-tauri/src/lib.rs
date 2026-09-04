@@ -11,6 +11,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tauri::{
     State,
+    ipc::Channel,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
@@ -166,6 +167,11 @@ fn body_hash(s: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     s.hash(&mut h);
     h.finish()
+}
+
+#[derive(Debug, Default)]
+struct CheckState {
+    cancel: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Copy)]
@@ -1148,6 +1154,12 @@ fn dead_result(raw: String, proto: String, attempts: u32, err: String) -> ProxyR
     }
 }
 
+#[tauri::command]
+fn cancel_check(state: State<'_, CheckState>) -> Result<(), String> {
+    state.cancel.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn check_candidate(
     raw: String,
@@ -1159,6 +1171,7 @@ async fn check_candidate(
     flags: CheckFlags,
     baseline: Arc<Baseline>,
     geo_cache: Arc<HashMap<String, GeoCacheEntry>>,
+    cancel: Arc<AtomicBool>,
 ) -> ProxyResult {
     // stage 1: fast tcp precheck
     if flags.precheck {
@@ -1200,6 +1213,10 @@ async fn check_candidate(
     let mut last_err: Option<String> = None;
 
     for _ in 0..repeats {
+        if cancel.load(Ordering::Relaxed) {
+            last_err = Some("cancelled".to_string());
+            break;
+        }
         let start = Instant::now();
         match client.get(&req_url).send().await {
             Ok(r) => {
@@ -1309,15 +1326,27 @@ async fn check_candidate(
         }
     }
     if flags.geo && !flags.judge {
+        if cancel.load(Ordering::Relaxed) {
+            return res;
+        }
         geo_lookup(&client, &mut res).await;
     }
     if flags.anon && !flags.judge {
+        if cancel.load(Ordering::Relaxed) {
+            return res;
+        }
         res.anonymity = detect_anonymity(&client, baseline.direct_ip.as_deref()).await;
     }
     if flags.tamper && !flags.judge {
+        if cancel.load(Ordering::Relaxed) {
+            return res;
+        }
         res.tamper = detect_tamper(&client, baseline.example_len, baseline.example_hash).await;
     }
     if flags.tls && !flags.judge {
+        if cancel.load(Ordering::Relaxed) {
+            return res;
+        }
         let (v, info) =
             tls_via_proxy(&url, timeout, baseline.example_cert_fp.as_deref()).await;
         res.tls = v;
@@ -1378,6 +1407,8 @@ async fn check_proxies(
     precheck_timeout_ms: Option<u64>,
     judge_mode: Option<bool>,
     geo_cache: Option<Vec<GeoCacheEntry>>,
+    state: State<'_, CheckState>,
+    on_result: Channel<ProxyResult>,
 ) -> Result<Vec<ProxyResult>, String> {
     let test_url = test_url.trim().to_string();
     if test_url.is_empty() {
@@ -1386,6 +1417,8 @@ async fn check_proxies(
     if !(test_url.starts_with("http://") || test_url.starts_with("https://")) {
         return Err("test url must start with http(s)://".to_string());
     }
+    state.cancel.store(false, Ordering::SeqCst);
+    let cancel = state.cancel.clone();
 
     let timeout = Duration::from_millis(timeout_ms.clamp(500, 60_000));
     let conc = concurrency.clamp(1, 500);
@@ -1453,6 +1486,7 @@ async fn check_proxies(
         let tu = test_url.clone();
         let base = baseline.clone();
         let gc = geo_map.clone();
+        let cl = cancel.clone();
         set.spawn(async move {
             let _p = sem_c.acquire_owned().await.unwrap();
             if cands.len() == 1 {
@@ -1467,6 +1501,7 @@ async fn check_proxies(
                     flags,
                     base,
                     gc,
+                    cl,
                 )
                 .await
             } else {
@@ -1481,9 +1516,13 @@ async fn check_proxies(
                     flags,
                     base.clone(),
                     gc.clone(),
+                    cl.clone(),
                 )
                 .await;
                 if r1.alive {
+                    return r1;
+                }
+                if cl.load(Ordering::Relaxed) {
                     return r1;
                 }
                 let (u2, p2) = &cands[1];
@@ -1497,6 +1536,7 @@ async fn check_proxies(
                     flags,
                     base,
                     gc,
+                    cl,
                 )
                 .await;
                 if r2.alive {
@@ -1516,13 +1556,19 @@ async fn check_proxies(
     let mut out = Vec::new();
     while let Some(r) = set.join_next().await {
         match r {
-            Ok(v) => out.push(v),
+            Ok(v) => {
+                let _ = on_result.send(v.clone());
+                out.push(v);
+            }
             Err(e) => out.push(dead_result(
                 "?".to_string(),
                 "?".to_string(),
                 0,
                 short_error(&e.to_string()),
             )),
+        }
+        if cancel.load(Ordering::Relaxed) {
+            break;
         }
     }
     out.sort_by(|a, b| {
@@ -2077,8 +2123,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(DispatchState::default())
+        .manage(CheckState::default())
         .invoke_handler(tauri::generate_handler![
             check_proxies,
+            cancel_check,
             check_direct,
             write_text_file,
             set_dispatch_pool,
