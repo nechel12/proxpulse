@@ -700,9 +700,9 @@ function readCheckSettings() {
   const judge = isJudgeMode();
   return {
     testUrl: effectiveTestUrl(),
-    timeoutMs: Math.max(1000, Math.min(30000, Number(($("timeout") as HTMLInputElement).value) || 8000)),
+    timeoutMs: Math.max(1000, Math.min(30000, Number(($("timeout") as HTMLInputElement).value) || 5000)),
     concurrency: Math.max(1, Math.min(500, Number(($("concurrency") as HTMLInputElement).value) || 50)),
-    repeats: Math.max(1, Math.min(5, Number(($("repeats") as HTMLInputElement).value) || 3)),
+    repeats: Math.max(1, Math.min(5, Number(($("repeats") as HTMLInputElement).value) || 1)),
     defaultProto: ($("default-proto") as HTMLSelectElement).value,
     withGeo: judge ? false : ($("chk-geo") as HTMLInputElement).checked,
     withAnonymity: judge ? false : ($("chk-anon") as HTMLInputElement).checked,

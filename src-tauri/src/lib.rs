@@ -546,7 +546,18 @@ fn host_port_of_url(url: &str) -> Option<(String, u16)> {
 // ================= http helpers =================
 
 fn short_error(e: &str) -> String {
-    let low = e.to_lowercase();
+    // reqwest format: "error sending request for url (URL): cause".
+    // The URL (often with ?direct_ip=...) only hides the real cause — drop it.
+    let mut s = e.replace('\n', " ");
+    if s.starts_with("error sending request for url (") {
+        if let Some(pos) = s.find("): ") {
+            let after = s[pos + 3..].trim();
+            if !after.is_empty() {
+                s = after.to_string();
+            }
+        }
+    }
+    let low = s.to_lowercase();
     if low.contains("timed out")
         || low.contains("timeout")
         || low.contains("deadline")
@@ -563,6 +574,8 @@ fn short_error(e: &str) -> String {
     if low.contains("failed to lookup")
         || low.contains("dns")
         || low.contains("could not resolve")
+        || low.contains("no route to host")
+        || low.contains("network unreachable")
     {
         return "dns error".to_string();
     }
@@ -570,15 +583,34 @@ fn short_error(e: &str) -> String {
         || low.contains("connection reset")
         || low.contains("broken pipe")
         || low.contains("unexpected eof")
+        || low.contains("connection closed before message completed")
     {
         return "connection reset".to_string();
     }
     if low.contains("rate limited") || low.contains("too many requests") {
         return "rate limited".to_string();
     }
-    let mut s = e.replace('\n', " ");
-    if s.len() > 120 {
-        s.truncate(120);
+    if low.contains("socks") {
+        return "socks error".to_string();
+    }
+    if low.contains("proxy") {
+        return "proxy error".to_string();
+    }
+    if low.contains("certificate")
+        || low.contains("tls")
+        || low.contains("ssl")
+        || low.contains("handshake failure")
+    {
+        return "tls error".to_string();
+    }
+    if low.contains("redirect") {
+        return "redirect error".to_string();
+    }
+    if low.contains("incomplete message") || low.contains("incompletemessage") {
+        return "incomplete response".to_string();
+    }
+    if s.len() > 160 {
+        s.truncate(160);
     }
     s.trim().to_string()
 }
@@ -1482,7 +1514,7 @@ async fn check_proxies(
 
     let timeout = Duration::from_millis(timeout_ms.clamp(500, 60_000));
     let conc = concurrency.clamp(1, 500);
-    let repeats = repeats.unwrap_or(3).clamp(1, 5);
+    let repeats = repeats.unwrap_or(1).clamp(1, 5);
     let flags = CheckFlags {
         geo: with_geo.unwrap_or(true),
         anon: with_anonymity.unwrap_or(true),
@@ -2314,8 +2346,7 @@ mod tests {
     }
 
     #[test]
-    fn dual_mode_expands() {
-        let c = normalize_candidates("1.2.3.4:8080", "http+socks5");
+    fn dual_mode_expands() {        let c = normalize_candidates("1.2.3.4:8080", "http+socks5");
         assert_eq!(c.len(), 2);
         assert!(c[0].0.starts_with("http://"));
         assert!(c[1].0.starts_with("socks5://"));
@@ -2376,5 +2407,27 @@ mod tests {
         let b = pick_order(3, "round-robin", &pool, &rr);
         assert_eq!(a, vec![0, 1, 2]);
         assert_eq!(b, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn short_error_mapping() {
+        // reqwest URL prefix is stripped, the cause is mapped
+        assert_eq!(
+            short_error("error sending request for url (https://proxycheck.lmtunnel.com/judge?direct_ip=1.2.3.4): operation timed out"),
+            "timeout"
+        );
+        assert_eq!(
+            short_error("error sending request for url (https://example.com/): SOCKS5 connection refused"),
+            "connection refused"
+        );
+        assert_eq!(
+            short_error("error sending request for url (https://example.com/): socks connect failed"),
+            "socks error"
+        );
+        assert_eq!(
+            short_error("error sending request for url (https://example.com/)"),
+            "error sending request for url (https://example.com/)"
+        );
+        assert!(short_error(&"x".repeat(500)).len() <= 160);
     }
 }

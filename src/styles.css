@@ -180,7 +180,7 @@ body {
 .menu button:hover { background: var(--red-dim); }
 #search { flex: 1; font-family: var(--mono); }
 .table-wrap { flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 9px; background: #060608; }
-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12.5px; }
 thead th {
   position: sticky; top: 0; background: #0e0e13; color: var(--mut);
   font-family: var(--mono); font-weight: 400; font-size: 11px; letter-spacing: 1px;
@@ -195,7 +195,7 @@ tr.empty td { text-align: center; color: var(--mut); padding: 30px; font-family:
 .ping-fast { color: var(--ok); } .ping-mid { color: var(--warn); } .ping-slow { color: var(--bad); }
 .anon-elite { color: var(--ok); } .anon-anon { color: var(--warn); } .anon-trans { color: var(--bad); }
 .cell-geo { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cell-err { color: var(--mut); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-err { color: var(--mut); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .foot {
   display: flex; justify-content: flex-end; padding: 8px 18px;
