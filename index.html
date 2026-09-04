@@ -219,6 +219,7 @@
             <button id="disp-auto-on" class="sqchk" aria-pressed="false"><span class="sq"></span><span data-i18n="auto_on">Вкл</span></button>
             <label class="fld" style="flex:1"><span data-i18n="auto_every">Каждые, мин</span><input id="disp-auto-min" type="number" value="30" min="1" max="1440" /></label>
           </div>
+          <label class="fld" style="margin-top:8px"><span data-i18n="max_ping">Макс. пинг, мс</span><input id="disp-max-ping" type="number" value="0" min="0" data-i18n-ph="max_ping_ph" placeholder="0 — без лимита" /></label>
           <div id="disp-auto-status" class="status-line">—</div>
         </div>
       </section>
@@ -231,8 +232,7 @@
         <div class="toolbar">
           <button id="btn-pool-sync" class="btn ghost" data-i18n="pool_sync">Синхронизировать</button>
           <button id="btn-pool-clear" class="btn ghost" data-i18n="btn_clear">Очистить</button>
-        </div>
-        <div class="hint" style="margin-bottom:8px" data-i18n="pool_hint">Пул пополняется автоматически после каждой проверки.</div>
+        </div>        <div class="hint" style="margin-bottom:8px" data-i18n="pool_hint">Пул пополняется автоматически после каждой проверки.</div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -260,12 +260,17 @@
             <button id="auto-on" class="sqchk" aria-pressed="false"><span class="sq"></span><span data-i18n="auto_on">Вкл</span></button>
             <label class="fld" style="flex:1"><span data-i18n="auto_every">Каждые, мин</span><input id="auto-min" type="number" value="30" min="1" max="1440" /></label>
           </div>
+          <label class="fld" style="margin-top:8px"><span data-i18n="max_ping">Макс. пинг, мс</span><input id="auto-max-ping" type="number" value="0" min="0" data-i18n-ph="max_ping_ph" placeholder="0 — без лимита" /></label>
           <button id="btn-auto-now" class="btn ghost" data-i18n="auto_now">Проверить сейчас</button>
           <div id="auto-status" class="status-line">—</div>
           <div class="panel-head" style="margin-top:14px">
             <span class="ph-title" data-i18n="webhook_title">▸ Вебхук</span>
           </div>
-          <label class="fld"><span data-i18n="webhook_url">URL вебхука</span><input id="webhook-url" placeholder="https://..." /></label>
+          <label class="fld"><span data-i18n="webhook_url">URL вебхука</span></label>
+          <div id="webhook-list"></div>
+          <div class="row2">
+            <button id="btn-webhook-add" class="btn ghost" data-i18n="webhook_add">+ Добавить</button>
+          </div>
           <div class="grid2">
             <label class="fld"><span data-i18n="webhook_format">Формат</span>
               <select id="webhook-format">
@@ -285,6 +290,10 @@
         <div class="panel-head">
           <span class="ph-title" data-i18n="pool_title">▸ Пул живых</span>
           <span id="auto-pool-count" class="count">0</span>
+        </div>
+        <div class="toolbar">
+          <button id="btn-auto-pool-sync" class="btn ghost" data-i18n="pool_sync">Синхронизировать</button>
+          <button id="btn-auto-pool-clear" class="btn ghost" data-i18n="btn_clear">Очистить</button>
         </div>
         <div class="table-wrap">
           <table>

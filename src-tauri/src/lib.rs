@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use tauri::{
     State,
     ipc::Channel,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
@@ -1761,8 +1761,124 @@ impl Default for DispatchState {
     }
 }
 
-fn pick_order(len: usize, mode: &str, pool: &[Upstream], rr: &AtomicUsize) -> Vec<usize> {
-    if len == 0 {
+// ================= tray status =================
+
+#[derive(Debug, Default, Clone)]
+struct TrayInfo {
+    disp_next: Option<u64>,
+    auto_next: Option<u64>,
+    webhook_on: bool,
+    webhook_url: String,
+}
+
+#[derive(Default)]
+struct TrayState {
+    info: Mutex<TrayInfo>,
+    last_menu: Mutex<String>,
+}
+
+fn fmt_countdown(s: Option<u64>) -> String {
+    match s {
+        None => "off".to_string(),
+        Some(x) if x >= 3600 => format!("{}h {:02}m", x / 3600, (x % 3600) / 60),
+        Some(x) if x >= 60 => format!("{}m", x / 60),
+        Some(_) => "soon".to_string(),
+    }
+}
+
+fn trunc_url(u: &str) -> String {
+    let chars: Vec<char> = u.chars().collect();
+    if chars.len() > 42 {
+        chars[..39].iter().collect::<String>() + "…"
+    } else {
+        u.to_string()
+    }
+}
+
+async fn refresh_tray_menu(app: &tauri::AppHandle) {
+    let disp: State<DispatchState> = app.state();
+    let tray: State<TrayState> = app.state();
+    let running = disp.inner.running.load(Ordering::SeqCst);
+    let port = *disp.inner.port.lock().await;
+    let info = tray.info.lock().await.clone();
+    let dispatch_txt = if running {
+        format!("Dispatcher: ON :{port}")
+    } else {
+        "Dispatcher: OFF".to_string()
+    };
+    let sig = format!(
+        "{dispatch_txt}|{:?}|{:?}|{}|{}",
+        info.disp_next, info.auto_next, info.webhook_on, info.webhook_url
+    );
+    {
+        let last = tray.last_menu.lock().await;
+        if *last == sig {
+            return;
+        }
+    }
+    let build = || -> tauri::Result<()> {
+        let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+        let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
+        let dispatch = MenuItem::with_id(app, "dispatch_toggle", &dispatch_txt, true, None::<&str>)?;
+        let next_disp = MenuItem::with_id(
+            app,
+            "next_disp",
+            format!("Next dispatch: {}", fmt_countdown(info.disp_next)),
+            false,
+            None::<&str>,
+        )?;
+        let next_auto = MenuItem::with_id(
+            app,
+            "next_auto",
+            format!("Next auto: {}", fmt_countdown(info.auto_next)),
+            false,
+            None::<&str>,
+        )?;
+        let webhook_txt =
+            if info.webhook_on && !info.webhook_url.trim().is_empty() {
+                format!("Webhook: on {}", trunc_url(info.webhook_url.trim()))
+            } else {
+                "Webhook: off".to_string()
+            };
+        let webhook =
+            MenuItem::with_id(app, "webhook_info", &webhook_txt, false, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+        let sep1 = PredefinedMenuItem::separator(app)?;
+        let sep2 = PredefinedMenuItem::separator(app)?;
+        let menu = Menu::with_items(
+            app,
+            &[&show, &hide, &sep1, &dispatch, &next_disp, &next_auto, &webhook, &sep2, &quit],
+        )?;
+        if let Some(tray_icon) = app.tray_by_id("main") {
+            tray_icon.set_menu(Some(menu))?;
+        }
+        Ok(())
+    };
+    if build().is_ok() {
+        *tray.last_menu.lock().await = sig;
+    }
+}
+
+#[tauri::command]
+async fn update_tray_status(
+    app: tauri::AppHandle,
+    tray: State<'_, TrayState>,
+    disp_next: Option<u64>,
+    auto_next: Option<u64>,
+    webhook_on: bool,
+    webhook_url: String,
+) -> Result<(), String> {
+    *tray.info.lock().await = TrayInfo {
+        disp_next,
+        auto_next,
+        webhook_on,
+        webhook_url,
+    };
+    refresh_tray_menu(&app).await;
+    Ok(())
+}
+
+fn pick_order(len: usize, mode: &str, pool: &[Upstream], rr: &AtomicUsize) -> Vec<usize> {    if len == 0 {
         return vec![];
     }
     if mode == "fastest" {
@@ -2072,6 +2188,57 @@ async fn set_dispatch_pool(
 }
 
 #[tauri::command]
+async fn start_proxy_inner(
+    inner: &Arc<DispatchInner>,
+    req_port: u16,
+    mode: String,
+    listener: String,
+) -> Result<String, String> {
+    if let Some(h) = inner.handle.lock().await.take() {
+        h.abort();
+    }
+    {
+        let pool = inner.pool.lock().await;
+        if pool.is_empty() {
+            return Err("pool is empty".to_string());
+        }
+    }
+    // fallback: requested port, then +1, +2, ... while busy
+    let mut port = req_port;
+    let tcp = loop {
+        match TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(l) => break l,
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                match port.checked_add(1) {
+                    Some(p) if p <= req_port.saturating_add(100) => {
+                        port = p;
+                        continue;
+                    }
+                    _ => return Err(format!("no free port near 127.0.0.1:{req_port}")),
+                }
+            }
+            Err(e) => return Err(format!("bind 127.0.0.1:{req_port}: {e}")),
+        }
+    };
+    *inner.port.lock().await = port;
+    *inner.mode.lock().await = mode.clone();
+    *inner.listener.lock().await = listener.clone();
+    let listener_desc = match listener.as_str() {
+        "http" => "http",
+        "socks5" => "socks5",
+        _ => "http+socks5",
+    }
+    .to_string();
+    inner.running.store(true, Ordering::SeqCst);
+    let inner_c = inner.clone();
+    let h = tokio::spawn(async move {
+        run_server(tcp, inner_c).await;
+    });
+    *inner.handle.lock().await = Some(h);
+    Ok(format!("127.0.0.1:{port} ({mode}, {listener_desc})"))
+}
+
+#[tauri::command]
 async fn start_local_proxy(
     port: u16,
     mode: String,
@@ -2081,43 +2248,16 @@ async fn start_local_proxy(
     if port == 0 {
         return Err("bad port".to_string());
     }
-    if let Some(h) = state.inner.handle.lock().await.take() {
-        h.abort();
-    }
-    {
-        let pool = state.inner.pool.lock().await;
-        if pool.is_empty() {
-            return Err("pool is empty".to_string());
-        }
-    }
     let listener = listener.unwrap_or_else(|| "both".to_string());
     let listener = match listener.as_str() {
         "http" | "socks5" => listener,
         _ => "both".to_string(),
     };
-    let listener_desc = match listener.as_str() {
-        "http" => "http",
-        "socks5" => "socks5",
-        _ => "http+socks5",
-    }
-    .to_string();
-    let tcp = TcpListener::bind(("127.0.0.1", port))
-        .await
-        .map_err(|e| format!("bind 127.0.0.1:{port}: {e}"))?;
-    *state.inner.port.lock().await = port;
     let mode = match mode.as_str() {
         "fastest" | "failover" => mode,
         _ => "round-robin".to_string(),
     };
-    *state.inner.mode.lock().await = mode.clone();
-    *state.inner.listener.lock().await = listener;
-    state.inner.running.store(true, Ordering::SeqCst);
-    let inner = state.inner.clone();
-    let h = tokio::spawn(async move {
-        run_server(tcp, inner).await;
-    });
-    *state.inner.handle.lock().await = Some(h);
-    Ok(format!("127.0.0.1:{port} ({mode}, {listener_desc})"))
+    start_proxy_inner(&state.inner, port, mode, listener).await
 }
 
 #[tauri::command]
@@ -2223,6 +2363,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(DispatchState::default())
         .manage(CheckState::default())
+        .manage(TrayState::default())
         .invoke_handler(tauri::generate_handler![
             check_proxies,
             cancel_check,
@@ -2234,15 +2375,29 @@ pub fn run() {
             local_proxy_status,
             send_webhook,
             hide_to_tray,
-            app_version
+            app_version,
+            update_tray_status
         ])
         .setup(|app| {
             if let Some(icon) = app.default_window_icon().cloned() {
                 let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
                 let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
+                let dispatch =
+                    MenuItem::with_id(app, "dispatch_toggle", "Dispatcher: OFF", true, None::<&str>)?;
+                let next_disp =
+                    MenuItem::with_id(app, "next_disp", "Next dispatch: off", false, None::<&str>)?;
+                let next_auto =
+                    MenuItem::with_id(app, "next_auto", "Next auto: off", false, None::<&str>)?;
+                let webhook =
+                    MenuItem::with_id(app, "webhook_info", "Webhook: off", false, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
-                TrayIconBuilder::new()
+                let sep1 = PredefinedMenuItem::separator(app)?;
+                let sep2 = PredefinedMenuItem::separator(app)?;
+                let menu = Menu::with_items(
+                    app,
+                    &[&show, &hide, &sep1, &dispatch, &next_disp, &next_auto, &webhook, &sep2, &quit],
+                )?;
+                TrayIconBuilder::with_id("main")
                     .icon(icon)
                     .tooltip("ProxPulse")
                     .menu(&menu)
@@ -2258,6 +2413,32 @@ pub fn run() {
                             if let Some(w) = app.get_webview_window("main") {
                                 let _ = w.hide();
                             }
+                        }
+                        "dispatch_toggle" => {
+                            let ah = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let disp: State<DispatchState> = ah.state();
+                                if disp.inner.running.load(Ordering::SeqCst) {
+                                    if let Some(h) = disp.inner.handle.lock().await.take() {
+                                        h.abort();
+                                    }
+                                    disp.inner.running.store(false, Ordering::SeqCst);
+                                } else {
+                                    let port = *disp.inner.port.lock().await;
+                                    let mode = disp.inner.mode.lock().await.clone();
+                                    let listener =
+                                        disp.inner.listener.lock().await.clone();
+                                    if start_proxy_inner(&disp.inner, port, mode, listener)
+                                        .await
+                                        .is_err()
+                                    {
+                                        *disp.inner.last_error.lock().await = Some(
+                                            "toggle failed: pool empty or ports busy".to_string(),
+                                        );
+                                    }
+                                }
+                                refresh_tray_menu(&ah).await;
+                            });
                         }
                         "quit" => app.exit(0),
                         _ => {}

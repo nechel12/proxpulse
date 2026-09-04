@@ -147,7 +147,14 @@ body {
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .checks { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; align-items: center; }
 .checks.end { align-items: flex-end; }
-.checks.end { align-items: flex-end; }
+.hrow { display: flex; gap: 6px; margin-bottom: 6px; }
+.hrow input {
+  flex: 1; min-width: 0;
+  background: #060608; border: 1px solid var(--line); color: var(--txt);
+  border-radius: 8px; padding: 8px 10px; outline: none; font-size: 13px;
+  font-family: var(--mono);
+}
+.hrow input:focus { border-color: var(--red); }
 .chk { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #c9c9d2; cursor: pointer; }
 .chk input { accent-color: var(--red); width: 14px; height: 14px; cursor: pointer; }
 .hidden { display: none !important; }

@@ -83,10 +83,12 @@ const I18N: Record<Lang, Record<string, string>> = {
     srv_listener: "Протокол сервера", lis_both: "HTTP + SOCKS5",
     lis_http: "Только HTTP", lis_socks: "Только SOCKS5",
     disp_auto_title: "▸ Автопроверка", auto_on: "Вкл", auto_every: "Каждые, мин",
+    max_ping: "Макс. пинг, мс", max_ping_ph: "0 — без лимита",
     auto_title: "▸ Авторежим",
     auto_hint: "Общий рабочий пул перепроверяется по таймеру, мёртвые вылетают, живые уходят на вебхук.",
     auto_now: "Проверить сейчас",
     webhook_title: "▸ Вебхук", webhook_url: "URL вебхука", webhook_format: "Формат",
+    webhook_add: "+ Добавить",
     webhook_send: "Отправить сейчас",
     webhook_hint: "После каждой автопроверки список уходит POST-запросом. Пусто — отправки нет.",
     info_title: "▸ О приложении",
@@ -157,10 +159,12 @@ const I18N: Record<Lang, Record<string, string>> = {
     srv_listener: "Server protocol", lis_both: "HTTP + SOCKS5",
     lis_http: "HTTP only", lis_socks: "SOCKS5 only",
     disp_auto_title: "▸ Auto-check", auto_on: "On", auto_every: "Every, min",
+    max_ping: "Max ping, ms", max_ping_ph: "0 — no limit",
     auto_title: "▸ Auto mode",
     auto_hint: "Shared alive pool is re-checked on a timer; dead drop out, alive go to the webhook.",
     auto_now: "Check now",
     webhook_title: "▸ Webhook", webhook_url: "Webhook URL", webhook_format: "Format",
+    webhook_add: "+ Add",
     webhook_send: "Send now",
     webhook_hint: "After each auto-check the list is POSTed. Empty — no send.",
     info_title: "▸ About",
@@ -620,10 +624,12 @@ function renderPool() {
   renderPoolInto("auto-pool-body");
 }
 
-/** merge: keep existing entries, add new ones, refresh latency */
+/** merge: keep existing entries, add new ones, refresh latency.
+ *  Over-limit pings (see maxPingMs) never enter the pool. */
 function mergePool(items: { raw: string; latency: number | null }[]) {
   const idx = new Map(dispatchPool.map((p, i) => [p.raw, i]));
   for (const it of items) {
+    if (!passPing(it.latency)) continue;
     const at = idx.get(it.raw);
     if (at == null) {
       idx.set(it.raw, dispatchPool.length);
@@ -631,6 +637,28 @@ function mergePool(items: { raw: string; latency: number | null }[]) {
     } else if (it.latency != null) {
       dispatchPool[at].latency = it.latency;
     }
+  }
+}
+
+let maxPingMs = 0;
+
+function passPing(latency: number | null): boolean {
+  return !(maxPingMs > 0 && latency != null && latency > maxPingMs);
+}
+
+function loadMaxPing(): void {
+  try {
+    const v = Math.floor(Number(localStorage.getItem("pp-maxping")) || 0);
+    maxPingMs = Number.isFinite(v) && v > 0 ? v : 0;
+  } catch {
+    maxPingMs = 0;
+  }
+}
+
+function syncMaxPingInputs(): void {
+  for (const id of ["disp-max-ping", "auto-max-ping"]) {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (el) el.value = String(maxPingMs);
   }
 }
 
@@ -815,7 +843,7 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
   try {
     if (el) el.textContent = t("auto_running", { n: dispatchPool.length });
     const res = await runCheckList(dispatchPool.map((p) => p.raw));
-    const alive = res.filter((r) => r.alive);
+    const alive = res.filter((r) => r.alive && passPing(r.latency_ms));
     learnGeo(res);
     dispatchPool = alive.map((r) => ({ raw: r.proxy, latency: r.latency_ms }));
     renderPool();
@@ -828,23 +856,108 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
   }
 }
 
+let dispSched = { ms: 0, next: 0 };
+let autoSched = { ms: 0, next: 0 };
+
 function armTimers() {
   window.clearInterval(dispAutoTimer);
   window.clearInterval(autoTimer);
+  dispSched = { ms: 0, next: 0 };
+  autoSched = { ms: 0, next: 0 };
   if (dispAutoOn) {
     const mins = Math.max(1, Math.min(1440, Number(($("disp-auto-min") as HTMLInputElement).value) || 30));
-    dispAutoTimer = window.setInterval(() => void autoCycle("disp-auto-status", false), mins * 60_000);
+    const ms = mins * 60_000;
+    dispSched = { ms, next: Date.now() + ms };
+    dispAutoTimer = window.setInterval(() => {
+      dispSched.next = Date.now() + dispSched.ms;
+      void autoCycle("disp-auto-status", false);
+    }, ms);
   }
   if (autoOn) {
     const mins = Math.max(1, Math.min(1440, Number(($("auto-min") as HTMLInputElement).value) || 30));
-    autoTimer = window.setInterval(() => void autoCycle("auto-status", true), mins * 60_000);
+    const ms = mins * 60_000;
+    autoSched = { ms, next: Date.now() + ms };
+    autoTimer = window.setInterval(() => {
+      autoSched.next = Date.now() + autoSched.ms;
+      void autoCycle("auto-status", true);
+    }, ms);
   }
+  void updateTray();
+}
+
+async function updateTray(): Promise<void> {
+  try {
+    const now = Date.now();
+    const d = dispAutoOn && dispSched.next > now ? Math.round((dispSched.next - now) / 1000) : null;
+    const a = autoOn && autoSched.next > now ? Math.round((autoSched.next - now) / 1000) : null;
+    const urls = getWebhookUrls();
+    await invoke("update_tray_status", {
+      dispNext: d,
+      autoNext: a,
+      webhookOn: autoOn && urls.length > 0,
+      webhookUrl: urls[0] ?? "",
+    });
+  } catch { /* tray may be unavailable */ }
+}
+
+let webhookUrls: string[] = [""];
+
+function loadWebhooks(): void {
+  try {
+    const raw = localStorage.getItem("pp-webhooks");
+    const arr = raw ? JSON.parse(raw) : null;
+    webhookUrls = Array.isArray(arr)
+      ? arr.filter((s): s is string => typeof s === "string").slice(0, 10)
+      : [""];
+  } catch {
+    webhookUrls = [""];
+  }
+  if (webhookUrls.length === 0) webhookUrls = [""];
+}
+
+function saveWebhooks(): void {
+  try {
+    localStorage.setItem("pp-webhooks", JSON.stringify(webhookUrls.slice(0, 10)));
+  } catch { /* ignore */ }
+}
+
+function renderWebhookList(): void {
+  const box = $("webhook-list");
+  box.innerHTML = "";
+  webhookUrls.forEach((u, i) => {
+    const row = document.createElement("div");
+    row.className = "hrow";
+    const inp = document.createElement("input");
+    inp.value = u;
+    inp.placeholder = "https://...";
+    inp.spellcheck = false;
+    inp.addEventListener("input", () => {
+      webhookUrls[i] = inp.value;
+      saveWebhooks();
+    });
+    const del = document.createElement("button");
+    del.className = "btn ghost";
+    del.textContent = "✕";
+    del.addEventListener("click", () => {
+      webhookUrls.splice(i, 1);
+      if (webhookUrls.length === 0) webhookUrls.push("");
+      saveWebhooks();
+      renderWebhookList();
+    });
+    row.appendChild(inp);
+    row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+
+function getWebhookUrls(): string[] {
+  return webhookUrls.map((s) => s.trim()).filter(Boolean).slice(0, 10);
 }
 
 async function sendWebhook(manual: boolean): Promise<void> {
-  const url = (($("webhook-url") as HTMLInputElement).value || "").trim();
+  const urls = getWebhookUrls();
   const statusEl = $("webhook-status") as HTMLElement;
-  if (!url) {
+  if (urls.length === 0) {
     if (manual) statusEl.textContent = t("webhook_hint");
     return;
   }
@@ -853,17 +966,18 @@ async function sendWebhook(manual: boolean): Promise<void> {
     return;
   }
   const format = ($("webhook-format") as HTMLSelectElement).value;
+  const items = dispatchPool.map((p) => ({ raw: p.raw, latency: p.latency }));
   statusEl.textContent = "...";
-  try {
-    const r = await invoke<string>("send_webhook", {
-      url,
-      format,
-      items: dispatchPool.map((p) => ({ raw: p.raw, latency: p.latency })),
-    });
-    statusEl.textContent = t("webhook_sent", { r });
-  } catch (e) {
-    statusEl.textContent = t("webhook_fail", { e: String(e).slice(0, 120) });
+  const lines: string[] = [];
+  for (let i = 0; i < urls.length; i++) {
+    try {
+      const r = await invoke<string>("send_webhook", { url: urls[i], format, items });
+      lines.push(`#${i + 1} ${t("webhook_sent", { r })}`);
+    } catch (e) {
+      lines.push(`#${i + 1} ${t("webhook_fail", { e: String(e).slice(0, 120) })}`);
+    }
   }
+  statusEl.textContent = lines.join(" | ");
 }
 
 async function start() {
@@ -1149,12 +1263,25 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   $("btn-clear-in").addEventListener("click", () => { input.value = ""; upd(); });
-  ($("btn-pool-clear") as HTMLButtonElement).addEventListener("click", () => {
+  async function doPoolSync(statusElId: string): Promise<void> {
+    mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms })));
+    renderPool();
+    updateCounts();
+    const n = await syncPool(false);
+    const el = document.getElementById(statusElId);
+    if (el) el.textContent = t("pool_synced", { n });
+    lastStatus = { key: "pool_synced", params: { n } };
+  }
+
+  function doPoolClear(): void {
     dispatchPool = [];
     void syncPool(false);
     renderPool();
     updateCounts();
-  });
+  }
+
+  ($("btn-pool-clear") as HTMLButtonElement).addEventListener("click", doPoolClear);
+  ($("btn-auto-pool-clear") as HTMLButtonElement).addEventListener("click", doPoolClear);
   $("file-input").addEventListener("change", async (e) => {
     const files = (e.target as HTMLInputElement).files;
     if (!files || files.length === 0) return;
@@ -1258,14 +1385,8 @@ window.addEventListener("DOMContentLoaded", () => {
   // dispatcher
   ($("srv-port") as HTMLInputElement).addEventListener("input", refreshSrvAddr);
   refreshSrvAddr();
-  ($("btn-pool-sync") as HTMLButtonElement).addEventListener("click", async () => {
-    mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms })));
-    renderPool();
-    updateCounts();
-    const n = await syncPool(false);
-    lastStatus = { key: "pool_synced", params: { n } };
-    ($("srv-status") as HTMLElement).textContent = t("pool_synced", { n });
-  });
+  ($("btn-pool-sync") as HTMLButtonElement).addEventListener("click", () => void doPoolSync("srv-status"));
+  ($("btn-auto-pool-sync") as HTMLButtonElement).addEventListener("click", () => void doPoolSync("auto-status"));
   ($("btn-srv-copy") as HTMLButtonElement).addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(($("srv-addr") as HTMLElement).textContent ?? "");
@@ -1285,8 +1406,13 @@ window.addEventListener("DOMContentLoaded", () => {
       await syncPool(false);
       const addr = await invoke<string>("start_local_proxy", { port, mode, listener });
       ($("srv-status") as HTMLElement).textContent = t("srv_on", { addr });
+      try {
+        const st = await invoke<DispatchStatus>("local_proxy_status");
+        ($("srv-port") as HTMLInputElement).value = String(st.port);
+      } catch { /* keep typed value */ }
       refreshSrvAddr();
       void pollDispatch();
+      void updateTray();
     } catch (e) {
       const msg = String(e);
       ($("srv-status") as HTMLElement).textContent = msg.includes("pool is empty")
@@ -1300,6 +1426,7 @@ window.addEventListener("DOMContentLoaded", () => {
     } catch { /* ignore */ }
     ($("srv-status") as HTMLElement).textContent = t("srv_off");
     void pollDispatch();
+    void updateTray();
   });
 
   // tray
@@ -1371,8 +1498,31 @@ window.addEventListener("DOMContentLoaded", () => {
   for (const id of ["disp-auto-min", "auto-min"]) {
     document.getElementById(id)?.addEventListener("change", armTimers);
   }
+  loadMaxPing();
+  syncMaxPingInputs();
+  for (const id of ["disp-max-ping", "auto-max-ping"]) {
+    document.getElementById(id)?.addEventListener("change", (e) => {
+      const v = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0));
+      maxPingMs = Number.isFinite(v) ? v : 0;
+      try {
+        localStorage.setItem("pp-maxping", String(maxPingMs));
+      } catch { /* ignore */ }
+      syncMaxPingInputs();
+    });
+  }
+  loadWebhooks();
+  renderWebhookList();
+  ($("btn-webhook-add") as HTMLButtonElement).addEventListener("click", () => {
+    if (webhookUrls.length >= 10) return;
+    webhookUrls.push("");
+    saveWebhooks();
+    renderWebhookList();
+    const inputs = document.querySelectorAll<HTMLInputElement>("#webhook-list input");
+    inputs[inputs.length - 1]?.focus();
+  });
   ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => void autoCycle("auto-status", true));
   ($("btn-webhook-send") as HTMLButtonElement).addEventListener("click", () => void sendWebhook(true));
+  window.setInterval(() => void updateTray(), 5000);
 
   applyI18n();
   armTimers();
