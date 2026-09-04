@@ -163,3 +163,7 @@ src-tauri/src/main.rs # entry point
 - [proxpulse-judge](https://github.com/nechel12/proxpulse-judge) —
   self-hosted check backend (Rust/axum, Docker). The public instance
   is embedded in the checker by default.
+
+## License
+
+Apache-2.0, see [LICENSE](LICENSE).

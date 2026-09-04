@@ -164,3 +164,7 @@ src-tauri/src/main.rs # точка входа
 - [proxpulse-judge](https://github.com/nechel12/proxpulse-judge) —
   self-hosted backend для проверок (Rust/axum, Docker). Публичный инстанс
   встроен в чекер по умолчанию.
+
+## Лицензия
+
+Apache-2.0, см. [LICENSE](LICENSE).
