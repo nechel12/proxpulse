@@ -145,9 +145,14 @@ body {
 }
 .fld input:focus, .fld select:focus, #test-url-custom:focus, #search:focus { border-color: var(--red); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.checks { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
+.checks { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; align-items: center; }
 .chk { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #c9c9d2; cursor: pointer; }
 .chk input { accent-color: var(--red); width: 14px; height: 14px; cursor: pointer; }
+.hidden { display: none !important; }
+.seg { display: flex; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg-btn { flex: 1; background: transparent; border: none; color: var(--mut); padding: 8px; cursor: pointer; font-size: 12px; font-family: inherit; }
+.seg-btn + .seg-btn { border-left: 1px solid var(--line); }
+.seg-btn.active { background: var(--red-dim); color: #fff; }
 .actions { display: flex; gap: 8px; margin-top: 12px; }
 .status-line { margin-top: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--mut); min-height: 18px; }
 

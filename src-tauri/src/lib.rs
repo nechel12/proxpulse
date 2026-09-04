@@ -72,6 +72,45 @@ struct HttpbinHeaders {
     headers: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct JudgeGeo {
+    country: Option<String>,
+    country_code: Option<String>,
+    city: Option<String>,
+    asn: Option<u64>,
+    aso: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct JudgeBody {
+    ip: Option<String>,
+    anonymity: Option<String>,
+    ip_type: Option<String>,
+    geo: Option<JudgeGeo>,
+}
+
+fn try_parse_judge_body(res: &mut ProxyResult, body: &str) {
+    let jb: JudgeBody = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    if let Some(ip) = jb.ip {
+        let t = ip.trim().to_string();
+        if !t.is_empty() {
+            res.ip = Some(t);
+        }
+    }
+    res.anonymity = jb.anonymity;
+    res.ip_type = jb.ip_type;
+    if let Some(g) = jb.geo {
+        res.country = g.country;
+        res.country_code = g.country_code;
+        res.city = g.city;
+        res.asn = g.asn.map(|n| n.to_string());
+        res.org = g.aso;
+    }
+}
+
 struct Baseline {
     direct_ip: Option<String>,
     example_len: Option<usize>,
@@ -93,6 +132,7 @@ struct CheckFlags {
     tls: bool,
     precheck: bool,
     precheck_timeout: Duration,
+    judge: bool,
 }
 
 // ================= proxy parsing =================
@@ -1097,13 +1137,26 @@ async fn check_candidate(
         Err(e) => return dead_result(raw, proto, 0, e),
     };
 
+    // judge mode: pass our direct IP so the judge can detect leaks
+    let req_url = if flags.judge {
+        match baseline.direct_ip.as_deref() {
+            Some(dip) if !dip.is_empty() => {
+                let sep = if test_url.contains('?') { '&' } else { '?' };
+                format!("{test_url}{sep}direct_ip={dip}")
+            }
+            _ => test_url.clone(),
+        }
+    } else {
+        test_url.clone()
+    };
+
     let mut latencies: Vec<u64> = Vec::new();
     let mut first_body: Option<String> = None;
     let mut last_err: Option<String> = None;
 
     for _ in 0..repeats {
         let start = Instant::now();
-        match client.get(&test_url).send().await {
+        match client.get(&req_url).send().await {
             Ok(r) => {
                 let status = r.status();
                 let ms = start.elapsed().as_millis() as u64;
@@ -1166,18 +1219,22 @@ async fn check_candidate(
     };
 
     if let Some(b) = first_body {
-        try_parse_test_body(&mut res, &test_url, &b);
+        if flags.judge {
+            try_parse_judge_body(&mut res, &b);
+        } else {
+            try_parse_test_body(&mut res, &test_url, &b);
+        }
     }
-    if flags.geo {
+    if flags.geo && !flags.judge {
         geo_lookup(&client, &mut res).await;
     }
-    if flags.anon {
+    if flags.anon && !flags.judge {
         res.anonymity = detect_anonymity(&client, baseline.direct_ip.as_deref()).await;
     }
-    if flags.tamper {
+    if flags.tamper && !flags.judge {
         res.tamper = detect_tamper(&client, baseline.example_len, baseline.example_hash).await;
     }
-    if flags.tls {
+    if flags.tls && !flags.judge {
         let (v, info) =
             tls_via_proxy(&url, timeout, baseline.example_cert_fp.as_deref()).await;
         res.tls = v;
@@ -1235,6 +1292,7 @@ async fn check_proxies(
     with_tls: Option<bool>,
     precheck: Option<bool>,
     precheck_timeout_ms: Option<u64>,
+    judge_mode: Option<bool>,
 ) -> Result<Vec<ProxyResult>, String> {
     let test_url = test_url.trim().to_string();
     if test_url.is_empty() {
@@ -1254,6 +1312,7 @@ async fn check_proxies(
         tls: with_tls.unwrap_or(true),
         precheck: precheck.unwrap_or(true),
         precheck_timeout: Duration::from_millis(precheck_timeout_ms.unwrap_or(1500).clamp(300, 10_000)),
+        judge: judge_mode.unwrap_or(false),
     };
 
     let mut jobs: Vec<(String, Vec<(String, String)>)> = Vec::new();

@@ -80,6 +80,7 @@
               <option value="https://httpbin.org/ip" data-i18n="opt_httpbin">httpbin.org/ip (покажет IP)</option>
               <option value="https://ip-api.com/json" data-i18n="opt_ipapi">ip-api.com/json (IP + гео)</option>
               <option value="https://example.com" data-i18n="opt_example">example.com</option>
+              <option value="judge" data-i18n="opt_judge">ProxPulse Judge</option>
             </select>
           </label>
           <input id="test-url-custom" data-i18n-ph="custom_ph" placeholder="или свой URL https://..." />
@@ -102,19 +103,23 @@
             </label>
           </div>
 
-          <div class="checks">
+          <div class="checks" id="deep-checks">
             <label class="chk"><input id="chk-geo" type="checkbox" checked /><span data-i18n="chk_geo">Гео и тип IP</span></label>
             <label class="chk"><input id="chk-anon" type="checkbox" checked /><span data-i18n="chk_anon">Анонимность</span></label>
             <label class="chk"><input id="chk-tamper" type="checkbox" checked /><span data-i18n="chk_tamper">Целостность</span></label>
             <label class="chk"><input id="chk-tls" type="checkbox" checked /><span data-i18n="chk_tls">TLS-интегрити</span></label>
           </div>
-          <div class="hint" data-i18n="deep_hint">Глубокие проверки медленнее: гео — через ip-api, анонимность — через httpbin, целостность — сверка с example.com, TLS — сверка сертификата.</div>
+          <div class="hint" id="deep-hint" data-i18n="deep_hint">Глубокие проверки медленнее: гео — через ip-api, анонимность — через httpbin, целостность — сверка с example.com, TLS — сверка сертификата.</div>
+          <div id="judge-mode-row" class="seg hidden">
+            <button id="judge-fast" class="seg-btn" data-i18n="judge_fast">Быстрая</button>
+            <button id="judge-full" class="seg-btn active" data-i18n="judge_full">Полная</button>
+          </div>
 
-          <div class="checks" style="margin-top:8px">
+          <div class="checks" id="precheck-row" style="margin-top:8px">
             <label class="chk"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Пречек порта</span></label>
             <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" /></label>
           </div>
-          <div class="hint" data-i18n="precheck_hint">Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.</div>
+          <div class="hint" id="precheck-hint" data-i18n="precheck_hint">Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.</div>
 
           <div class="row2">
             <button id="btn-direct" class="btn ghost" data-i18n="btn_direct">Проверить связь</button>
@@ -211,7 +216,7 @@
             <span class="ph-title" data-i18n="disp_auto_title">▸ Автопроверка</span>
           </div>
           <div class="checks">
-            <label class="chk"><input id="disp-auto-on" type="checkbox" /><span data-i18n="auto_on">Вкл</span></label>
+            <button id="disp-auto-on" class="sqchk" aria-pressed="false"><span class="sq"></span><span data-i18n="auto_on">Вкл</span></button>
             <label class="fld" style="flex:1"><span data-i18n="auto_every">Каждые, мин</span><input id="disp-auto-min" type="number" value="30" min="1" max="1440" /></label>
           </div>
           <div id="disp-auto-status" class="status-line">—</div>
@@ -252,7 +257,7 @@
         <div class="hint" data-i18n="auto_hint">Общий рабочий пул перепроверяется по таймеру, мёртвые вылетают, живые уходят на вебхук.</div>
         <div class="settings">
           <div class="checks">
-            <label class="chk"><input id="auto-on" type="checkbox" /><span data-i18n="auto_on">Вкл</span></label>
+            <button id="auto-on" class="sqchk" aria-pressed="false"><span class="sq"></span><span data-i18n="auto_on">Вкл</span></button>
             <label class="fld" style="flex:1"><span data-i18n="auto_every">Каждые, мин</span><input id="auto-min" type="number" value="30" min="1" max="1440" /></label>
           </div>
           <button id="btn-auto-now" class="btn ghost" data-i18n="auto_now">Проверить сейчас</button>
@@ -314,6 +319,10 @@
         <div class="gh-card" id="gh-card" title="github.com/nechel12/proxpulse">
           <span class="gh-logo">⬢</span>
           <span class="gh-text"><b>nechel12/proxpulse</b><i>GitHub →</i></span>
+        </div>
+        <div class="gh-card" id="gh-card-judge" title="github.com/nechel12/proxpulse-judge">
+          <span class="gh-logo">⬢</span>
+          <span class="gh-text"><b>nechel12/proxpulse-judge</b><i>GitHub →</i></span>
         </div>
       </section>
     </div>

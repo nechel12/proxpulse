@@ -39,7 +39,10 @@ const I18N: Record<Lang, Record<string, string>> = {
     opt_google: "google generate_204 (быстро)", opt_cf: "cloudflare generate_204 (быстро)",
     opt_ipify: "api.ipify.org (покажет IP)", opt_httpbin: "httpbin.org/ip (покажет IP)",
     opt_ipapi: "ip-api.com/json (IP + гео)", opt_example: "example.com",
+    opt_judge: "ProxPulse Judge",
     custom_ph: "или свой URL https://...",
+    custom_judge_ph: "свой judge, например https://...",
+    judge_fast: "Быстрая", judge_full: "Полная",
     f_timeout: "Таймаут, мс", f_threads: "Потоки", f_repeats: "Замеры",
     f_protonoscheme: "Тип без схемы", opt_http: "HTTP",
     chk_geo: "Гео и тип IP", chk_anon: "Анонимность", chk_tamper: "Целостность", chk_tls: "TLS-интегрити",
@@ -105,7 +108,10 @@ const I18N: Record<Lang, Record<string, string>> = {
     opt_google: "google generate_204 (fast)", opt_cf: "cloudflare generate_204 (fast)",
     opt_ipify: "api.ipify.org (shows IP)", opt_httpbin: "httpbin.org/ip (shows IP)",
     opt_ipapi: "ip-api.com/json (IP + geo)", opt_example: "example.com",
+    opt_judge: "ProxPulse Judge",
     custom_ph: "or custom URL https://...",
+    custom_judge_ph: "custom judge, e.g. https://...",
+    judge_fast: "Fast", judge_full: "Full",
     f_timeout: "Timeout, ms", f_threads: "Threads", f_repeats: "Samples",
     f_protonoscheme: "No-scheme type", opt_http: "HTTP",
     chk_geo: "Geo & IP type", chk_anon: "Anonymity", chk_tamper: "Integrity", chk_tls: "TLS integrity",
@@ -188,6 +194,10 @@ let pollTimer: number | undefined;
 let autoBusy = false;
 let dispAutoTimer: number | undefined;
 let autoTimer: number | undefined;
+const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
+let judgeFull = true;
+let dispAutoOn = false;
+let autoOn = false;
 
 // ---------- proxy extraction (many formats) ----------
 
@@ -352,10 +362,31 @@ function parseInput(text: string): string[] {
 
 // ---------- ui helpers ----------
 
+function isJudgeMode(): boolean {
+  return ($("test-url") as HTMLSelectElement).value === "judge";
+}
+
+function judgeBase(): string {
+  const custom = ($("test-url-custom") as HTMLInputElement).value.trim();
+  const base = (custom || JUDGE_DEFAULT).replace(/\/+$/, "");
+  if (/\/(judge|generate_204)$/.test(base)) return base;
+  return base + (judgeFull ? "/judge" : "/generate_204");
+}
+
 function effectiveTestUrl(): string {
+  if (isJudgeMode()) return judgeBase();
   const sel = ($("test-url") as HTMLSelectElement).value.trim();
   const custom = ($("test-url-custom") as HTMLInputElement).value.trim();
   return custom || sel;
+}
+
+function updateJudgeUI(): void {
+  const j = isJudgeMode();
+  for (const id of ["deep-checks", "deep-hint", "precheck-row", "precheck-hint"]) {
+    document.getElementById(id)?.classList.toggle("hidden", j);
+  }
+  document.getElementById("judge-mode-row")?.classList.toggle("hidden", !j);
+  ($("test-url-custom") as HTMLInputElement).placeholder = t(j ? "custom_judge_ph" : "custom_ph");
 }
 
 function setStatusT(key: string, params?: Record<string, string | number>) {
@@ -390,6 +421,7 @@ function applyI18n() {
   render();
   renderPool();
   updateCounts();
+  updateJudgeUI();
 }
 
 function updateCounts() {
@@ -570,18 +602,20 @@ function mergePool(items: { raw: string; latency: number | null }[]) {
 }
 
 function readCheckSettings() {
+  const judge = isJudgeMode();
   return {
     testUrl: effectiveTestUrl(),
     timeoutMs: Math.max(1000, Math.min(30000, Number(($("timeout") as HTMLInputElement).value) || 8000)),
     concurrency: Math.max(1, Math.min(500, Number(($("concurrency") as HTMLInputElement).value) || 50)),
     repeats: Math.max(1, Math.min(5, Number(($("repeats") as HTMLInputElement).value) || 3)),
     defaultProto: ($("default-proto") as HTMLSelectElement).value,
-    withGeo: ($("chk-geo") as HTMLInputElement).checked,
-    withAnonymity: ($("chk-anon") as HTMLInputElement).checked,
-    withTamper: ($("chk-tamper") as HTMLInputElement).checked,
-    withTls: ($("chk-tls") as HTMLInputElement).checked,
+    withGeo: judge ? false : ($("chk-geo") as HTMLInputElement).checked,
+    withAnonymity: judge ? false : ($("chk-anon") as HTMLInputElement).checked,
+    withTamper: judge ? false : ($("chk-tamper") as HTMLInputElement).checked,
+    withTls: judge ? false : ($("chk-tls") as HTMLInputElement).checked,
     precheck: ($("chk-precheck") as HTMLInputElement).checked,
     precheckTimeoutMs: Math.max(300, Math.min(10000, Number(($("precheck-timeout") as HTMLInputElement).value) || 1500)),
+    judgeMode: judge,
   };
 }
 
@@ -607,6 +641,7 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
         withTls: s.withTls,
         precheck: s.precheck,
         precheckTimeoutMs: s.precheckTimeoutMs,
+        judgeMode: s.judgeMode,
       });
       out.push(...part);
     } catch (e) {
@@ -675,11 +710,11 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
 function armTimers() {
   window.clearInterval(dispAutoTimer);
   window.clearInterval(autoTimer);
-  if (($("disp-auto-on") as HTMLInputElement)?.checked) {
+  if (dispAutoOn) {
     const mins = Math.max(1, Math.min(1440, Number(($("disp-auto-min") as HTMLInputElement).value) || 30));
     dispAutoTimer = window.setInterval(() => void autoCycle("disp-auto-status", false), mins * 60_000);
   }
-  if (($("auto-on") as HTMLInputElement)?.checked) {
+  if (autoOn) {
     const mins = Math.max(1, Math.min(1440, Number(($("auto-min") as HTMLInputElement).value) || 30));
     autoTimer = window.setInterval(() => void autoCycle("auto-status", true), mins * 60_000);
   }
@@ -1015,16 +1050,38 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // github card
-  $("gh-card").addEventListener("click", async () => {
-    const url = "https://github.com/nechel12/proxpulse";
+  // github cards
+  const openGh = (url: string) => async () => {
     try {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(url);
     } catch {
       window.open(url, "_blank");
     }
-  });
+  };
+  $("gh-card").addEventListener("click", openGh("https://github.com/nechel12/proxpulse"));
+  $("gh-card-judge").addEventListener("click", openGh("https://github.com/nechel12/proxpulse-judge"));
+
+  // judge mode UI
+  $("test-url").addEventListener("change", updateJudgeUI);
+  const setJudgeFull = (full: boolean) => {
+    judgeFull = full;
+    ($("judge-fast") as HTMLButtonElement).classList.toggle("active", !full);
+    ($("judge-full") as HTMLButtonElement).classList.toggle("active", full);
+  };
+  ($("judge-fast") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(false));
+  ($("judge-full") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(true));
+
+  // auto toggles (sqchk style)
+  const bindSqchk = (id: string, get: () => boolean, set: (v: boolean) => void) => {
+    $(id).addEventListener("click", () => {
+      set(!get());
+      ($(id) as HTMLButtonElement).setAttribute("aria-pressed", String(get()));
+      armTimers();
+    });
+  };
+  bindSqchk("disp-auto-on", () => dispAutoOn, (v) => { dispAutoOn = v; });
+  bindSqchk("auto-on", () => autoOn, (v) => { autoOn = v; });
 
   // dispatcher
   ($("srv-port") as HTMLInputElement).addEventListener("input", refreshSrvAddr);
@@ -1081,7 +1138,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   // auto timers + webhook
-  for (const id of ["disp-auto-on", "disp-auto-min", "auto-on", "auto-min"]) {
+  for (const id of ["disp-auto-min", "auto-min"]) {
     document.getElementById(id)?.addEventListener("change", armTimers);
   }
   ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => void autoCycle("auto-status", true));
