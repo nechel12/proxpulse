@@ -894,6 +894,8 @@ async function start() {
     results = await runCheckList(list, (done, total) => {
       lastStatus = { key: "st_checking", params: { done, total } };
       $("status-line").textContent = t("st_checking", lastStatus.params);
+      const secs = Math.floor((performance.now() - t0) / 1000);
+      setNet("work", `checking ${secs}s`);
       render();
       updateCounts();
       setProgress(done, total);

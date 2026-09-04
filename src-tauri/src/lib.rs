@@ -672,27 +672,16 @@ fn try_parse_test_body(res: &mut ProxyResult, test_url: &str, body: &str) {
     }
 }
 
-async fn geo_lookup(client: &reqwest::Client, res: &mut ProxyResult) {
-    if res.country.is_some() || res.ip_type.is_some() {
-        return;
-    }
+async fn fetch_geo(client: &reqwest::Client) -> Option<IpApi> {
     let url = "http://ip-api.com/json/?fields=status,message,query,country,countryCode,city,isp,org,as,mobile,proxy,hosting";
-    let r = match client.get(url).send().await {
-        Ok(v) => v,
-        Err(_) => return,
-    };
+    let r = client.get(url).send().await.ok()?;
     if !r.status().is_success() {
-        return;
+        return None;
     }
-    let body = match r.text().await {
-        Ok(t) => t,
-        Err(_) => return,
-    };
-    if let Ok(g) = serde_json::from_str::<IpApi>(&body) {
-        if g.status.as_deref() == Some("fail") {
-            return;
-        }
-        apply_ipapi(res, &g);
+    let body = r.text().await.ok()?;
+    match serde_json::from_str::<IpApi>(&body) {
+        Ok(g) if g.status.as_deref() != Some("fail") => Some(g),
+        _ => None,
     }
 }
 
@@ -1173,6 +1162,39 @@ async fn check_candidate(
     geo_cache: Arc<HashMap<String, GeoCacheEntry>>,
     cancel: Arc<AtomicBool>,
 ) -> ProxyResult {
+    // absolute ceiling: a single proxy may never outlive the sum of its own timeouts
+    let budget = flags.precheck_timeout
+        + timeout * (repeats as u32 + 2)
+        + Duration::from_secs(5);
+    let raw_fb = raw.clone();
+    let proto_fb = proto.clone();
+    match tokio::time::timeout(
+        budget,
+        check_candidate_inner(
+            raw, url, proto, test_url, timeout, repeats, flags, baseline, geo_cache,
+            cancel,
+        ),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => dead_result(raw_fb, proto_fb, 0, "timeout".to_string()),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn check_candidate_inner(
+    raw: String,
+    url: String,
+    proto: String,
+    test_url: String,
+    timeout: Duration,
+    repeats: usize,
+    flags: CheckFlags,
+    baseline: Arc<Baseline>,
+    geo_cache: Arc<HashMap<String, GeoCacheEntry>>,
+    cancel: Arc<AtomicBool>,
+) -> ProxyResult {
     // stage 1: fast tcp precheck
     if flags.precheck {
         if let Some((h, p)) = host_port_of_url(&url) {
@@ -1325,32 +1347,60 @@ async fn check_candidate(
             }
         }
     }
-    if flags.geo && !flags.judge {
-        if cancel.load(Ordering::Relaxed) {
-            return res;
+    // deep stages run concurrently: worst case ~1 timeout instead of 4 in a row
+    if !flags.judge && !cancel.load(Ordering::Relaxed) {
+        let need_geo =
+            flags.geo && res.country.is_none() && res.ip_type.is_none();
+        let want_anon = flags.anon;
+        let want_tamper = flags.tamper;
+        let want_tls = flags.tls;
+        let direct_ip = baseline.direct_ip.clone();
+        let (ex_len, ex_hash) = (baseline.example_len, baseline.example_hash);
+        let cert_fp = baseline.example_cert_fp.clone();
+        let url_c = url.clone();
+        let (geo_r, anon_r, tamper_r, tls_r) = tokio::join!(
+            async {
+                if need_geo {
+                    fetch_geo(&client).await
+                } else {
+                    None
+                }
+            },
+            async {
+                if want_anon {
+                    detect_anonymity(&client, direct_ip.as_deref()).await
+                } else {
+                    None
+                }
+            },
+            async {
+                if want_tamper {
+                    detect_tamper(&client, ex_len, ex_hash).await
+                } else {
+                    None
+                }
+            },
+            async {
+                if want_tls {
+                    Some(tls_via_proxy(&url_c, timeout, cert_fp.as_deref()).await)
+                } else {
+                    None
+                }
+            },
+        );
+        if let Some(g) = geo_r {
+            apply_ipapi(&mut res, &g);
         }
-        geo_lookup(&client, &mut res).await;
-    }
-    if flags.anon && !flags.judge {
-        if cancel.load(Ordering::Relaxed) {
-            return res;
+        if anon_r.is_some() {
+            res.anonymity = anon_r;
         }
-        res.anonymity = detect_anonymity(&client, baseline.direct_ip.as_deref()).await;
-    }
-    if flags.tamper && !flags.judge {
-        if cancel.load(Ordering::Relaxed) {
-            return res;
+        if tamper_r.is_some() {
+            res.tamper = tamper_r;
         }
-        res.tamper = detect_tamper(&client, baseline.example_len, baseline.example_hash).await;
-    }
-    if flags.tls && !flags.judge {
-        if cancel.load(Ordering::Relaxed) {
-            return res;
+        if let Some((v, info)) = tls_r {
+            res.tls = v;
+            res.tls_info = info;
         }
-        let (v, info) =
-            tls_via_proxy(&url, timeout, baseline.example_cert_fp.as_deref()).await;
-        res.tls = v;
-        res.tls_info = info;
     }
     res
 }
@@ -1461,8 +1511,8 @@ async fn check_proxies(
     } else {
         None
     };
-    let (mut baseline_inner, judge_sha) = tokio::join!(
-        fetch_baseline(),
+    let (baseline_res, judge_sha) = tokio::join!(
+        tokio::time::timeout(Duration::from_secs(20), fetch_baseline()),
         async {
             match &judge_base {
                 Some(b) => fetch_direct_judge_sha(b, timeout).await,
@@ -1470,6 +1520,13 @@ async fn check_proxies(
             }
         }
     );
+    let mut baseline_inner = baseline_res.unwrap_or(Baseline {
+        direct_ip: None,
+        example_len: None,
+        example_hash: None,
+        example_cert_fp: None,
+        judge_content_sha: None,
+    });
     baseline_inner.judge_content_sha = judge_sha;
     let baseline = Arc::new(baseline_inner);
 
