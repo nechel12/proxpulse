@@ -58,6 +58,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     empty_idle: "Пока пусто — вставь список слева и жми Старт.",
     empty_filter: "Ничего не найдено под фильтр.",
     pill_alive: "ALIVE", pill_dead: "DEAD",
+    net_idle: "ожидание", net_work: "проверка {s}с", net_done: "готово", net_stopped: "остановлено",
     st_ready: "Готов к проверке.", st_empty: "Список пуст — вставь прокси.",
     st_badurl: "Тестовый URL должен начинаться с http(s)://",
     st_checking: "Проверка {done}/{total} ...", st_done: "Готово за {secs}с. Живых: {alive}/{total}.",
@@ -134,6 +135,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     empty_idle: "Empty — paste a list on the left and hit Start.",
     empty_filter: "Nothing matches the filter.",
     pill_alive: "ALIVE", pill_dead: "DEAD",
+    net_idle: "idle", net_work: "checking {s}s", net_done: "done", net_stopped: "stopped",
     st_ready: "Ready.", st_empty: "List is empty — paste proxies.",
     st_badurl: "Test URL must start with http(s)://",
     st_checking: "Checking {done}/{total} ...", st_done: "Done in {secs}s. Alive: {alive}/{total}.",
@@ -625,18 +627,26 @@ function renderPool() {
 }
 
 /** merge: keep existing entries, add new ones, refresh latency.
- *  Over-limit pings (see maxPingMs) never enter the pool. */
+ *  Entries over maxPingMs never enter the pool; re-checked entries
+ *  that went over the limit are dropped. */
 function mergePool(items: { raw: string; latency: number | null }[]) {
   const idx = new Map(dispatchPool.map((p, i) => [p.raw, i]));
+  const drop = new Set<number>();
   for (const it of items) {
-    if (!passPing(it.latency)) continue;
     const at = idx.get(it.raw);
+    if (!passPing(it.latency)) {
+      if (at != null) drop.add(at);
+      continue;
+    }
     if (at == null) {
       idx.set(it.raw, dispatchPool.length);
       dispatchPool.push({ raw: it.raw, latency: it.latency });
     } else if (it.latency != null) {
       dispatchPool[at].latency = it.latency;
     }
+  }
+  if (drop.size > 0) {
+    dispatchPool = dispatchPool.filter((_, i) => !drop.has(i));
   }
 }
 
@@ -1000,7 +1010,7 @@ async function start() {
   updateCounts();
   ($("btn-start") as HTMLButtonElement).disabled = true;
   ($("btn-stop") as HTMLButtonElement).disabled = false;
-  setNet("work", "checking");
+  setNet("work", t("net_work", { s: 0 }));
   setProgress(0, list.length);
   const t0 = performance.now();
 
@@ -1009,7 +1019,7 @@ async function start() {
       lastStatus = { key: "st_checking", params: { done, total } };
       $("status-line").textContent = t("st_checking", lastStatus.params);
       const secs = Math.floor((performance.now() - t0) / 1000);
-      setNet("work", `checking ${secs}s`);
+      setNet("work", t("net_work", { s: secs }));
       render();
       updateCounts();
       setProgress(done, total);
@@ -1027,7 +1037,7 @@ async function start() {
   const alive = results.filter((r) => r.alive).length;
   if (stopFlag) setStatusT("st_stopped", { alive, total: results.length });
   else setStatusT("st_done", { secs, alive, total: results.length });
-  setNet("done", stopFlag ? "stopped" : "done");
+  setNet("done", stopFlag ? t("net_stopped") : t("net_done"));
   ($("btn-start") as HTMLButtonElement).disabled = false;
   ($("btn-stop") as HTMLButtonElement).disabled = true;
   running = false;
@@ -1441,7 +1451,10 @@ window.addEventListener("DOMContentLoaded", () => {
   loadErrRing();
   renderErrList();
   void invoke<string>("app_version")
-    .then((v) => { ($("app-ver") as HTMLElement).textContent = v; })
+    .then((v) => {
+      ($("app-ver") as HTMLElement).textContent = v;
+      ($("brand-ver") as HTMLElement).textContent = `proxy checker // v${v}`;
+    })
     .catch(() => { /* ignore */ });
   ($("btn-copy-diag") as HTMLButtonElement).addEventListener("click", async () => {
     const data = {

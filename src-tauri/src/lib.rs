@@ -5,16 +5,15 @@ use std::hash::{Hash, Hasher};
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    Arc,
 };
 use std::time::{Duration, Instant};
 use tauri::{
-    State,
     ipc::Channel,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Manager, State,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -142,11 +141,7 @@ fn judge_base_url(test_url: &str) -> Option<String> {
 
 async fn fetch_direct_judge_sha(base: &str, timeout: Duration) -> Option<String> {
     let client = build_client(None, timeout).ok()?;
-    let r = client
-        .get(format!("{base}/judge"))
-        .send()
-        .await
-        .ok()?;
+    let r = client.get(format!("{base}/judge")).send().await.ok()?;
     if !r.status().is_success() {
         return None;
     }
@@ -216,7 +211,7 @@ fn valid_port(p: &str) -> bool {
         return false;
     }
     match p.parse::<u32>() {
-        Ok(n) => n >= 1 && n <= 65535,
+        Ok(n) => (1..=65535).contains(&n),
         Err(_) => false,
     }
 }
@@ -272,10 +267,7 @@ fn from_columns(parts: &[String], default_proto: &str) -> Option<(String, String
             let (host, port) = (parts[0].trim(), parts[1].trim());
             if !host.is_empty() && valid_port(port) {
                 let scheme = canonical_scheme(def);
-                return Some((
-                    format!("{scheme}://{host}:{port}"),
-                    proto_label(&scheme),
-                ));
+                return Some((format!("{scheme}://{host}:{port}"), proto_label(&scheme)));
             }
             None
         }
@@ -615,13 +607,10 @@ fn short_error(e: &str) -> String {
     s.trim().to_string()
 }
 
-fn build_client(
-    proxy_url: Option<&str>,
-    timeout: Duration,
-) -> Result<reqwest::Client, String> {
+fn build_client(proxy_url: Option<&str>, timeout: Duration) -> Result<reqwest::Client, String> {
     let mut b = reqwest::Client::builder()
         .timeout(timeout)
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxPulse/0.2");
+        .user_agent(concat!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxPulse/", env!("CARGO_PKG_VERSION")));
     if let Some(u) = proxy_url {
         let p = reqwest::Proxy::all(u).map_err(|e| short_error(&e.to_string()))?;
         b = b.proxy(p);
@@ -717,11 +706,12 @@ async fn fetch_geo(client: &reqwest::Client) -> Option<IpApi> {
     }
 }
 
-async fn detect_anonymity(
-    client: &reqwest::Client,
-    direct_ip: Option<&str>,
-) -> Option<String> {
-    let r = client.get("https://httpbin.org/headers").send().await.ok()?;
+async fn detect_anonymity(client: &reqwest::Client, direct_ip: Option<&str>) -> Option<String> {
+    let r = client
+        .get("https://httpbin.org/headers")
+        .send()
+        .await
+        .ok()?;
     if !r.status().is_success() {
         return None;
     }
@@ -794,7 +784,9 @@ struct Upstream {
     latency: Option<u64>,
 }
 
-fn parse_upstream_url(url: &str) -> Option<(String, String, u16, Option<String>, Option<String>)> {
+type UpstreamParts = (String, String, u16, Option<String>, Option<String>);
+
+fn parse_upstream_url(url: &str) -> Option<UpstreamParts> {
     let (scheme, rest) = url.split_once("://")?;
     let after = rest.rsplit('@').next()?;
     let userinfo = rest.rsplit_once('@').map(|(u, _)| u.to_string());
@@ -865,7 +857,10 @@ async fn socks5_connect(
         write_all_t(&mut s, &req, d).await?;
         read_exact_t(&mut s, &mut resp, d).await?;
         if resp[1] != 0x00 {
-            return Err(Error::new(ErrorKind::PermissionDenied, "socks5 auth failed"));
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "socks5 auth failed",
+            ));
         }
     } else if resp[1] != 0x00 {
         return Err(Error::new(
@@ -1067,10 +1062,7 @@ fn tls_client_config() -> Arc<rustls::ClientConfig> {
             let provider = Arc::new(rustls::crypto::ring::default_provider());
             Arc::new(
                 rustls::ClientConfig::builder_with_provider(provider)
-                    .with_protocol_versions(&[
-                        &rustls::version::TLS13,
-                        &rustls::version::TLS12,
-                    ])
+                    .with_protocol_versions(&[&rustls::version::TLS13, &rustls::version::TLS12])
                     .expect("ring supports TLS 1.2/1.3")
                     .with_root_certificates(roots)
                     .with_no_client_auth(),
@@ -1086,13 +1078,9 @@ fn cert_fp_hex(der: &[u8]) -> String {
     format!("{:x}", h.finalize())
 }
 
-async fn tls_handshake_fp(
-    stream: TcpStream,
-    timeout: Duration,
-) -> Option<(String, String)> {
+async fn tls_handshake_fp(stream: TcpStream, timeout: Duration) -> Option<(String, String)> {
     use rustls_pki_types::ServerName;
-    let connector =
-        tokio_rustls::TlsConnector::from(tls_client_config());
+    let connector = tokio_rustls::TlsConnector::from(tls_client_config());
     let name = ServerName::try_from("example.com").ok()?.to_owned();
     let fut = connector.connect(name, stream);
     let tls = match tokio::time::timeout(timeout, fut).await {
@@ -1118,11 +1106,11 @@ async fn tls_handshake_fp(
 
 async fn tls_direct_fp() -> Option<String> {
     let timeout = Duration::from_millis(9000);
-    let stream =
-        match tokio::time::timeout(timeout, TcpStream::connect(("example.com", 443))).await {
-            Ok(Ok(s)) => s,
-            _ => return None,
-        };
+    let stream = match tokio::time::timeout(timeout, TcpStream::connect(("example.com", 443))).await
+    {
+        Ok(Ok(s)) => s,
+        _ => return None,
+    };
     tls_handshake_fp(stream, timeout).await.map(|(fp, _)| fp)
 }
 
@@ -1205,16 +1193,13 @@ async fn check_candidate(
     cancel: Arc<AtomicBool>,
 ) -> ProxyResult {
     // absolute ceiling: a single proxy may never outlive the sum of its own timeouts
-    let budget = flags.precheck_timeout
-        + timeout * (repeats as u32 + 2)
-        + Duration::from_secs(5);
+    let budget = flags.precheck_timeout + timeout * (repeats as u32 + 2) + Duration::from_secs(5);
     let raw_fb = raw.clone();
     let proto_fb = proto.clone();
     match tokio::time::timeout(
         budget,
         check_candidate_inner(
-            raw, url, proto, test_url, timeout, repeats, flags, baseline, geo_cache,
-            cancel,
+            raw, url, proto, test_url, timeout, repeats, flags, baseline, geo_cache, cancel,
         ),
     )
     .await
@@ -1391,8 +1376,7 @@ async fn check_candidate_inner(
     }
     // deep stages run concurrently: worst case ~1 timeout instead of 4 in a row
     if !flags.judge && !cancel.load(Ordering::Relaxed) {
-        let need_geo =
-            flags.geo && res.country.is_none() && res.ip_type.is_none();
+        let need_geo = flags.geo && res.country.is_none() && res.ip_type.is_none();
         let want_anon = flags.anon;
         let want_tamper = flags.tamper;
         let want_tls = flags.tls;
@@ -1484,6 +1468,7 @@ async fn fetch_baseline() -> Baseline {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn check_proxies(
     proxies: Vec<String>,
     test_url: String,
@@ -1521,7 +1506,9 @@ async fn check_proxies(
         tamper: with_tamper.unwrap_or(true),
         tls: with_tls.unwrap_or(true),
         precheck: precheck.unwrap_or(true),
-        precheck_timeout: Duration::from_millis(precheck_timeout_ms.unwrap_or(1500).clamp(300, 10_000)),
+        precheck_timeout: Duration::from_millis(
+            precheck_timeout_ms.unwrap_or(1500).clamp(300, 10_000),
+        ),
         judge: judge_mode.unwrap_or(false),
     };
 
@@ -1671,9 +1658,11 @@ async fn check_proxies(
         }
     }
     out.sort_by(|a, b| {
-        b.alive
-            .cmp(&a.alive)
-            .then(a.latency_ms.unwrap_or(u64::MAX).cmp(&b.latency_ms.unwrap_or(u64::MAX)))
+        b.alive.cmp(&a.alive).then(
+            a.latency_ms
+                .unwrap_or(u64::MAX)
+                .cmp(&b.latency_ms.unwrap_or(u64::MAX)),
+        )
     });
     Ok(out)
 }
@@ -1819,7 +1808,8 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
     let build = || -> tauri::Result<()> {
         let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
         let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
-        let dispatch = MenuItem::with_id(app, "dispatch_toggle", &dispatch_txt, true, None::<&str>)?;
+        let dispatch =
+            MenuItem::with_id(app, "dispatch_toggle", &dispatch_txt, true, None::<&str>)?;
         let next_disp = MenuItem::with_id(
             app,
             "next_disp",
@@ -1834,20 +1824,20 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
             false,
             None::<&str>,
         )?;
-        let webhook_txt =
-            if info.webhook_on && !info.webhook_url.trim().is_empty() {
-                format!("Webhook: on {}", trunc_url(info.webhook_url.trim()))
-            } else {
-                "Webhook: off".to_string()
-            };
-        let webhook =
-            MenuItem::with_id(app, "webhook_info", &webhook_txt, false, None::<&str>)?;
+        let webhook_txt = if info.webhook_on && !info.webhook_url.trim().is_empty() {
+            format!("Webhook: on {}", trunc_url(info.webhook_url.trim()))
+        } else {
+            "Webhook: off".to_string()
+        };
+        let webhook = MenuItem::with_id(app, "webhook_info", &webhook_txt, false, None::<&str>)?;
         let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
         let sep1 = PredefinedMenuItem::separator(app)?;
         let sep2 = PredefinedMenuItem::separator(app)?;
         let menu = Menu::with_items(
             app,
-            &[&show, &hide, &sep1, &dispatch, &next_disp, &next_auto, &webhook, &sep2, &quit],
+            &[
+                &show, &hide, &sep1, &dispatch, &next_disp, &next_auto, &webhook, &sep2, &quit,
+            ],
         )?;
         if let Some(tray_icon) = app.tray_by_id("main") {
             tray_icon.set_menu(Some(menu))?;
@@ -1878,7 +1868,8 @@ async fn update_tray_status(
     Ok(())
 }
 
-fn pick_order(len: usize, mode: &str, pool: &[Upstream], rr: &AtomicUsize) -> Vec<usize> {    if len == 0 {
+fn pick_order(len: usize, mode: &str, pool: &[Upstream], rr: &AtomicUsize) -> Vec<usize> {
+    if len == 0 {
         return vec![];
     }
     if mode == "fastest" {
@@ -1931,8 +1922,7 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
         if buf.len() > 65536 {
             return;
         }
-        let n = match tokio::time::timeout(Duration::from_secs(10), client.read(&mut tmp)).await
-        {
+        let n = match tokio::time::timeout(Duration::from_secs(10), client.read(&mut tmp)).await {
             Ok(Ok(0)) => return,
             Ok(Ok(n)) => n,
             _ => return,
@@ -1952,9 +1942,7 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
     let (t_host, t_port) = match parse_target(&method, &target) {
         Some(v) => v,
         None => {
-            let _ = client
-                .write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")
-                .await;
+            let _ = client.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
             return;
         }
     };
@@ -1962,9 +1950,7 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
 
     let order = take_upstreams(&st).await;
     if order.is_empty() {
-        let _ = client
-            .write_all(b"HTTP/1.1 502 No upstreams\r\n\r\n")
-            .await;
+        let _ = client.write_all(b"HTTP/1.1 502 No upstreams\r\n\r\n").await;
         return;
     }
 
@@ -2070,10 +2056,7 @@ async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>) {
                 .chunks(2)
                 .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
                 .collect();
-            (
-                segs.join(":"),
-                u16::from_be_bytes([b[16], b[17]]),
-            )
+            (segs.join(":"), u16::from_be_bytes([b[16], b[17]]))
         }
         _ => {
             let _ = write_all_t(&mut client, &[0x05, 0x08, 0, 1, 0, 0, 0, 0, 0, 0], d).await;
@@ -2108,8 +2091,7 @@ async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>) {
         }
     }
     st.errors.fetch_add(1, Ordering::Relaxed);
-    *st.last_error.lock().await =
-        Some(format!("socks {t_host}:{t_port}: {last_err}"));
+    *st.last_error.lock().await = Some(format!("socks {t_host}:{t_port}: {last_err}"));
     let _ = write_all_t(&mut client, &[0x05, 0x05, 0, 1, 0, 0, 0, 0, 0, 0], d).await;
 }
 
@@ -2208,15 +2190,13 @@ async fn start_proxy_inner(
     let tcp = loop {
         match TcpListener::bind(("127.0.0.1", port)).await {
             Ok(l) => break l,
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-                match port.checked_add(1) {
-                    Some(p) if p <= req_port.saturating_add(100) => {
-                        port = p;
-                        continue;
-                    }
-                    _ => return Err(format!("no free port near 127.0.0.1:{req_port}")),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => match port.checked_add(1) {
+                Some(p) if p <= req_port.saturating_add(100) => {
+                    port = p;
+                    continue;
                 }
-            }
+                _ => return Err(format!("no free port near 127.0.0.1:{req_port}")),
+            },
             Err(e) => return Err(format!("bind 127.0.0.1:{req_port}: {e}")),
         }
     };
@@ -2328,7 +2308,7 @@ async fn send_webhook(
     };
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent("ProxPulse/0.3")
+        .user_agent(concat!("ProxPulse/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
     let r = client
@@ -2382,8 +2362,13 @@ pub fn run() {
             if let Some(icon) = app.default_window_icon().cloned() {
                 let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
                 let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
-                let dispatch =
-                    MenuItem::with_id(app, "dispatch_toggle", "Dispatcher: OFF", true, None::<&str>)?;
+                let dispatch = MenuItem::with_id(
+                    app,
+                    "dispatch_toggle",
+                    "Dispatcher: OFF",
+                    true,
+                    None::<&str>,
+                )?;
                 let next_disp =
                     MenuItem::with_id(app, "next_disp", "Next dispatch: off", false, None::<&str>)?;
                 let next_auto =
@@ -2395,7 +2380,10 @@ pub fn run() {
                 let sep2 = PredefinedMenuItem::separator(app)?;
                 let menu = Menu::with_items(
                     app,
-                    &[&show, &hide, &sep1, &dispatch, &next_disp, &next_auto, &webhook, &sep2, &quit],
+                    &[
+                        &show, &hide, &sep1, &dispatch, &next_disp, &next_auto, &webhook, &sep2,
+                        &quit,
+                    ],
                 )?;
                 TrayIconBuilder::with_id("main")
                     .icon(icon)
@@ -2426,8 +2414,7 @@ pub fn run() {
                                 } else {
                                     let port = *disp.inner.port.lock().await;
                                     let mode = disp.inner.mode.lock().await.clone();
-                                    let listener =
-                                        disp.inner.listener.lock().await.clone();
+                                    let listener = disp.inner.listener.lock().await.clone();
                                     if start_proxy_inner(&disp.inner, port, mode, listener)
                                         .await
                                         .is_err()
@@ -2527,7 +2514,8 @@ mod tests {
     }
 
     #[test]
-    fn dual_mode_expands() {        let c = normalize_candidates("1.2.3.4:8080", "http+socks5");
+    fn dual_mode_expands() {
+        let c = normalize_candidates("1.2.3.4:8080", "http+socks5");
         assert_eq!(c.len(), 2);
         assert!(c[0].0.starts_with("http://"));
         assert!(c[1].0.starts_with("socks5://"));
@@ -2579,10 +2567,7 @@ mod tests {
             latency: lat,
         };
         let pool = vec![mk(Some(900)), mk(Some(100)), mk(None)];
-        assert_eq!(
-            pick_order(3, "fastest", &pool, &rr),
-            vec![1, 0, 2]
-        );
+        assert_eq!(pick_order(3, "fastest", &pool, &rr), vec![1, 0, 2]);
         assert_eq!(pick_order(3, "failover", &pool, &rr), vec![0, 1, 2]);
         let a = pick_order(3, "round-robin", &pool, &rr);
         let b = pick_order(3, "round-robin", &pool, &rr);
@@ -2598,11 +2583,15 @@ mod tests {
             "timeout"
         );
         assert_eq!(
-            short_error("error sending request for url (https://example.com/): SOCKS5 connection refused"),
+            short_error(
+                "error sending request for url (https://example.com/): SOCKS5 connection refused"
+            ),
             "connection refused"
         );
         assert_eq!(
-            short_error("error sending request for url (https://example.com/): socks connect failed"),
+            short_error(
+                "error sending request for url (https://example.com/): socks connect failed"
+            ),
             "socks error"
         );
         assert_eq!(
@@ -2610,5 +2599,18 @@ mod tests {
             "error sending request for url (https://example.com/)"
         );
         assert!(short_error(&"x".repeat(500)).len() <= 160);
+    }
+
+    #[test]
+    fn judge_base_url_strip() {
+        assert_eq!(
+            judge_base_url("https://proxycheck.lmtunnel.com/judge"),
+            Some("https://proxycheck.lmtunnel.com".to_string())
+        );
+        assert_eq!(
+            judge_base_url("https://proxycheck.lmtunnel.com/generate_204/"),
+            Some("https://proxycheck.lmtunnel.com".to_string())
+        );
+        assert_eq!(judge_base_url("https://example.com/"), None);
     }
 }
