@@ -82,6 +82,10 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
+      # gh resolves the repo via git, so checkout is required even though
+      # no files are used.
+      - uses: actions/checkout@v4
+
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
