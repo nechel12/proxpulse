@@ -13,10 +13,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-22.04 (not 24.04): older glibc → runs on more distros.
-        # macos-latest runners are ARM64; there is no x86_64 (Intel) build
-        # (no Mac to test it, see README).
-        platform: [windows-latest, ubuntu-22.04, macos-latest]
+        include:
+          # ubuntu-22.04 (not 24.04): older glibc → runs on more distros.
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+          # macos-latest runners are ARM64. The Intel build is unsigned
+          # and untested (no Mac, see README).
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +40,10 @@ jobs:
           node-version: 20
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install macOS targets
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - run: npm ci
 
@@ -49,6 +61,7 @@ jobs:
           releaseBody: "See the assets below to download and install this version."
           releaseDraft: false
           prerelease: false
+          args: ${{ matrix.args }}
 
       # Portable exe is not a Tauri bundle target — upload the raw binary.
       # Windows-only (Linux already ships portable AppImage,
@@ -61,3 +74,35 @@ jobs:
         run: |
           cp src-tauri/target/release/proxpulse.exe "ProxPulse_${{ github.ref_name }}_portable.exe"
           gh release upload "${{ github.ref_name }}" "ProxPulse_${{ github.ref_name }}_portable.exe" --clobber
+
+  # Replaces the placeholder body with an exact file → platform map
+  # (filenames contain the version, so it is generated here, not static).
+  # Runs after every platform job (tauri-action must not overwrite after).
+  notes:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          TAG="$GITHUB_REF_NAME"
+          gh release edit "$TAG" --notes "## What to download
+
+          **Windows (x64)**
+          - \`ProxPulse_${VER}_x64-setup.exe\` — installer (recommended, auto-updates)
+          - \`ProxPulse_${VER}_x64_en-US.msi\` — MSI installer (auto-updates)
+          - \`ProxPulse_${TAG}_portable.exe\` — portable, no install (update manually)
+
+          **Linux (x64)**
+          - \`ProxPulse_${VER}_amd64.AppImage\` — portable (update manually)
+          - \`ProxPulse_${VER}_amd64.deb\` — Debian/Ubuntu (auto-updates)
+          - \`ProxPulse-${VER}-1.x86_64.rpm\` — Fedora/openSUSE (auto-updates)
+
+          **macOS (Apple Silicon)** — unsigned, see README for Gatekeeper steps
+          - \`ProxPulse_${VER}_aarch64.dmg\`
+
+          **macOS (Intel)** — unsigned and untested
+          - \`ProxPulse_${VER}_x86_64.dmg\`
+
+          \`latest.json\` and \`.sig\` files are for the built-in updater, you do not need to download them."

@@ -13,15 +13,16 @@ Dark theme with red accents, Russian and English UI.
 
 > Ready builds — under [Releases](https://github.com/nechel12/proxpulse/releases):
 > Windows (`-setup.exe` / `.msi` installer + portable `.exe`),
-> Linux (`.AppImage` / `.deb`), macOS (`.dmg`, Apple Silicon only).
+> Linux (`.AppImage` / `.deb` / `.rpm`), macOS (`.dmg`, Apple Silicon and Intel).
 > Installed versions update themselves (Info tab → check for updates),
 > portable is updated by downloading the new file manually.
+> Which file to grab is spelled out in each release's description.
 >
-> macOS: unsigned build (no Apple Developer certificate) —
+> macOS: unsigned builds (no Apple Developer certificate) —
 > on first launch: right-click → Open (or `xattr -cr ProxPulse.app`).
-> The author builds blind (no Mac available), so the macOS build is
-> provided as-is with no guarantee it works — please attach the
-> Info-tab diagnostics when reporting issues.
+> The author builds blind (no Mac available): macOS builds are verified
+> by successful compilation only, never test-run, so no guarantee they
+> work. Please attach the Info-tab diagnostics when reporting issues.
 
 ## Quick start
 
