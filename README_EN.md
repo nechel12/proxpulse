@@ -1,6 +1,6 @@
 # ProxPulse
 
-[![GitHub release](https://img.shields.io/github/v/release/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/releases) [![Downloads](https://img.shields.io/github/downloads/nechel12/proxpulse/total)](https://github.com/nechel12/proxpulse/releases) [![Release build](https://github.com/nechel12/proxpulse/actions/workflows/release.yml/badge.svg)](https://github.com/nechel12/proxpulse/actions/workflows/release.yml) ![Windows](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white) [![License](https://img.shields.io/github/license/nechel12/proxpulse)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/releases) [![Downloads](https://img.shields.io/github/downloads/nechel12/proxpulse/total)](https://github.com/nechel12/proxpulse/releases) [![Release build](https://github.com/nechel12/proxpulse/actions/workflows/release.yml/badge.svg)](https://github.com/nechel12/proxpulse/actions/workflows/release.yml) ![Windows](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white) ![Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black) ![macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white) [![License](https://img.shields.io/github/license/nechel12/proxpulse)](LICENSE)
 
 *[Русская версия](README.md)*
 
