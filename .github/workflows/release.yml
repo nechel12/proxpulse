@@ -107,6 +107,6 @@ jobs:
           - \`ProxPulse_${VER}_aarch64.dmg\`
 
           **macOS (Intel)** — unsigned and untested
-          - \`ProxPulse_${VER}_x86_64.dmg\`
+          - \`ProxPulse_${VER}_x64.dmg\`
 
           \`latest.json\` and \`.sig\` files are for the built-in updater, you do not need to download them."
