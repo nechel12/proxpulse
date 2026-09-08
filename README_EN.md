@@ -11,15 +11,24 @@ timer-based auto-checks and posting alive proxies to webhooks.
 Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
 Dark theme with red accents, Russian and English UI.
 
-> Ready Windows build — under [Releases](https://github.com/nechel12/proxpulse/releases):
-> installer (`-setup.exe` / `.msi`) and portable `.exe`. The installed version
-> updates itself (Info tab → check for updates), portable is updated
-> by downloading the new file manually.
+> Ready builds — under [Releases](https://github.com/nechel12/proxpulse/releases):
+> Windows (`-setup.exe` / `.msi` installer + portable `.exe`),
+> Linux (`.AppImage` / `.deb`), macOS (`.dmg`, Apple Silicon only).
+> Installed versions update themselves (Info tab → check for updates),
+> portable is updated by downloading the new file manually.
+>
+> macOS: unsigned build (no Apple Developer certificate) —
+> on first launch: right-click → Open (or `xattr -cr ProxPulse.app`).
+> The author builds blind (no Mac available), so the macOS build is
+> provided as-is with no guarantee it works — please attach the
+> Info-tab diagnostics when reporting issues.
 
 ## Quick start
 
 Requires [Node.js 18+](https://nodejs.org/), [Rust](https://rustup.rs/)
-and WebView2 (built into Windows 10/11).
+and WebView2 (built into Windows 10/11). Linux builds additionally need
+system packages (WebKitGTK etc. — see the Install Linux build deps step
+in `.github/workflows/release.yml`).
 
 ```sh
 npm install

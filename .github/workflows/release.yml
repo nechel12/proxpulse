@@ -13,10 +13,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest]
+        # ubuntu-22.04 (not 24.04): older glibc → runs on more distros.
+        # macos-latest runners are ARM64; there is no x86_64 (Intel) build
+        # (no Mac to test it, see README).
+        platform: [windows-latest, ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Linux build deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - uses: actions/setup-node@v4
         with:
@@ -28,7 +37,8 @@ jobs:
 
       # Before tagging: bump version in package.json,
       # src-tauri/tauri.conf.json and src-tauri/Cargo.toml to match.
-      # Signing key lives in repo secrets as TAURI_SIGNING_PRIVATE_KEY.
+      # Signing key lives in repo secrets as TAURI_SIGNING_PRIVATE_KEY
+      # (one minisign key signs every platform).
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -41,8 +51,10 @@ jobs:
           prerelease: false
 
       # Portable exe is not a Tauri bundle target — upload the raw binary.
-      # Runs after tauri-action created the release above.
+      # Windows-only (Linux already ships portable AppImage,
+      # macOS ships .app.tar.gz). Runs after tauri-action created the release.
       - name: Upload portable exe
+        if: matrix.platform == 'windows-latest'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

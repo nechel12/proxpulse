@@ -11,15 +11,24 @@
 Стек: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
 Тёмная тема с красными акцентами, русский и английский язык.
 
-> Готовая сборка для Windows — во вкладке [Releases](https://github.com/nechel12/proxpulse/releases):
-> установщик (`-setup.exe` / `.msi`) и portable `.exe`. Установленная версия
-> обновляется сама (вкладка «Инфо» → проверка обновлений), portable
-> обновляется скачиванием нового файла вручную.
+> Готовые сборки — во вкладке [Releases](https://github.com/nechel12/proxpulse/releases):
+> Windows (установщик `-setup.exe` / `.msi` + portable `.exe`),
+> Linux (`.AppImage` / `.deb`), macOS (`.dmg`, только Apple Silicon).
+> Установленные версии обновляются сами (вкладка «Инфо» → проверка
+> обновлений), portable — скачиванием нового файла вручную.
+>
+> macOS: сборка без подписи Apple (сертификата разработчика нет) —
+> при первом запуске: ПКМ → Открыть (или `xattr -cr ProxPulse.app`).
+> Автор собирает вслепую (Mac отсутствует), работоспособность
+> macOS-версии не гарантируется — при проблемах прикладывайте
+> диагностику из вкладки «Инфо».
 
 ## Быстрый старт
 
 Нужны [Node.js 18+](https://nodejs.org/), [Rust](https://rustup.rs/)
-и WebView2 (в Windows 10/11 уже встроен).
+и WebView2 (в Windows 10/11 уже встроен). Для сборки под Linux нужны
+системные пакеты (WebKitGTK и др. — см. шаг Install Linux build deps
+в `.github/workflows/release.yml`).
 
 ```sh
 npm install

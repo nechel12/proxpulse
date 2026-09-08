@@ -1,6 +1,6 @@
 [package]
 name = "proxpulse"
-version = "0.4.1"
+version = "0.4.2"
 description = "ProxPulse — fast proxy checker"
 authors = ["nechel12"]
 edition = "2021"
