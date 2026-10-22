@@ -48,6 +48,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     judge_fast: "Быстрая", judge_full: "Полная",
     profile: "Профиль", profile_save: "Сохранить", profile_del: "Удалить",
     profile_none: "— пресет —", profile_name: "Название профиля",
+    profile_limit: "Лимит профилей: 20.",
+    modal_ok: "Сохранить", modal_cancel: "Отмена",
     prof_fast: "Быстрый", prof_deep: "Глубокий", prof_judge: "Judge",
     f_timeout: "Таймаут, мс", f_threads: "Потоки", f_repeats: "Замеры",
     f_protonoscheme: "Тип без схемы", opt_http: "HTTP",
@@ -67,6 +69,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     net_idle: "ожидание", net_work: "проверка {s}с", net_done: "готово", net_stopped: "остановлено",
     st_ready: "Готов к проверке.", st_empty: "Список пуст — вставь прокси.",
     st_badurl: "Тестовый URL должен начинаться с http(s)://",
+    st_done_trunc: "Готово за {secs}с. Живых: {alive}/{total}. Проверены первые {n} из списка.",
     st_checking: "Проверка {done}/{total} ...", st_done: "Готово за {secs}с. Живых: {alive}/{total}.",
     st_stopped: "Остановлено. Живых: {alive}/{total}.", st_stopping: "Останавливаю...",
     st_cleared: "Результат очищен.", st_nocopy: "Нечего копировать.",
@@ -86,6 +89,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     pool_sort_ping: "Пинг", pool_sort_country: "Страна",
     pool_hint: "Пул пополняется автоматически после каждой проверки.",
     pool_empty: "Пусто — запусти проверку.", pool_synced: "Пул: {n}.",
+    pool_sync_err: "Не удалось синхронизировать пул.",
     srv_on: "Сервер на {addr}.", srv_off: "Сервер выключен.",
     srv_err_empty: "Пул пуст — сначала проверь прокси.", srv_err: "Ошибка сервера: {e}",
     tray_hide: "Скрыть в трей", tab_auto: "Авто", tab_info: "Инфо",
@@ -107,12 +111,13 @@ const I18N: Record<Lang, Record<string, string>> = {
     diag_title: "▸ Диагностика", diag_ver: "Версия", diag_copy: "Копировать",
     diag_upd: "Проверить обновления", upd_open: "Открыть релиз",
     upd_latest: "Установлена последняя ({v})", upd_found: "Доступна {v} (у тебя {cur})",
-    upd_none: "Релизов пока нет", upd_fail: "Не удалось проверить",
+    upd_fail: "Не удалось проверить",
     upd_install: "Установить", upd_confirm: "Установить {v}? Приложение перезапустится.",
     upd_installing: "Установка…", upd_restart: "Установлено, перезапусти приложение",
     auto_running: "Автопроверка {n} шт...",
     auto_pruned: "Автопроверка: живых {alive}/{total}.",
     auto_skip: "Пропуск: идёт другая проверка.",
+    auto_err: "Ошибка автопроверки: {e}",
     webhook_sent: "Вебхук: {r}", webhook_fail: "Вебхук не ушёл: {e}",
     webhook_empty: "Пул пуст, отправлять нечего.",
   },
@@ -135,6 +140,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     judge_fast: "Fast", judge_full: "Full",
     profile: "Profile", profile_save: "Save", profile_del: "Delete",
     profile_none: "— preset —", profile_name: "Profile name",
+    profile_limit: "Profile limit: 20.",
+    modal_ok: "Save", modal_cancel: "Cancel",
     prof_fast: "Fast", prof_deep: "Deep", prof_judge: "Judge",
     f_timeout: "Timeout, ms", f_threads: "Threads", f_repeats: "Samples",
     f_protonoscheme: "No-scheme type", opt_http: "HTTP",
@@ -154,6 +161,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     net_idle: "idle", net_work: "checking {s}s", net_done: "done", net_stopped: "stopped",
     st_ready: "Ready.", st_empty: "List is empty — paste proxies.",
     st_badurl: "Test URL must start with http(s)://",
+    st_done_trunc: "Done in {secs}s. Alive: {alive}/{total}. Only the first {n} were checked.",
     st_checking: "Checking {done}/{total} ...", st_done: "Done in {secs}s. Alive: {alive}/{total}.",
     st_stopped: "Stopped. Alive: {alive}/{total}.", st_stopping: "Stopping...",
     st_cleared: "Results cleared.", st_nocopy: "Nothing to copy.",
@@ -173,6 +181,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     pool_sort_ping: "Ping", pool_sort_country: "Country",
     pool_hint: "Pool auto-fills after every check.",
     pool_empty: "Empty — run a check.", pool_synced: "Pool: {n}.",
+    pool_sync_err: "Failed to sync the pool.",
     srv_on: "Server on {addr}.", srv_off: "Server off.",
     srv_err_empty: "Pool is empty — check proxies first.", srv_err: "Server error: {e}",
     tray_hide: "Hide to tray", tab_auto: "Auto", tab_info: "Info",
@@ -194,12 +203,13 @@ const I18N: Record<Lang, Record<string, string>> = {
     diag_title: "▸ Diagnostics", diag_ver: "Version", diag_copy: "Copy",
     diag_upd: "Check for updates", upd_open: "Open release",
     upd_latest: "Up to date ({v})", upd_found: "Available {v} (yours {cur})",
-    upd_none: "No releases yet", upd_fail: "Check failed",
+    upd_fail: "Check failed",
     upd_install: "Install", upd_confirm: "Install {v}? The app will restart.",
     upd_installing: "Installing…", upd_restart: "Installed — restart the app",
     auto_running: "Auto-checking {n}...",
     auto_pruned: "Auto-check: {alive}/{total} alive.",
     auto_skip: "Skipped: another check is running.",
+    auto_err: "Auto-check failed: {e}",
     webhook_sent: "Webhook: {r}", webhook_fail: "Webhook failed: {e}",
     webhook_empty: "Pool is empty, nothing to send.",
   },
@@ -211,7 +221,7 @@ if (lang !== "ru" && lang !== "en") lang = "ru";
 function t(key: string, params?: Record<string, string | number>): string {
   let s = I18N[lang][key] ?? I18N.ru[key] ?? key;
   if (params) {
-    for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v));
+    for (const [k, v] of Object.entries(params)) s = s.split(`{${k}}`).join(String(v));
   }
   return s;
 }
@@ -230,6 +240,7 @@ let running = false;
 let includeDead = false;
 type PoolItem = { raw: string; latency: number | null; country: string | null };
 let dispatchPool: PoolItem[] = [];
+let poolGen = 0;
 let pollTimer: number | undefined;
 let autoBusy = false;
 let dispAutoTimer: number | undefined;
@@ -296,6 +307,57 @@ type ProfileData = {
   precheckTimeout: string;
   judgeFull: boolean;
 };
+
+const PROFILE_DEFAULTS: ProfileData = {
+  testUrlSel: "https://www.google.com/generate_204",
+  customUrl: "",
+  timeout: "5000",
+  concurrency: "50",
+  repeats: "1",
+  defaultProto: "http",
+  geo: true,
+  anon: true,
+  tamper: true,
+  tls: true,
+  precheck: true,
+  precheckTimeout: "1500",
+  judgeFull: true,
+};
+
+const TEST_URL_VALUES = [
+  "https://www.google.com/generate_204",
+  "https://cp.cloudflare.com/generate_204",
+  "https://api.ipify.org",
+  "https://httpbin.org/ip",
+  "https://ip-api.com/json",
+  "https://example.com",
+  "judge",
+];
+
+function sanitizeProfile(raw: unknown): ProfileData | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Partial<ProfileData>;
+  const str = (v: unknown, fb: string, re?: RegExp) =>
+    typeof v === "string" && (!re || re.test(v)) ? v : fb;
+  const bool = (v: unknown, fb: boolean) => (typeof v === "boolean" ? v : fb);
+  const urlSel = str(o.testUrlSel, PROFILE_DEFAULTS.testUrlSel);
+  const proto = str(o.defaultProto, PROFILE_DEFAULTS.defaultProto);
+  return {
+    testUrlSel: TEST_URL_VALUES.includes(urlSel) ? urlSel : PROFILE_DEFAULTS.testUrlSel,
+    customUrl: str(o.customUrl, ""),
+    timeout: str(o.timeout, PROFILE_DEFAULTS.timeout, /^\d+$/),
+    concurrency: str(o.concurrency, PROFILE_DEFAULTS.concurrency, /^\d+$/),
+    repeats: str(o.repeats, PROFILE_DEFAULTS.repeats, /^\d+$/),
+    defaultProto: ["http", "socks5", "socks4"].includes(proto) ? proto : "http",
+    geo: bool(o.geo, true),
+    anon: bool(o.anon, true),
+    tamper: bool(o.tamper, true),
+    tls: bool(o.tls, true),
+    precheck: bool(o.precheck, true),
+    precheckTimeout: str(o.precheckTimeout, PROFILE_DEFAULTS.precheckTimeout, /^\d+$/),
+    judgeFull: bool(o.judgeFull, true),
+  };
+}
 
 const BUILTIN_PROFILES: { id: string; nameKey: string; data: ProfileData }[] = [
   {
@@ -364,12 +426,18 @@ function applyProfile(d: ProfileData): void {
 }
 
 function loadProfiles(): void {
+  customProfiles = [];
   try {
     const raw = localStorage.getItem("pp-profiles");
     const arr = raw ? JSON.parse(raw) : null;
-    customProfiles = Array.isArray(arr)
-      ? arr.filter((p) => p && typeof p.name === "string" && p.data && typeof p.data === "object").slice(0, 20)
-      : [];
+    if (!Array.isArray(arr)) return;
+    for (const p of arr) {
+      if (!p || typeof p.name !== "string" || !p.name.trim()) continue;
+      const data = sanitizeProfile(p.data);
+      if (!data) continue;
+      customProfiles.push({ name: p.name.trim().slice(0, 40), data });
+      if (customProfiles.length >= 20) break;
+    }
   } catch {
     customProfiles = [];
   }
@@ -423,6 +491,42 @@ function setNet(state: "idle" | "work" | "done", text: string) {
   const dot = $("net-dot");
   dot.className = "dot " + state;
   $("net-text").textContent = text;
+}
+
+function askText(title: string, value = ""): Promise<string | null> {
+  const overlay = $("text-modal");
+  const input = $("text-modal-input") as HTMLInputElement;
+  const ok = $("text-modal-ok") as HTMLButtonElement;
+  const cancel = $("text-modal-cancel") as HTMLButtonElement;
+  $("text-modal-title").textContent = title;
+  input.value = value;
+  overlay.classList.remove("hidden");
+  input.focus();
+  input.select();
+  return new Promise((resolve) => {
+    const done = (v: string | null) => {
+      overlay.classList.add("hidden");
+      ok.onclick = null;
+      cancel.onclick = null;
+      overlay.onclick = null;
+      input.onkeydown = null;
+      resolve(v);
+    };
+    ok.onclick = () => done(input.value);
+    cancel.onclick = () => done(null);
+    overlay.onclick = (e) => {
+      if (e.target === overlay) done(null);
+    };
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        done(input.value);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        done(null);
+      }
+    };
+  });
 }
 
 function applyI18n() {
@@ -663,6 +767,7 @@ function mergePool(items: { raw: string; latency: number | null; country?: strin
       continue;
     }
     if (at == null) {
+      if (dispatchPool.length >= MAX_PROXIES) continue;
       idx.set(it.raw, dispatchPool.length);
       dispatchPool.push({ raw: it.raw, latency: it.latency, country: it.country ?? null });
     } else {
@@ -718,8 +823,20 @@ function loadGeoCache(): void {
     const raw = localStorage.getItem("pp-geocache");
     if (!raw) return;
     const arr = JSON.parse(raw) as [string, GeoFields][];
+    const str = (v: unknown) => (typeof v === "string" ? v : null);
     for (const [k, v] of arr.slice(-GEO_CACHE_MAX)) {
-      if (typeof k === "string" && v && typeof v === "object") geoCache.set(k, v);
+      if (typeof k !== "string" || !v || typeof v !== "object") continue;
+      const g = v as Partial<GeoFields>;
+      geoCache.set(k, {
+        ip: str(g.ip),
+        country: str(g.country),
+        country_code: str(g.country_code),
+        city: str(g.city),
+        isp: str(g.isp),
+        org: str(g.org),
+        asn: str(g.asn),
+        ip_type: str(g.ip_type),
+      });
     }
   } catch { /* ignore */ }
 }
@@ -777,6 +894,8 @@ function readCheckSettings() {
   };
 }
 
+const MAX_PROXIES = 20_000;
+
 async function runCheckList(list: string[], onProgress?: (done: number, total: number) => void, onLive?: (live: ProxyResult[]) => void): Promise<ProxyResult[]> {
   const s = readCheckSettings();
   if (!/^https?:\/\//i.test(s.testUrl)) throw new Error("badurl");
@@ -794,45 +913,37 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
     lastPaint = now;
     out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
     onLive?.([...out]);
-    render();
-    updateCounts();
-    setProgress(done, total);
+    onProgress?.(done, total);
   };
-  const CHUNK = 120;
-  for (let i = 0; i < list.length; i += CHUNK) {
-    if (stopFlag) break;
-    const chunk = list.slice(i, i + CHUNK);
-    const baseCount = out.length;
-    const channel = new Channel<ProxyResult>();
-    channel.onmessage = (r) => {
-      pushLive(r);
-      paint(i + out.length - baseCount, list.length);
-    };
-    try {
-      const part = await invoke<ProxyResult[]>("check_proxies", {
-        proxies: chunk,
-        testUrl: s.testUrl,
-        timeoutMs: s.timeoutMs,
-        concurrency: s.concurrency,
-        defaultProto: s.defaultProto,
-        repeats: s.repeats,
-        withGeo: s.withGeo,
-        withAnonymity: s.withAnonymity,
-        withTamper: s.withTamper,
-        withTls: s.withTls,
-        precheck: s.precheck,
-        precheckTimeoutMs: s.precheckTimeoutMs,
-        judgeMode: s.judgeMode,
-        geoCache: relevantGeoCache(list),
-        onResult: channel,
-      });
-      for (const r of part) pushLive(r);
-    } catch (e) {
-      const msg = String(e);
-      for (const p of chunk) pushLive(deadStub(p, msg));
-    }
-    onProgress?.(Math.min(list.length, i + CHUNK), list.length);
+  const channel = new Channel<ProxyResult>();
+  channel.onmessage = (r) => {
+    pushLive(r);
+    paint(out.length, list.length);
+  };
+  try {
+    const part = await invoke<ProxyResult[]>("check_proxies", {
+      proxies: list,
+      testUrl: s.testUrl,
+      timeoutMs: s.timeoutMs,
+      concurrency: s.concurrency,
+      defaultProto: s.defaultProto,
+      repeats: s.repeats,
+      withGeo: s.withGeo,
+      withAnonymity: s.withAnonymity,
+      withTamper: s.withTamper,
+      withTls: s.withTls,
+      precheck: s.precheck,
+      precheckTimeoutMs: s.precheckTimeoutMs,
+      judgeMode: s.judgeMode,
+      geoCache: relevantGeoCache(list),
+      onResult: channel,
+    });
+    for (const r of part) pushLive(r);
+  } catch (e) {
+    const msg = String(e);
+    for (const p of list) pushLive(deadStub(p, msg));
   }
+  paint(out.length, list.length);
   out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
   return out;
 }
@@ -915,7 +1026,8 @@ async function syncPool(notify: boolean): Promise<number> {
     if (notify) setStatusT("pool_synced", { n });
     return n;
   } catch {
-    return 0;
+    if (notify) setStatusT("pool_sync_err");
+    return -1;
   }
 }
 
@@ -932,20 +1044,38 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
   }
   autoBusy = true;
   stopFlag = false;
+  const gen = poolGen;
+  ($("btn-stop") as HTMLButtonElement).disabled = false;
   try {
     if (el) el.textContent = t("auto_running", { n: dispatchPool.length });
     const res = await runCheckList(dispatchPool.map((p) => p.raw));
+    if (stopFlag) {
+      if (el) el.textContent = t("st_stopped", { alive: res.filter((r) => r.alive).length, total: res.length });
+      return;
+    }
+    if (gen !== poolGen) {
+      if (el) el.textContent = t("pool_empty");
+      return;
+    }
     const alive = res.filter((r) => r.alive && passPing(r.latency_ms));
     learnGeo(res);
     dispatchPool = alive.map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) }));
     renderPool();
     updateCounts();
-    await syncPool(false);
+    const synced = await syncPool(false);
+    if (synced < 0) {
+      if (el) el.textContent = t("pool_sync_err");
+      return;
+    }
     pushPingPoint();
     if (el) el.textContent = `${t("auto_pruned", { alive: alive.length, total: res.length })} ${new Date().toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US")}`;
     if (sendHook) await sendWebhook(false);
+  } catch (e) {
+    const msg = String(e);
+    if (el) el.textContent = msg.includes("badurl") ? t("st_badurl") : t("auto_err", { e: msg });
   } finally {
     autoBusy = false;
+    ($("btn-stop") as HTMLButtonElement).disabled = true;
   }
 }
 
@@ -1075,10 +1205,15 @@ async function sendWebhook(manual: boolean): Promise<void> {
 
 async function start() {
   if (running || autoBusy) return;
-  const list = parseInput(($("proxy-input") as HTMLTextAreaElement).value);
+  let list = parseInput(($("proxy-input") as HTMLTextAreaElement).value);
   if (list.length === 0) {
     setStatusT("st_empty");
     return;
+  }
+  let truncated = false;
+  if (list.length > MAX_PROXIES) {
+    list = list.slice(0, MAX_PROXIES);
+    truncated = true;
   }
   if (!/^https?:\/\//i.test(effectiveTestUrl())) {
     setStatusT("st_badurl");
@@ -1110,20 +1245,23 @@ async function start() {
       results = live;
     });
   } catch {
-    results = [];
+    /* keep partial results delivered through the channel */
+  } finally {
+    running = false;
+    ($("btn-start") as HTMLButtonElement).disabled = false;
+    ($("btn-stop") as HTMLButtonElement).disabled = true;
   }
   learnGeo(results);
   render();
   updateCounts();
+  setProgress(stopFlag ? results.length : list.length, list.length);
 
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   const alive = results.filter((r) => r.alive).length;
   if (stopFlag) setStatusT("st_stopped", { alive, total: results.length });
+  else if (truncated) setStatusT("st_done_trunc", { secs, alive, total: results.length, n: MAX_PROXIES });
   else setStatusT("st_done", { secs, alive, total: results.length });
   setNet("done", stopFlag ? t("net_stopped") : t("net_done"));
-  ($("btn-start") as HTMLButtonElement).disabled = false;
-  ($("btn-stop") as HTMLButtonElement).disabled = true;
-  running = false;
 
   // merge alive into dispatcher pool (existing entries kept)
   mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) })));
@@ -1384,11 +1522,17 @@ window.addEventListener("DOMContentLoaded", () => {
     updateCounts();
     const n = await syncPool(false);
     const el = document.getElementById(statusElId);
+    if (n < 0) {
+      if (el) el.textContent = t("pool_sync_err");
+      lastStatus = { key: "pool_sync_err" };
+      return;
+    }
     if (el) el.textContent = t("pool_synced", { n });
     lastStatus = { key: "pool_synced", params: { n } };
   }
 
   function doPoolClear(): void {
+    poolGen++;
     dispatchPool = [];
     void syncPool(false);
     renderPool();
@@ -1486,15 +1630,19 @@ window.addEventListener("DOMContentLoaded", () => {
     if (d) applyProfile(d);
     ($("btn-profile-del") as HTMLButtonElement).disabled = !id.startsWith("custom:");
   });
-  ($("btn-profile-save") as HTMLButtonElement).addEventListener("click", () => {
-    const res = window.prompt(t("profile_name"));
+  ($("btn-profile-save") as HTMLButtonElement).addEventListener("click", async () => {
+    const res = await askText(t("profile_name"));
     if (res == null) return;
-    const name = res.trim();
+    const name = res.trim().slice(0, 40);
     if (!name) return;
     const data = snapshotProfile();
     const at = customProfiles.findIndex((c) => c.name === name);
     if (at >= 0) customProfiles[at] = { name, data };
-    else customProfiles.push({ name, data });
+    else if (customProfiles.length < 20) customProfiles.push({ name, data });
+    else {
+      setStatusT("profile_limit");
+      return;
+    }
     saveProfiles();
     currentProfileId = "custom:" + name;
     renderProfileList();
@@ -1541,7 +1689,8 @@ window.addEventListener("DOMContentLoaded", () => {
         renderPool();
         updateCounts();
       }
-      await syncPool(false);
+      const synced = await syncPool(false);
+      if (synced < 0) throw new Error(t("pool_sync_err"));
       const addr = await invoke<string>("start_local_proxy", { port, mode, listener });
       ($("srv-status") as HTMLElement).textContent = t("srv_on", { addr });
       try {
@@ -1582,6 +1731,7 @@ window.addEventListener("DOMContentLoaded", () => {
     .then((v) => {
       ($("app-ver") as HTMLElement).textContent = v;
       ($("brand-ver") as HTMLElement).textContent = `proxy checker // v${v}`;
+      ($("brand-ver-info") as HTMLElement).textContent = `proxy checker // v${v}`;
     })
     .catch(() => { /* ignore */ });
   ($("btn-copy-diag") as HTMLButtonElement).addEventListener("click", async () => {

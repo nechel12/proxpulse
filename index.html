@@ -343,7 +343,7 @@
           <div class="brand-mark">◈</div>
           <div>
             <div class="brand-name">PROX<span>PULSE</span></div>
-            <div class="brand-sub">proxy checker // v0.3</div>
+            <div class="brand-sub" id="brand-ver-info">proxy checker // v0.4.3</div>
           </div>
         </div>
         <p class="hint" data-i18n="info_about">Быстрый чекер прокси: проверка живости, гео, анонимности и TLS, локальный диспетчер и авторассылка пула на вебхук.</p>
@@ -375,5 +375,16 @@
     <footer class="foot">
       <span id="foot-info"></span>
     </footer>
+
+    <div id="text-modal" class="modal-overlay hidden">
+      <div class="modal-box">
+        <div class="modal-title" id="text-modal-title"></div>
+        <input id="text-modal-input" type="text" maxlength="40" autocomplete="off" spellcheck="false" />
+        <div class="modal-actions">
+          <button id="text-modal-cancel" class="btn ghost" data-i18n="modal_cancel">Отмена</button>
+          <button id="text-modal-ok" class="btn primary" data-i18n="modal_ok">OK</button>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

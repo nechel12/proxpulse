@@ -270,6 +270,23 @@ tr.empty td { text-align: center; color: var(--mut); padding: 30px; font-family:
 }
 .scroll-box { white-space: pre-wrap; word-break: break-all; max-height: 140px; overflow-y: auto; }
 #srv-pill.on { background: rgba(0,255,163,.12); color: var(--ok); border: 1px solid rgba(0,255,163,.4); }
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+  background: rgba(0,0,0,.65); backdrop-filter: blur(3px);
+}
+.modal-box {
+  width: min(360px, calc(100vw - 40px)); background: var(--panel);
+  border: 1px solid var(--red); border-radius: 12px; padding: 16px;
+  box-shadow: 0 18px 60px rgba(0,0,0,.7), 0 0 22px rgba(255,30,45,.25);
+}
+.modal-title { font-family: var(--mono); font-size: 12px; letter-spacing: 1px; color: var(--red2); margin-bottom: 10px; text-transform: uppercase; }
+.modal-box input {
+  width: 100%; background: #060608; border: 1px solid var(--line); color: var(--txt);
+  border-radius: 8px; padding: 9px 10px; outline: none; font-size: 13px;
+}
+.modal-box input:focus { border-color: var(--red); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.modal-actions .btn.primary { flex: none; padding: 8px 16px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #26262e; border-radius: 6px; border: 2px solid #060608; }
 ::-webkit-scrollbar-thumb:hover { background: var(--red); }

@@ -140,6 +140,8 @@ export function extractProxiesFromText(text: string): string[] {
     }
     const hashIdx = line.indexOf(" #");
     if (hashIdx > 0) line = line.slice(0, hashIdx).trim();
+    const token = line.split(/[\s,;|]+/)[0];
+    if (token && token !== line && /(?::\d{1,5}|@|:\/\/)/.test(token)) line = token;
     push(line);
   }
 

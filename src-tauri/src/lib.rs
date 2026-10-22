@@ -622,13 +622,7 @@ fn build_client(proxy_url: Option<&str>, timeout: Duration) -> Result<reqwest::C
 }
 
 fn looks_like_ip(s: &str) -> bool {
-    let t = s.trim();
-    if t.is_empty() || t.len() > 64 || t.contains('<') || t.contains(' ') || t.contains('\n') {
-        return false;
-    }
-    t.chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == ':' || c == '-')
-        && (t.contains('.') || t.contains(':'))
+    s.trim().parse::<std::net::IpAddr>().is_ok()
 }
 
 fn derive_ip_type(g: &IpApi) -> Option<String> {
@@ -813,6 +807,14 @@ fn parse_upstream_url(url: &str) -> Option<UpstreamParts> {
     Some((canonical_scheme(scheme), host, port, user, pass))
 }
 
+fn host_for_connect(host: &str) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    }
+}
+
 async fn read_exact_t(s: &mut TcpStream, buf: &mut [u8], d: Duration) -> std::io::Result<()> {
     match tokio::time::timeout(d, s.read_exact(buf)).await {
         Ok(Ok(_)) => Ok(()),
@@ -965,7 +967,8 @@ async fn http_connect(
     pass: Option<String>,
     d: Duration,
 ) -> std::io::Result<TcpStream> {
-    let mut req = format!("CONNECT {t_host}:{t_port} HTTP/1.1\r\nHost: {t_host}:{t_port}\r\n");
+    let host = host_for_connect(t_host);
+    let mut req = format!("CONNECT {host}:{t_port} HTTP/1.1\r\nHost: {host}:{t_port}\r\n");
     if let Some(u) = user {
         let p = pass.unwrap_or_default();
         let enc = base64::engine::general_purpose::STANDARD.encode(format!("{u}:{p}"));
@@ -1013,7 +1016,7 @@ async fn connect_via(
     t_port: u16,
     timeout: Duration,
 ) -> std::io::Result<TcpStream> {
-    let addr = format!("{}:{}", up.host, up.port);
+    let addr = format!("{}:{}", host_for_connect(&up.host), up.port);
     let stream = match tokio::time::timeout(timeout, TcpStream::connect(addr.as_str())).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => return Err(e),
@@ -1434,9 +1437,13 @@ async fn check_candidate_inner(
     res
 }
 
-async fn fetch_baseline() -> Baseline {
+async fn fetch_baseline(flags: CheckFlags) -> Baseline {
     let timeout = Duration::from_millis(9000);
+    let want_ip = flags.judge || flags.anon;
     let direct_ip = async {
+        if !want_ip {
+            return None;
+        }
         let c = build_client(None, timeout).ok()?;
         let r = c.get("https://api.ipify.org").send().await.ok()?;
         if !r.status().is_success() {
@@ -1451,6 +1458,9 @@ async fn fetch_baseline() -> Baseline {
         }
     };
     let example = async {
+        if !flags.tamper {
+            return None;
+        }
         let c = build_client(None, timeout).ok()?;
         let r = c.get("https://example.com").send().await.ok()?;
         if !r.status().is_success() {
@@ -1459,7 +1469,13 @@ async fn fetch_baseline() -> Baseline {
         let t = r.text().await.ok()?;
         Some((t.len(), body_hash(&t)))
     };
-    let (ip, ex, cert) = tokio::join!(direct_ip, example, tls_direct_fp());
+    let cert = async {
+        if !flags.tls {
+            return None;
+        }
+        tls_direct_fp().await
+    };
+    let (ip, ex, cert) = tokio::join!(direct_ip, example, cert);
     let (len, hash) = ex.unzip();
     Baseline {
         direct_ip: ip,
@@ -1544,7 +1560,7 @@ async fn check_proxies(
         None
     };
     let (baseline_res, judge_sha) = tokio::join!(
-        tokio::time::timeout(Duration::from_secs(20), fetch_baseline()),
+        tokio::time::timeout(Duration::from_secs(20), fetch_baseline(flags)),
         async {
             match &judge_base {
                 Some(b) => fetch_direct_judge_sha(b, timeout).await,
@@ -1798,9 +1814,11 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
     } else {
         "Dispatcher: OFF".to_string()
     };
+    let next_disp_txt = format!("Next dispatch: {}", fmt_countdown(info.disp_next));
+    let next_auto_txt = format!("Next auto: {}", fmt_countdown(info.auto_next));
     let sig = format!(
-        "{dispatch_txt}|{:?}|{:?}|{}|{}",
-        info.disp_next, info.auto_next, info.webhook_on, info.webhook_url
+        "{dispatch_txt}|{next_disp_txt}|{next_auto_txt}|{}|{}",
+        info.webhook_on, info.webhook_url
     );
     {
         let last = tray.last_menu.lock().await;
@@ -1816,14 +1834,14 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
         let next_disp = MenuItem::with_id(
             app,
             "next_disp",
-            format!("Next dispatch: {}", fmt_countdown(info.disp_next)),
+            &next_disp_txt,
             false,
             None::<&str>,
         )?;
         let next_auto = MenuItem::with_id(
             app,
             "next_auto",
-            format!("Next auto: {}", fmt_countdown(info.auto_next)),
+            &next_auto_txt,
             false,
             None::<&str>,
         )?;
@@ -1890,7 +1908,9 @@ fn pick_order(len: usize, mode: &str, pool: &[Upstream], rr: &AtomicUsize) -> Ve
 fn parse_target(method: &str, target: &str) -> Option<(String, u16)> {
     if method.eq_ignore_ascii_case("CONNECT") {
         let (h, p) = target.rsplit_once(':')?;
-        return Some((h.trim().to_string(), p.trim().parse().ok()?));
+        let h = h.trim();
+        let host = h.strip_prefix('[').and_then(|x| x.strip_suffix(']')).unwrap_or(h);
+        return Some((host.to_string(), p.trim().parse().ok()?));
     }
     let rest = target.strip_prefix("http://")?;
     let auth = rest.split('/').next()?;
@@ -1907,6 +1927,8 @@ fn parse_target(method: &str, target: &str) -> Option<(String, u16)> {
     }
 }
 
+const MAX_UPSTREAM_ATTEMPTS: usize = 5;
+
 async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
     let pool = st.pool.lock().await;
     if pool.is_empty() {
@@ -1914,14 +1936,18 @@ async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
     }
     let mode = st.mode.lock().await.clone();
     let order = pick_order(pool.len(), &mode, &pool, &st.rr);
-    order.iter().map(|&i| pool[i].clone()).collect()
+    order
+        .iter()
+        .take(MAX_UPSTREAM_ATTEMPTS)
+        .map(|&i| pool[i].clone())
+        .collect()
 }
 
 async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
     // read request head
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
-    let head_ok = loop {
+    loop {
         if buf.len() > 65536 {
             return;
         }
@@ -1932,13 +1958,15 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
         };
         buf.extend_from_slice(&tmp[..n]);
         if buf.windows(4).any(|w| w == b"\r\n\r\n") {
-            break true;
+            break;
         }
-    };
-    if !head_ok {
-        return;
     }
     let head = String::from_utf8_lossy(&buf).to_string();
+    let hdr_end = buf
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|p| p + 4)
+        .unwrap_or(buf.len());
     let mut it = head.split_whitespace();
     let method = it.next().unwrap_or("").to_string();
     let target = it.next().unwrap_or("").to_string();
@@ -1968,6 +1996,9 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                         client
                             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                             .await?;
+                        if hdr_end < buf.len() {
+                            ups.write_all(&buf[hdr_end..]).await?;
+                        }
                     } else {
                         ups.write_all(&buf).await?;
                     }
@@ -2128,7 +2159,10 @@ async fn run_server(listener: TcpListener, st: Arc<DispatchInner>) {
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
         };
         let stc = st.clone();
         tokio::spawn(async move {
@@ -2179,15 +2213,16 @@ async fn start_proxy_inner(
     mode: String,
     listener: String,
 ) -> Result<String, String> {
-    if let Some(h) = inner.handle.lock().await.take() {
-        h.abort();
-    }
     {
         let pool = inner.pool.lock().await;
         if pool.is_empty() {
             return Err("pool is empty".to_string());
         }
     }
+    if let Some(h) = inner.handle.lock().await.take() {
+        h.abort();
+    }
+    inner.running.store(false, Ordering::SeqCst);
     // fallback: requested port, then +1, +2, ... while busy
     let mut port = req_port;
     let tcp = loop {
@@ -2206,6 +2241,8 @@ async fn start_proxy_inner(
     *inner.port.lock().await = port;
     *inner.mode.lock().await = mode.clone();
     *inner.listener.lock().await = listener.clone();
+    *inner.last_error.lock().await = None;
+    *inner.current.lock().await = None;
     let listener_desc = match listener.as_str() {
         "http" => "http",
         "socks5" => "socks5",
@@ -2249,6 +2286,7 @@ async fn stop_local_proxy(state: State<'_, DispatchState>) -> Result<(), String>
         h.abort();
     }
     state.inner.running.store(false, Ordering::SeqCst);
+    *state.inner.current.lock().await = None;
     Ok(())
 }
 
@@ -2266,6 +2304,14 @@ async fn local_proxy_status(state: State<'_, DispatchState>) -> Result<DispatchS
         errors: state.inner.errors.load(Ordering::SeqCst),
         last_error: state.inner.last_error.lock().await.clone(),
     })
+}
+
+fn csv_cell(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
 }
 
 #[tauri::command]
@@ -2294,7 +2340,7 @@ async fn send_webhook(
             for i in &items {
                 s.push_str(&format!(
                     "{},{}\n",
-                    i.raw,
+                    csv_cell(&i.raw),
                     i.latency.map(|v| v.to_string()).unwrap_or_default()
                 ));
             }
@@ -2343,7 +2389,7 @@ async fn fetch_url_text(url: String) -> Result<String, String> {
         .user_agent(concat!("ProxPulse/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
-    let r = client
+    let mut r = client
         .get(url)
         .send()
         .await
@@ -2351,11 +2397,19 @@ async fn fetch_url_text(url: String) -> Result<String, String> {
     if !r.status().is_success() {
         return Err(format!("http {}", r.status().as_u16()));
     }
-    let b = r.bytes().await.map_err(|e| short_error(&e.to_string()))?;
-    if b.len() > 2_097_152 {
-        return Err("too big (2MB max)".to_string());
+    const MAX_BODY: usize = 2_097_152;
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = r
+        .chunk()
+        .await
+        .map_err(|e| short_error(&e.to_string()))?
+    {
+        if body.len() + chunk.len() > MAX_BODY {
+            return Err("too big (2MB max)".to_string());
+        }
+        body.extend_from_slice(&chunk);
     }
-    String::from_utf8(b.to_vec()).map_err(|_| "not text".to_string())
+    String::from_utf8(body).map_err(|_| "not text".to_string())
 }
 
 #[derive(Serialize)]
@@ -2619,6 +2673,10 @@ mod tests {
             Some(("example.com".into(), 443))
         );
         assert_eq!(
+            parse_target("CONNECT", "[::1]:443"),
+            Some(("::1".into(), 443))
+        );
+        assert_eq!(
             parse_target("GET", "http://example.com:8080/path?q=1"),
             Some(("example.com".into(), 8080))
         );
@@ -2648,6 +2706,31 @@ mod tests {
         let b = pick_order(3, "round-robin", &pool, &rr);
         assert_eq!(a, vec![0, 1, 2]);
         assert_eq!(b, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn ipv6_authority_brackets() {
+        assert_eq!(host_for_connect("::1"), "[::1]");
+        assert_eq!(host_for_connect("[::1]"), "[::1]");
+        assert_eq!(host_for_connect("1.2.3.4"), "1.2.3.4");
+        assert_eq!(host_for_connect("example.com"), "example.com");
+    }
+
+    #[test]
+    fn ip_validation_is_strict() {
+        assert!(looks_like_ip("1.2.3.4"));
+        assert!(looks_like_ip("2001:db8::1"));
+        assert!(!looks_like_ip("abc.def"));
+        assert!(!looks_like_ip("1.2.3.4:8080"));
+        assert!(!looks_like_ip("<html>"));
+    }
+
+    #[test]
+    fn csv_escaping() {
+        assert_eq!(csv_cell("1.2.3.4:80"), "1.2.3.4:80");
+        assert_eq!(csv_cell("user,pass"), "\"user,pass\"");
+        assert_eq!(csv_cell("a\"b"), "\"a\"\"b\"");
+        assert_eq!(csv_cell("line\nbreak"), "\"line\nbreak\"");
     }
 
     #[test]

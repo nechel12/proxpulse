@@ -102,4 +102,9 @@ describe("extractProxiesFromText", () => {
   it("drops too-short fragments", () => {
     expect(extractProxiesFromText("ab")).toEqual([]);
   });
+  it("drops trailing comments after proxy tokens", () => {
+    expect(
+      extractProxiesFromText("1.2.3.4:8080, comment\n5.6.7.8:3128; note\nuser:pass@9.9.9.9:1080 here")
+    ).toEqual(["1.2.3.4:8080", "5.6.7.8:3128", "user:pass@9.9.9.9:1080"]);
+  });
 });
