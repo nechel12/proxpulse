@@ -11,6 +11,10 @@ dispatcher, scheduled re-checks and webhook delivery of working proxies.
 Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
 Dark theme with red accents; Russian and English UI.
 
+## Screenshot
+
+![ProxPulse main screen](docs/screenshots/main-en.png)
+
 ## Features
 
 - Liveness, latency, jitter and success-rate checks.
@@ -204,10 +208,10 @@ Stored locally in the browser: language, ping limit, webhooks, geo cache (up to
 
 ## Security
 
-Do not publish working proxies, passwords or other secrets in issues. For
-vulnerability reports, use a private channel to contact the author (for
-example, GitHub Security Advisories if enabled for the repository) rather than
-a public issue.
+Do not publish working proxies, passwords or other secrets in issues. To
+report a vulnerability, use GitHub's private vulnerability reporting:
+[report a vulnerability](https://github.com/nechel12/proxpulse/security/advisories/new).
+See [SECURITY.md](SECURITY.md) for details.
 
 ## Project structure
 
