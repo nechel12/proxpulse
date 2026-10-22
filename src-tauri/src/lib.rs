@@ -4,10 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
+use std::pin::Pin;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     Arc,
 };
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tauri::{
     ipc::Channel,
@@ -15,7 +17,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, State,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Semaphore};
 
@@ -158,6 +160,26 @@ struct Baseline {
     judge_content_sha: Option<String>,
 }
 
+#[derive(Default)]
+struct BaselineCache {
+    direct_ip: Option<(String, Instant)>,
+    example: Option<(usize, u64, Instant)>,
+    cert: Option<(String, Instant)>,
+}
+
+static BASELINE_CACHE: std::sync::OnceLock<Mutex<BaselineCache>> = std::sync::OnceLock::new();
+
+const BASELINE_IP_TTL: Duration = Duration::from_secs(300);
+const BASELINE_PAGE_TTL: Duration = Duration::from_secs(1800);
+
+fn baseline_cache() -> &'static Mutex<BaselineCache> {
+    BASELINE_CACHE.get_or_init(|| Mutex::const_new(BaselineCache::default()))
+}
+
+fn cache_fresh(ts: Instant, ttl: Duration) -> bool {
+    ts.elapsed() < ttl
+}
+
 fn body_hash(s: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     s.hash(&mut h);
@@ -184,7 +206,8 @@ struct CheckFlags {
 
 fn proto_label(scheme: &str) -> String {
     match scheme.to_lowercase().as_str() {
-        "http" | "https" => "HTTP".to_string(),
+        "http" => "HTTP".to_string(),
+        "https" => "HTTPS".to_string(),
         "socks5" | "socks5h" | "socks" => "SOCKS5".to_string(),
         "socks4" | "socks4a" => "SOCKS4".to_string(),
         other => other.to_uppercase(),
@@ -194,7 +217,6 @@ fn proto_label(scheme: &str) -> String {
 fn canonical_scheme(s: &str) -> String {
     match s.to_lowercase().as_str() {
         "socks" => "socks5".to_string(),
-        "https" => "http".to_string(),
         other => other.to_string(),
     }
 }
@@ -815,7 +837,56 @@ fn host_for_connect(host: &str) -> String {
     }
 }
 
-async fn read_exact_t(s: &mut TcpStream, buf: &mut [u8], d: Duration) -> std::io::Result<()> {
+enum ProxyStream {
+    Plain(TcpStream),
+    Tls(Box<tokio_rustls::client::TlsStream<TcpStream>>),
+}
+
+impl AsyncRead for ProxyStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            ProxyStream::Plain(s) => Pin::new(s).poll_read(cx, buf),
+            ProxyStream::Tls(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for ProxyStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match &mut *self {
+            ProxyStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
+            ProxyStream::Tls(s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            ProxyStream::Plain(s) => Pin::new(s).poll_flush(cx),
+            ProxyStream::Tls(s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            ProxyStream::Plain(s) => Pin::new(s).poll_shutdown(cx),
+            ProxyStream::Tls(s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
+async fn read_exact_t<S: AsyncRead + Unpin>(
+    s: &mut S,
+    buf: &mut [u8],
+    d: Duration,
+) -> std::io::Result<()> {
     match tokio::time::timeout(d, s.read_exact(buf)).await {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(e)) => Err(e),
@@ -823,21 +894,25 @@ async fn read_exact_t(s: &mut TcpStream, buf: &mut [u8], d: Duration) -> std::io
     }
 }
 
-async fn write_all_t(s: &mut TcpStream, buf: &[u8], d: Duration) -> std::io::Result<()> {
+async fn write_all_t<S: AsyncWrite + Unpin>(
+    s: &mut S,
+    buf: &[u8],
+    d: Duration,
+) -> std::io::Result<()> {
     match tokio::time::timeout(d, s.write_all(buf)).await {
         Ok(r) => r,
         Err(_) => Err(Error::new(ErrorKind::TimedOut, "write timeout")),
     }
 }
 
-async fn socks5_connect(
-    mut s: TcpStream,
+async fn socks5_connect<S: AsyncRead + AsyncWrite + Unpin>(
+    mut s: S,
     t_host: &str,
     t_port: u16,
     user: Option<String>,
     pass: Option<String>,
     d: Duration,
-) -> std::io::Result<TcpStream> {
+) -> std::io::Result<S> {
     if user.is_some() {
         write_all_t(&mut s, &[0x05, 0x01, 0x02], d).await?;
     } else {
@@ -924,29 +999,15 @@ async fn socks5_connect(
     Ok(s)
 }
 
-async fn socks4_connect(
-    mut s: TcpStream,
+async fn socks4_connect<S: AsyncRead + AsyncWrite + Unpin>(
+    mut s: S,
     t_host: &str,
     t_port: u16,
     user: Option<String>,
+    allow_ipv6_domain: bool,
     d: Duration,
-) -> std::io::Result<TcpStream> {
-    let mut req = vec![0x04, 0x01];
-    req.extend_from_slice(&t_port.to_be_bytes());
-    let mut domain: Option<&[u8]> = None;
-    if let Ok(IpAddr::V4(v)) = t_host.parse::<IpAddr>() {
-        req.extend_from_slice(&v.octets());
-    } else {
-        req.extend_from_slice(&[0, 0, 0, 1]);
-        domain = Some(t_host.as_bytes());
-    }
-    let uid = user.unwrap_or_default();
-    req.extend_from_slice(uid.as_bytes());
-    req.push(0x00);
-    if let Some(dm) = domain {
-        req.extend_from_slice(dm);
-        req.push(0x00);
-    }
+) -> std::io::Result<S> {
+    let req = build_socks4_request(t_host, t_port, user.as_deref(), allow_ipv6_domain)?;
     write_all_t(&mut s, &req, d).await?;
     let mut resp = [0u8; 8];
     read_exact_t(&mut s, &mut resp, d).await?;
@@ -959,14 +1020,58 @@ async fn socks4_connect(
     Ok(s)
 }
 
-async fn http_connect(
-    mut s: TcpStream,
+fn build_socks4_request(
+    t_host: &str,
+    t_port: u16,
+    user: Option<&str>,
+    allow_ipv6_domain: bool,
+) -> std::io::Result<Vec<u8>> {
+    let mut req = vec![0x04, 0x01];
+    req.extend_from_slice(&t_port.to_be_bytes());
+    let domain = match t_host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v)) => {
+            req.extend_from_slice(&v.octets());
+            None
+        }
+        Ok(IpAddr::V6(_)) if allow_ipv6_domain => {
+            req.extend_from_slice(&[0, 0, 0, 1]);
+            Some(t_host)
+        }
+        Ok(IpAddr::V6(_)) => {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "socks4 does not support IPv6; use socks5 or socks4a",
+            ))
+        }
+        Err(_) => {
+            req.extend_from_slice(&[0, 0, 0, 1]);
+            Some(t_host)
+        }
+    };
+    let uid = user.unwrap_or("");
+    if uid.len() > 255 {
+        return Err(Error::new(ErrorKind::InvalidInput, "socks4 user too long"));
+    }
+    req.extend_from_slice(uid.as_bytes());
+    req.push(0x00);
+    if let Some(dm) = domain {
+        if dm.is_empty() || dm.len() > 255 {
+            return Err(Error::new(ErrorKind::InvalidInput, "socks4 host too long"));
+        }
+        req.extend_from_slice(dm.as_bytes());
+        req.push(0x00);
+    }
+    Ok(req)
+}
+
+async fn http_connect<S: AsyncRead + AsyncWrite + Unpin>(
+    mut s: S,
     t_host: &str,
     t_port: u16,
     user: Option<String>,
     pass: Option<String>,
     d: Duration,
-) -> std::io::Result<TcpStream> {
+) -> std::io::Result<S> {
     let host = host_for_connect(t_host);
     let mut req = format!("CONNECT {host}:{t_port} HTTP/1.1\r\nHost: {host}:{t_port}\r\n");
     if let Some(u) = user {
@@ -1010,12 +1115,28 @@ async fn http_connect(
     Ok(s)
 }
 
+async fn tls_to_proxy(
+    stream: TcpStream,
+    host: &str,
+    d: Duration,
+) -> std::io::Result<tokio_rustls::client::TlsStream<TcpStream>> {
+    use rustls_pki_types::ServerName;
+    let name = ServerName::try_from(host.to_string())
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "bad proxy tls name"))?;
+    let connector = tokio_rustls::TlsConnector::from(tls_client_config());
+    match tokio::time::timeout(d, connector.connect(name, stream)).await {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(e)) => Err(Error::other(format!("proxy tls: {e}"))),
+        Err(_) => Err(Error::new(ErrorKind::TimedOut, "proxy tls timeout")),
+    }
+}
+
 async fn connect_via(
     up: &Upstream,
     t_host: &str,
     t_port: u16,
     timeout: Duration,
-) -> std::io::Result<TcpStream> {
+) -> std::io::Result<ProxyStream> {
     let addr = format!("{}:{}", host_for_connect(&up.host), up.port);
     let stream = match tokio::time::timeout(timeout, TcpStream::connect(addr.as_str())).await {
         Ok(Ok(s)) => s,
@@ -1026,7 +1147,7 @@ async fn connect_via(
     match up.scheme.as_str() {
         "socks5" | "socks5h" => {
             socks5_connect(
-                stream,
+                ProxyStream::Plain(stream),
                 t_host,
                 t_port,
                 up.user.clone(),
@@ -1035,12 +1156,43 @@ async fn connect_via(
             )
             .await
         }
-        "socks4" | "socks4a" => {
-            socks4_connect(stream, t_host, t_port, up.user.clone(), timeout).await
+        "socks4" => {
+            socks4_connect(
+                ProxyStream::Plain(stream),
+                t_host,
+                t_port,
+                up.user.clone(),
+                false,
+                timeout,
+            )
+            .await
+        }
+        "socks4a" => {
+            socks4_connect(
+                ProxyStream::Plain(stream),
+                t_host,
+                t_port,
+                up.user.clone(),
+                true,
+                timeout,
+            )
+            .await
+        }
+        "https" => {
+            let tls = tls_to_proxy(stream, &up.host, timeout).await?;
+            http_connect(
+                ProxyStream::Tls(Box::new(tls)),
+                t_host,
+                t_port,
+                up.user.clone(),
+                up.pass.clone(),
+                timeout,
+            )
+            .await
         }
         _ => {
             http_connect(
-                stream,
+                ProxyStream::Plain(stream),
                 t_host,
                 t_port,
                 up.user.clone(),
@@ -1084,7 +1236,10 @@ fn cert_fp_hex(der: &[u8]) -> String {
     format!("{:x}", h.finalize())
 }
 
-async fn tls_handshake_fp(stream: TcpStream, timeout: Duration) -> Option<(String, String)> {
+async fn tls_handshake_fp<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: S,
+    timeout: Duration,
+) -> Option<(String, String)> {
     use rustls_pki_types::ServerName;
     let connector = tokio_rustls::TlsConnector::from(tls_client_config());
     let name = ServerName::try_from("example.com").ok()?.to_owned();
@@ -1444,6 +1599,14 @@ async fn fetch_baseline(flags: CheckFlags) -> Baseline {
         if !want_ip {
             return None;
         }
+        {
+            let c = baseline_cache().lock().await;
+            if let Some((v, ts)) = &c.direct_ip {
+                if cache_fresh(*ts, BASELINE_IP_TTL) {
+                    return Some(v.clone());
+                }
+            }
+        }
         let c = build_client(None, timeout).ok()?;
         let r = c.get("https://api.ipify.org").send().await.ok()?;
         if !r.status().is_success() {
@@ -1452,6 +1615,7 @@ async fn fetch_baseline(flags: CheckFlags) -> Baseline {
         let t = r.text().await.ok()?;
         let t = t.trim().to_string();
         if looks_like_ip(&t) {
+            baseline_cache().lock().await.direct_ip = Some((t.clone(), Instant::now()));
             Some(t)
         } else {
             None
@@ -1461,19 +1625,41 @@ async fn fetch_baseline(flags: CheckFlags) -> Baseline {
         if !flags.tamper {
             return None;
         }
+        {
+            let c = baseline_cache().lock().await;
+            if let Some((len, hash, ts)) = c.example {
+                if cache_fresh(ts, BASELINE_PAGE_TTL) {
+                    return Some((len, hash));
+                }
+            }
+        }
         let c = build_client(None, timeout).ok()?;
         let r = c.get("https://example.com").send().await.ok()?;
         if !r.status().is_success() {
             return None;
         }
         let t = r.text().await.ok()?;
-        Some((t.len(), body_hash(&t)))
+        let val = (t.len(), body_hash(&t));
+        baseline_cache().lock().await.example = Some((val.0, val.1, Instant::now()));
+        Some(val)
     };
     let cert = async {
         if !flags.tls {
             return None;
         }
-        tls_direct_fp().await
+        {
+            let c = baseline_cache().lock().await;
+            if let Some((v, ts)) = &c.cert {
+                if cache_fresh(*ts, BASELINE_PAGE_TTL) {
+                    return Some(v.clone());
+                }
+            }
+        }
+        let fp = tls_direct_fp().await;
+        if let Some(v) = &fp {
+            baseline_cache().lock().await.cert = Some((v.clone(), Instant::now()));
+        }
+        fp
     };
     let (ip, ex, cert) = tokio::join!(direct_ip, example, cert);
     let (len, hash) = ex.unzip();
@@ -1929,7 +2115,25 @@ fn parse_target(method: &str, target: &str) -> Option<(String, u16)> {
 
 const MAX_UPSTREAM_ATTEMPTS: usize = 5;
 
+fn is_self_upstream(up: &Upstream, port: u16) -> bool {
+    if up.port != port {
+        return false;
+    }
+    let host = up
+        .host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    matches!(
+        host.as_str(),
+        "127.0.0.1" | "localhost" | "::1" | "0.0.0.0" | "::" | "::ffff:127.0.0.1"
+    )
+}
+
 async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
+    let port = *st.port.lock().await;
     let pool = st.pool.lock().await;
     if pool.is_empty() {
         return vec![];
@@ -1938,6 +2142,7 @@ async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
     let order = pick_order(pool.len(), &mode, &pool, &st.rr);
     order
         .iter()
+        .filter(|&&i| !is_self_upstream(&pool[i], port))
         .take(MAX_UPSTREAM_ATTEMPTS)
         .map(|&i| pool[i].clone())
         .collect()
@@ -2201,6 +2406,10 @@ async fn set_dispatch_pool(
         }
     }
     pool.sort_by_key(|u| u.latency.unwrap_or(u64::MAX));
+    if state.inner.running.load(Ordering::SeqCst) {
+        let port = *state.inner.port.lock().await;
+        pool.retain(|u| !is_self_upstream(u, port));
+    }
     let n = pool.len();
     *state.inner.pool.lock().await = pool;
     Ok(n)
@@ -2239,6 +2448,13 @@ async fn start_proxy_inner(
         }
     };
     *inner.port.lock().await = port;
+    {
+        let mut pool = inner.pool.lock().await;
+        pool.retain(|u| !is_self_upstream(u, port));
+        if pool.is_empty() {
+            return Err("pool contains only the local listener".to_string());
+        }
+    }
     *inner.mode.lock().await = mode.clone();
     *inner.listener.lock().await = listener.clone();
     *inner.last_error.lock().await = None;
@@ -2770,5 +2986,56 @@ mod tests {
             Some("https://proxycheck.lmtunnel.com".to_string())
         );
         assert_eq!(judge_base_url("https://example.com/"), None);
+    }
+
+    #[test]
+    fn https_proxy_scheme_is_preserved() {
+        assert_eq!(
+            norm("https://1.2.3.4:8443", "http"),
+            Some(("https://1.2.3.4:8443".into(), "HTTPS".into()))
+        );
+        assert_eq!(
+            parse_upstream_url("https://1.2.3.4:8443").map(|v| v.0),
+            Some("https".to_string())
+        );
+        assert!(build_client(Some("https://1.2.3.4:8443"), Duration::from_secs(1)).is_ok());
+    }
+
+    #[test]
+    fn socks4_ipv6_policy() {
+        assert!(build_socks4_request("2001:db8::1", 443, None, false).is_err());
+        let req = build_socks4_request("2001:db8::1", 443, None, true).unwrap();
+        assert_eq!(&req[..8], &[0x04, 0x01, 0x01, 0xbb, 0, 0, 0, 1]);
+        assert!(req.ends_with(b"2001:db8::1\0"));
+
+        let v4 = build_socks4_request("1.2.3.4", 8080, Some("u"), false).unwrap();
+        assert_eq!(&v4[..9], &[0x04, 0x01, 0x1f, 0x90, 1, 2, 3, 4, b'u']);
+        assert_eq!(v4.last(), Some(&0));
+    }
+
+    #[test]
+    fn self_loop_detection() {
+        let mk = |host: &str, port: u16| Upstream {
+            raw: String::new(),
+            scheme: "http".into(),
+            host: host.into(),
+            port,
+            user: None,
+            pass: None,
+            latency: None,
+        };
+        assert!(is_self_upstream(&mk("127.0.0.1", 1080), 1080));
+        assert!(is_self_upstream(&mk("localhost", 1080), 1080));
+        assert!(is_self_upstream(&mk("[::1]", 1080), 1080));
+        assert!(is_self_upstream(&mk("0.0.0.0", 1080), 1080));
+        assert!(!is_self_upstream(&mk("127.0.0.1", 1081), 1080));
+        assert!(!is_self_upstream(&mk("1.2.3.4", 1080), 1080));
+    }
+
+    #[test]
+    fn baseline_cache_ttl() {
+        assert!(cache_fresh(Instant::now(), Duration::from_secs(1)));
+        let old = Instant::now() - Duration::from_secs(2);
+        assert!(!cache_fresh(old, Duration::from_secs(1)));
     }
 }
