@@ -1,189 +1,247 @@
 # ProxPulse
 
-[![GitHub release](https://img.shields.io/github/v/release/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/releases) [![Downloads](https://img.shields.io/github/downloads/nechel12/proxpulse/total)](https://github.com/nechel12/proxpulse/releases) [![Release build](https://github.com/nechel12/proxpulse/actions/workflows/release.yml/badge.svg)](https://github.com/nechel12/proxpulse/actions/workflows/release.yml) ![Windows](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white) ![Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black) ![macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white) [![License](https://img.shields.io/github/license/nechel12/proxpulse)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/releases) [![Downloads](https://img.shields.io/github/downloads/nechel12/proxpulse/total)](https://github.com/nechel12/proxpulse/releases) [![Release build](https://github.com/nechel12/proxpulse/actions/workflows/release.yml/badge.svg)](https://github.com/nechel12/proxpulse/actions/workflows/release.yml) [![CI](https://github.com/nechel12/proxpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/nechel12/proxpulse/actions/workflows/ci.yml) ![Windows](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white) ![Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black) ![macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white) [![License](https://img.shields.io/github/license/nechel12/proxpulse)](LICENSE)
 
-*[Русская версия](README.md)*
+*[Russian version](README.md)*
 
-Desktop proxy checker with a live UI: liveness, ping, geo, anonymity,
-traffic integrity and TLS checks — plus a local proxy dispatcher,
-timer-based auto-checks and posting alive proxies to webhooks.
+ProxPulse is a desktop proxy checker with real-time results: liveness, latency,
+geolocation, anonymity, traffic integrity and TLS checks, plus a local proxy
+dispatcher, scheduled re-checks and webhook delivery of working proxies.
 
 Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
-Dark theme with red accents, Russian and English UI.
+Dark theme with red accents; Russian and English UI.
 
-> Ready builds — under [Releases](https://github.com/nechel12/proxpulse/releases):
-> Windows (`-setup.exe` / `.msi` installer + portable `.exe`),
-> Linux (`.AppImage` / `.deb` / `.rpm`), macOS (`.dmg`, Apple Silicon and Intel).
-> Installed versions update themselves (Info tab → check for updates),
-> portable is updated by downloading the new file manually.
-> Which file to grab is spelled out in each release's description.
->
-> macOS: unsigned builds (no Apple Developer certificate) —
-> on first launch: right-click → Open (or `xattr -cr ProxPulse.app`).
-> The author builds blind (no Mac available): macOS builds are verified
-> by successful compilation only, never test-run, so no guarantee they
-> work. Please attach the Info-tab diagnostics when reporting issues.
+## Features
 
-## Quick start
+- Liveness, latency, jitter and success-rate checks.
+- Geolocation, IP type, anonymity, content integrity and TLS checks.
+- HTTP, HTTPS (TLS to the proxy), SOCKS5/SOCKS5h and SOCKS4/SOCKS4a.
+- Local HTTP/SOCKS5 dispatcher with rotation, fastest and failover modes.
+- Scheduled re-checks, settings profiles, TXT/JSON/CSV export and webhooks.
+- File and URL import, deduplication, dark theme, RU/EN UI.
+- Update checks and a system tray.
 
-Requires [Node.js 18+](https://nodejs.org/), [Rust](https://rustup.rs/)
-and WebView2 (built into Windows 10/11). Linux builds additionally need
-system packages (WebKitGTK etc. — see the Install Linux build deps step
-in `.github/workflows/release.yml`).
+## Installation
+
+Ready builds are available in [Releases](https://github.com/nechel12/proxpulse/releases):
+
+- **Windows (x64):** `-setup.exe` or `.msi` installer, and a portable `.exe`;
+- **Linux (x64):** `.AppImage`, `.deb`, `.rpm`;
+- **macOS:** `.dmg` for Apple Silicon and Intel.
+
+Installed builds can check for updates from the Info tab. Portable builds are
+updated manually by replacing the file. The file to download for each platform
+is described in the release notes.
+
+> **macOS:** builds are not signed with an Apple certificate. On first launch,
+> open the app from the context menu → Open, or run `xattr -cr ProxPulse.app`.
+> The author does not have access to a Mac: macOS builds are verified by
+> successful compilation only; they have not been run and are not guaranteed
+> to work. If you encounter problems, attach the diagnostics from the Info tab.
+
+## Build from source
+
+Requirements: [Node.js 18+](https://nodejs.org/), [Rust](https://rustup.rs/)
+(stable) and WebView2 (built into Windows 10/11). Linux builds additionally
+need WebKitGTK and other system packages.
+
+<details>
+<summary>Linux build dependencies (Debian/Ubuntu)</summary>
 
 ```sh
-npm install
-npm run tauri dev     # dev mode
-npm run tauri build   # build installer
+sudo apt update
+sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
-Code checks:
+</details>
+
+```sh
+npm install           # or npm ci for a lockfile-based install
+npm run tauri dev     # development mode
+npm run tauri build   # build the installer
+```
+
+Checks:
 
 ```sh
 npm run build         # tsc + vite build
 npm test              # vitest: proxy parsing (frontend)
-cargo test --manifest-path src-tauri/Cargo.toml --lib   # unit tests (backend)
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+cargo test --manifest-path src-tauri/Cargo.toml --lib
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+npm run check:versions
 ```
+
+CI (`.github/workflows/ci.yml`) runs these checks on pushes to `main` and on
+pull requests.
 
 ## Checking (the “Check” tab)
 
-Paste a list into the left field (one per line) and hit **Start**.
-Results stream in live, as they arrive. The **Stop** button really stops
-the check.
+Paste a list into the field on the left (one proxy per line) and click
+**Start**. Results appear as checks complete. **Stop** aborts the current check.
 
 ### Supported formats
 
-Auto-detected, scheme case doesn't matter:
+The format is detected automatically; scheme case does not matter:
 
 - `127.0.0.1:8080`, `proxy.example.com:8080`, `[2001:db8::1]:8080`
 - `user:pass@127.0.0.1:8080`
-- `http://…`, `https://…`, `socks5://…`, `socks4://…`
-- `127.0.0.1:8080:user:pass` and reversed `user:pass:127.0.0.1:8080`
-- `127.0.0.1:8080:socks5` (protocol as suffix)
-- CSV/tabs/spaces: `127.0.0.1,8080,user,pass`
-- JSON: `{"host":"…","port":8080,"username":"u","password":"p"}`, arrays and logs
-- Numbered lists (`1) …`, `- …`), `# …` comments
+- `http://…`, `https://…`
+- `socks5://…`, `socks5h://…`, `socks://…`
+- `socks4://…`, `socks4a://…`
+- `127.0.0.1:8080:user:pass` and the reverse order `user:pass:127.0.0.1:8080`
+- `127.0.0.1:8080:socks5` (protocol as a suffix)
+- CSV, tabs and spaces: `127.0.0.1,8080,user,pass`
+- JSON: an object, array or log with `host`, `port`, `username`, `password`
+- Numbered lists (`1) …`, `- …`) and `# …` / `// …` comments
 
-Duplicates are dropped automatically. File import (txt, csv, json,
-log — actually any text file) and URL import — the list is fetched
-with the built-in client (2 MB cap) and parsed the same way.
+Duplicates are removed automatically. A list can be imported from any text
+file (TXT, CSV, JSON, LOG) or from a URL: the built-in client downloads up to
+2 MB and parses it with the same parser.
+
+> `socks4` does not support IPv6 literals. Use `socks5` or `socks4a` for IPv6;
+> with `socks4a`, the IPv6 address is passed as a domain name (best effort;
+> support depends on the proxy).
 
 ### Test URLs
 
-- `google generate_204`, `cloudflare generate_204` — fast, empty body
-- `api.ipify.org`, `httpbin.org/ip` — reveal the exit IP
-- `ip-api.com/json` — IP + geo in one shot
-- `example.com` — a regular page
-- **ProxPulse Judge** — own check backend (see below);
-  the field next to it accepts a custom instance. Two modes:
-  **Fast** (`/generate_204`) and **Full** (`/judge` — geo, anonymity
-  and IP type in a single response, plus content-hash integrity check)
+- `google generate_204`, `cloudflare generate_204` — fast, empty body;
+- `api.ipify.org`, `httpbin.org/ip` — show the exit IP;
+- `ip-api.com/json` — IP and geolocation in one request;
+- `example.com` — a regular page;
+- [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge) — a dedicated
+  check backend. In Judge mode, the public instance is used by default; the
+  field next to it accepts another instance. Modes: **Fast** (`/generate_204`)
+  and **Full** (`/judge` — geolocation, anonymity and IP type in one response,
+  plus a content-hash integrity check).
 
-A custom URL can also be typed manually.
+A custom URL can also be entered manually.
 
-### Measurement settings
+### Check settings
 
-| Parameter | Default | Meaning |
+| Parameter | Default | Description |
 |---|---|---|
-| Timeout, ms | 5000 | single HTTP request limit (1000–30000) |
+| Timeout | 5000 ms | single HTTP request limit (1000–30000) |
 | Threads | 50 | parallel checks (1–500) |
-| Samples | 1 | repeats per proxy for ping/jitter/SR (1–5) |
-| No-scheme type | HTTP | assumed when no scheme given; HTTP + SOCKS5 mode checks both |
-| Port precheck | on, 1500 ms | fast TCP connect: drops dead hosts before the heavy check |
+| Samples | 1 | repeats per proxy for ping, jitter and success rate (1–5) |
+| No-scheme type | HTTP | value used when no scheme is given; HTTP + SOCKS5 mode checks both |
+| Port precheck | on, 1500 ms | fast TCP connect: unavailable proxies are dropped before the full check |
 
-Settings are stored as named **profiles** (“Fast”, “Deep”,
-“Judge” built in + your own): pick, save and delete in one click.
+Settings are stored in named profiles: “Fast”, “Deep”, “Judge” and custom
+ones. A profile can be selected, saved or deleted.
 
-### Deep checks (not for judge mode)
+### Deep checks (not used in Judge mode)
 
-- **Geo & IP type** — via ip-api (country/city/ISP/ORG/ASN, mobile/datacenter/residential)
-- **Anonymity** — `elite` / `anonymous` / `transparent` (header heuristics via httpbin + comparison against your direct IP)
-- **Integrity** — example.com body vs direct connection (`ok` / `modified`)
-- **TLS integrity** — example.com certificate SHA256 vs direct (`ok` / `modified`)
+- **Geolocation and IP type** — via ip-api: country, city, ISP, ORG, ASN,
+  mobile/datacenter/residential.
+- **Anonymity** — `elite` / `anonymous` / `transparent`: header heuristics via
+  httpbin and comparison with the direct IP.
+- **Content integrity** — example.com body compared with a direct connection
+  (`ok` / `modified`).
+- **TLS integrity** — example.com certificate SHA256 compared with a direct
+  connection (`ok` / `modified`).
 
-Each deep check means extra requests through the proxy, so all of them
-are toggleable. Not needed in judge mode: the judge returns everything itself.
+Each deep check makes additional requests through the proxy, so all of them can
+be disabled. They are not needed in Judge mode: Judge returns the data itself.
 
 ### Export
 
-**Export** menu: `.txt` (proxies only), `.json` (full results),
-`.csv` (table), **Copy**. The square **“dead”** toggle next to it switches
-whether dead proxies go into the export. Saving uses the system dialog.
+**Export** menu: `.txt` (proxies only), `.json` (full results), `.csv` (table),
+**Copy**. The **“dead”** toggle controls whether unavailable proxies are
+included in the export. Saving uses the system dialog.
 
-Below the table — a sparkline of alive avg ping per check (history
-stored locally).
+Below the table, a sparkline shows the average ping of working proxies across
+checks; the history is stored locally.
 
 ## Dispatcher (the “Dispatcher” tab)
 
-Spins up a **local proxy on 127.0.0.1:port** (default 1080) routing traffic
-through alive proxies from checks. One port answers **both HTTP and SOCKS5**
-(auto-detected by the first byte) or just the selected protocol.
-If the port is busy, the next free one is taken automatically
-(+1, +2, …); the actual port is written back into the field and shown
-to the client.
+Starts a local proxy on **127.0.0.1:1080** (default port) and routes traffic
+through working proxies from checks. One port accepts **both HTTP and SOCKS5**
+(the protocol is detected from the first byte) or only the selected protocol.
+If the port is busy, the next free one is selected (+1, +2, …); the actual port
+is shown in the field.
 
-- Modes: **rotation**, **fastest**, **failover**
-- The pool merges (old entries are kept); “Sync” / “Clear” buttons;
-  pool filter and sorting (by ping / country)
-- **Max ping**: proxies slower than the limit never enter the pool (`0` — no limit)
-- Request/error counters, current upstream, last error
-- Pool auto-check every N minutes with dead pruning
+- Modes: **rotation**, **fastest**, **failover**.
+- The pool merges new entries with old ones; “Sync” and “Clear” buttons; pool
+  filtering and sorting by ping or country.
+- **Max ping**: proxies slower than the limit do not enter the pool (`0` — no
+  limit).
+- Request and error counters, current upstream proxy, last error.
+- Pool auto-check every N minutes with removal of unavailable proxies.
 
 ## Auto (the “Auto” tab)
 
-The same shared pool on its own timer: re-checked every N minutes,
-dead ones drop out. After each auto-check the pool is POSTed
-to **webhooks** (up to 10, shared txt/json/csv format).
-“Check now” and “Send now” buttons for manual runs.
+The shared pool is re-checked on a separate timer every N minutes; unavailable
+proxies are removed. After each auto-check, the pool is sent as POST requests
+to the configured webhooks (up to 10, TXT/JSON/CSV format). “Check now” and
+“Send now” run these actions manually.
 
-## Info, tray, diagnostics (the “Info” tab)
+## Info, tray and diagnostics (the “Info” tab)
 
-- GitHub links: the checker itself and ProxPulse Judge
-- **Diagnostics**: app version, update check via GitHub Releases
-  (install with restart), report copy (version, counters, recent errors)
-- The ⇲ button in the header minimizes the window to tray. Tray (right click):
-  show/hide, dispatcher on/off with the current port, time until next
-  auto-checks, webhook state, quit. Left click toggles the window.
+- GitHub links: ProxPulse and ProxPulse Judge.
+- **Diagnostics**: app version, update check via GitHub Releases, install with
+  restart, report copy (version, counters, recent errors).
+- The ⇲ button in the header minimizes the window to the system tray. The tray
+  menu provides show/hide, dispatcher on/off with the current port, time until
+  the next auto-check, webhook state and quit. Left-clicking the icon shows or
+  hides the window.
 
 ## Privacy and local data
 
-What leaves the machine during a check: requests to the selected test URL
-(plus ip-api/httpbin/example.com when deep checks are on), direct
-no-proxy requests for baselines (your IP, example.com reference), requests
-to your/public Judge instance, a GitHub releases check, POSTs to your
-webhooks, URL list download. Proxy passwords only go to the proxies
-themselves in auth headers — nowhere else.
+During a check, the following leaves the machine: requests to the selected
+test URL; requests to ip-api, httpbin and example.com when deep checks are
+enabled; direct no-proxy requests for baselines (your IP and the example.com
+reference); requests to the selected Judge instance; a GitHub release check;
+POST requests to the configured webhooks; URL list downloads.
 
-Stored locally in the browser: language, ping limit, webhooks, geo cache
-(up to 2000 entries), recent errors, ping history, settings profiles.
-Clearing localStorage wipes it.
+Proxy credentials are sent only to the selected proxy using its authentication
+mechanism (HTTP `Proxy-Authorization` or SOCKS authentication) and are not sent
+anywhere else.
+
+Stored locally in the browser: language, ping limit, webhooks, geo cache (up to
+2000 entries), recent errors, ping history and settings profiles. Clearing
+`localStorage` removes this data.
+
+## Security
+
+Do not publish working proxies, passwords or other secrets in issues. For
+vulnerability reports, use a private channel to contact the author (for
+example, GitHub Security Advisories if enabled for the repository) rather than
+a public issue.
 
 ## Project structure
 
-```
-index.html            # all screens markup
-src/main.ts           # all frontend logic + RU/EN dictionaries (I18N)
-src/parse.ts          # proxy parsing (pure functions + tests)
-src/parse.test.ts     # 18 parsing tests (vitest)
-src/styles.css        # dark theme
-src-tauri/src/lib.rs  # backend: checker, dispatcher, tray (~2600 lines)
-src-tauri/src/main.rs # entry point
+```text
+index.html                     # screen markup
+src/main.ts                    # frontend logic and RU/EN dictionaries
+src/parse.ts                   # proxy parsing (pure functions)
+src/parse.test.ts              # 19 parsing tests (vitest)
+src/styles.css                 # dark theme
+src-tauri/src/lib.rs           # backend: checker, dispatcher, tray
+src-tauri/src/main.rs          # entry point
+src-tauri/tauri.conf.json      # Tauri configuration
+src-tauri/Cargo.toml           # Rust dependencies
+.github/workflows/ci.yml       # tests, clippy and version check
 .github/workflows/release.yml  # release builds and auto-update files
+scripts/check-versions.mjs     # version synchronization
 ```
 
 ## Related projects
 
-- [proxpulse-judge](https://github.com/nechel12/proxpulse-judge) —
-  self-hosted check backend (Rust/axum, Docker). The public instance
-  is embedded in the checker by default.
+- [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge) — a
+  self-hosted check backend (Rust/axum, Docker). The public instance is used
+  in Judge mode by default.
 
 ## Contributing
 
-Bug reports and PRs are welcome. Before sending, run the checks
-from Quickstart: `npm run build`, `npm test`,
-`cargo test --manifest-path src-tauri/Cargo.toml`.
+Bug reports and pull requests are welcome. In a bug report, include the app
+version, operating system and diagnostics from the Info tab. Before opening a
+PR, run the checks from “Build from source”: `npm run build`, `npm test`,
+`cargo test --manifest-path src-tauri/Cargo.toml --lib`,
+`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`.
+
+Issue tracker: [Issues](https://github.com/nechel12/proxpulse/issues).
 
 ## License
 
-Apache-2.0, see [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
