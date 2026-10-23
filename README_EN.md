@@ -11,10 +11,6 @@ dispatcher, scheduled re-checks and webhook delivery of working proxies.
 Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
 Dark theme with red accents; Russian and English UI.
 
-## Screenshot
-
-![ProxPulse main screen](docs/screenshots/main-en.png)
-
 ## Features
 
 - Liveness, latency, jitter and success-rate checks.
