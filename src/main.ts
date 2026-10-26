@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { buildCsv, buildJson, buildTxt } from "./export.ts";
+import { buildCsv, buildJson, buildTxt, withExtension } from "./export.ts";
 import {
   anonShort,
   geoShort,
@@ -1075,9 +1075,10 @@ async function saveViaDialog(suggested: string, text: string, filters: { name: s
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({ defaultPath: suggested, filters });
     if (!path) return;
-    await invoke("write_text_file", { path, contents: text });
-    lastStatus = { key: "st_saved", params: { path: String(path) } };
-    $("status-line").textContent = t("st_saved", { path: String(path) });
+    const outPath = withExtension(String(path), filters[0]?.extensions[0] ?? "");
+    await invoke("write_text_file", { path: outPath, contents: text });
+    lastStatus = { key: "st_saved", params: { path: outPath } };
+    $("status-line").textContent = t("st_saved", { path: outPath });
   } catch (e) {
     if (isTauriRuntime()) {
       const msg = String(e).slice(0, 120);

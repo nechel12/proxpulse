@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCsv, buildJson, buildTxt } from "./export.ts";
+import { buildCsv, buildJson, buildTxt, withExtension } from "./export.ts";
 import type { ProxyResult } from "./types.ts";
 
 const base: ProxyResult = {
@@ -49,6 +49,21 @@ describe("export", () => {
   it("serializes full results as JSON", () => {
     expect(JSON.parse(buildJson([base]))[0].url).toBe(
       "http://user:pass@1.2.3.4:8080"
+    );
+  });
+
+  it("adds a missing export extension only", () => {
+    expect(withExtension("C:\\out\\proxpulse", "txt")).toBe(
+      "C:\\out\\proxpulse.txt"
+    );
+    expect(withExtension("/tmp/proxpulse", ".json")).toBe(
+      "/tmp/proxpulse.json"
+    );
+    expect(withExtension("/tmp/proxpulse.csv", "json")).toBe(
+      "/tmp/proxpulse.csv"
+    );
+    expect(withExtension("/tmp/dir.with.dots/file", "csv")).toBe(
+      "/tmp/dir.with.dots/file.csv"
     );
   });
 });

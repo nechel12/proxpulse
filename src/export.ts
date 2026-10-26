@@ -9,6 +9,14 @@ export function buildJson(list: ProxyResult[]): string {
   return JSON.stringify(list, null, 2);
 }
 
+/** Add the dialog filter extension when the user typed a name without one. */
+export function withExtension(path: string, ext: string): string {
+  const name = path.split(/[\\/]/).pop() ?? "";
+  if (!name || name.includes(".")) return path;
+  const clean = ext.replace(/^\./, "");
+  return clean ? `${path}.${clean}` : path;
+}
+
 export function buildCsv(list: ProxyResult[]): string {
   const head = ["proxy", "url", "proto", "alive", "latency_ms", "jitter_ms", "success_rate", "attempts", "ip", "country_code", "country", "city", "isp", "org", "asn", "ip_type", "anonymity", "tamper", "tls", "tls_info", "error"];
   const lines = [head.join(",")];
