@@ -184,8 +184,21 @@ const GEO_COOLDOWN: Duration = Duration::from_secs(60);
 static GEO_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
 static GEO_COOLDOWN_UNTIL: Mutex<Option<Instant>> = Mutex::const_new(None);
 
+/// Deep checks open one extra connection per stage. Without a cap, a
+/// 500-way check can spawn ~2500 sockets at once. These limits are per stage
+/// and skip (rather than queue) when saturated, so the per-proxy budget is
+/// not consumed by waiting.
+const DEEP_CONCURRENCY: usize = 64;
+static ANON_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
+static TAMPER_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
+static TLS_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
+
 fn geo_semaphore() -> &'static Semaphore {
     GEO_SEM.get_or_init(|| Semaphore::new(GEO_CONCURRENCY))
+}
+
+fn deep_semaphore(slot: &'static std::sync::OnceLock<Semaphore>) -> &'static Semaphore {
+    slot.get_or_init(|| Semaphore::new(DEEP_CONCURRENCY))
 }
 
 fn baseline_cache() -> &'static Mutex<BaselineCache> {
@@ -312,8 +325,9 @@ fn build_client(
 ) -> Result<reqwest::Client, String> {
     let mut b = reqwest::Client::builder()
         .timeout(timeout)
-        // Force rustls: the Cargo features no longer enable native-tls.
-        .use_rustls_tls()
+        // Reuse the process-wide rustls config instead of rebuilding the
+        // webpki root store for every proxy client.
+        .use_preconfigured_tls((*tls_client_config()).clone())
         .user_agent(concat!(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxPulse/",
             env!("CARGO_PKG_VERSION")
@@ -920,13 +934,18 @@ async fn http_connect<S: AsyncRead + AsyncWrite + Unpin>(
     }
     req.push_str("\r\n");
     write_all_t(&mut s, req.as_bytes(), d).await?;
+    let deadline = Instant::now() + d;
     let mut buf = Vec::new();
     let mut tmp = [0u8; 1024];
     loop {
         if buf.len() > 32768 {
             return Err(Error::new(ErrorKind::InvalidData, "proxy header too big"));
         }
-        let n = match tokio::time::timeout(d, s.read(&mut tmp)).await {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(Error::new(ErrorKind::TimedOut, "proxy read timeout"));
+        }
+        let n = match tokio::time::timeout(remaining, s.read(&mut tmp)).await {
             Ok(Ok(0)) => return Err(Error::new(ErrorKind::UnexpectedEof, "proxy closed")),
             Ok(Ok(n)) => n,
             Ok(Err(e)) => return Err(e),
@@ -1456,25 +1475,25 @@ async fn check_candidate_inner(
                 fetch_geo(&client, flags.ipapi_key.as_deref()).await
             },
             async {
-                if want_anon {
-                    detect_anonymity(&client, direct_ip.as_deref()).await
-                } else {
-                    None
+                if !want_anon {
+                    return None;
                 }
+                let _permit = deep_semaphore(&ANON_SEM).try_acquire().ok()?;
+                detect_anonymity(&client, direct_ip.as_deref()).await
             },
             async {
-                if want_tamper {
-                    detect_tamper(&client, ex_len, ex_hash).await
-                } else {
-                    None
+                if !want_tamper {
+                    return None;
                 }
+                let _permit = deep_semaphore(&TAMPER_SEM).try_acquire().ok()?;
+                detect_tamper(&client, ex_len, ex_hash).await
             },
             async {
-                if want_tls {
-                    Some(tls_via_proxy(&url_c, timeout, cert_fp.as_deref()).await)
-                } else {
-                    None
+                if !want_tls {
+                    return None;
                 }
+                let _permit = deep_semaphore(&TLS_SEM).try_acquire().ok()?;
+                Some(tls_via_proxy(&url_c, timeout, cert_fp.as_deref()).await)
             },
         );
         if let Some(g) = geo_r {
@@ -2225,13 +2244,18 @@ async fn abort_connections(inner: &Arc<DispatchInner>) {
 
 async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
     // read request head
+    let deadline = Instant::now() + Duration::from_secs(10);
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
     loop {
         if buf.len() > 65536 {
             return;
         }
-        let n = match tokio::time::timeout(Duration::from_secs(10), client.read(&mut tmp)).await {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return;
+        }
+        let n = match tokio::time::timeout(remaining, client.read(&mut tmp)).await {
             Ok(Ok(0)) => return,
             Ok(Ok(n)) => n,
             _ => return,
