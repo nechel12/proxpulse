@@ -2574,7 +2574,13 @@ async fn set_dispatch_pool(
         pool.retain(|u| !is_self_upstream(u, port));
     }
     let n = pool.len();
+    let stop_empty = n == 0 && state.inner.running.load(Ordering::SeqCst);
     *state.inner.pool.lock().await = pool;
+    if stop_empty {
+        // A listener with zero upstreams only replies 502. Clearing the pool
+        // is an explicit user action, so stop the dispatcher with it.
+        stop_proxy_inner(&state.inner).await;
+    }
     Ok(n)
 }
 

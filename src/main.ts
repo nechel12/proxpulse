@@ -1303,7 +1303,13 @@ window.addEventListener("DOMContentLoaded", () => {
   function doPoolClear(): void {
     poolGen++;
     dispatchPool = [];
-    void syncPool(false);
+    // The backend stops a running dispatcher when the pool becomes empty;
+    // refresh the status once the sync completes.
+    void syncPool(false).then(() => {
+      const st = document.getElementById("srv-status");
+      if (st) st.textContent = t("srv_off");
+      void pollDispatch();
+    });
     renderPool();
     updateCounts();
   }
