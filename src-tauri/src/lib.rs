@@ -2073,12 +2073,15 @@ fn pick_order(len: usize, mode: &str, rr: &AtomicUsize, limit: usize) -> Vec<usi
     if len == 0 || limit == 0 {
         return vec![];
     }
-    let take = len.min(limit);
-    if mode == "round-robin" {
-        let start = rr.fetch_add(1, Ordering::Relaxed) % len;
-        (0..take).map(|i| (start + i) % len).collect()
-    } else {
-        (0..take).collect()
+    match mode {
+        // Strictly one attempt: the fastest upstream is either used or the
+        // request fails. Fallback is the explicit "failover" mode.
+        "fastest" => vec![0],
+        "round-robin" => {
+            let start = rr.fetch_add(1, Ordering::Relaxed) % len;
+            (0..len.min(limit)).map(|i| (start + i) % len).collect()
+        }
+        _ => (0..len.min(limit)).collect(),
     }
 }
 
@@ -3128,7 +3131,7 @@ mod tests {
     fn order_modes() {
         let rr = AtomicUsize::new(0);
         // set_dispatch_pool keeps the pool sorted by latency.
-        assert_eq!(pick_order(3, "fastest", &rr, 3), vec![0, 1, 2]);
+        assert_eq!(pick_order(3, "fastest", &rr, 3), vec![0]);
         assert_eq!(pick_order(3, "failover", &rr, 2), vec![0, 1]);
         assert_eq!(pick_order(0, "fastest", &rr, 3), Vec::<usize>::new());
         let a = pick_order(3, "round-robin", &rr, 3);

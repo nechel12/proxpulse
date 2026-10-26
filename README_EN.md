@@ -201,7 +201,10 @@ through working proxies from checks. One port accepts **both HTTP and SOCKS5**
 If the port is busy, the next free one is selected (+1, +2, …); the actual port
 is shown in the field.
 
-- Modes: **rotation**, **fastest**, **failover**.
+- Modes: **rotation**, **fastest**, **failover**. Fastest makes a single
+  attempt through the best upstream; failover tries up to five; rotation
+  picks an upstream when a connection is established. Browser keep-alive
+  keeps one upstream for the lifetime of a connection.
 - The pool merges new entries with old ones; “Sync” and “Clear” buttons; pool
   filtering and sorting by ping or country.
 - **Max ping**: proxies slower than the limit do not enter the pool (`0` — no
