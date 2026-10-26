@@ -1152,6 +1152,20 @@ fn cancel_check(state: State<'_, CheckState>) -> Result<(), String> {
     Ok(())
 }
 
+fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckFlags) -> Duration {
+    // Main attempts: repeats × timeout. Deep stages run concurrently; the
+    // slowest is TLS via an HTTPS proxy: TCP + CONNECT + handshake = 3×.
+    // Without TLS, one timeout is enough for the whole deep group.
+    let deep = if flags.judge {
+        Duration::ZERO
+    } else if flags.tls {
+        timeout * 3
+    } else {
+        timeout
+    };
+    flags.precheck_timeout + timeout * (repeats as u32 + 1) + deep + Duration::from_secs(5)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn check_candidate(
     raw: String,
@@ -1166,7 +1180,7 @@ async fn check_candidate(
     cancel: Arc<AtomicBool>,
 ) -> ProxyResult {
     // absolute ceiling: a single proxy may never outlive the sum of its own timeouts
-    let budget = flags.precheck_timeout + timeout * (repeats as u32 + 2) + Duration::from_secs(5);
+    let budget = candidate_budget(timeout, repeats, &flags);
     let raw_fb = raw.clone();
     let proto_fb = proto.clone();
     match tokio::time::timeout(
@@ -1664,23 +1678,33 @@ async fn check_proxies(
     }
 
     let mut out = Vec::new();
-    while let Some(r) = set.join_next().await {
-        match r {
-            Ok(v) => {
-                let _ = on_result.send(v.clone());
-                out.push(v);
+    loop {
+        // Stop must abort in-flight requests immediately instead of waiting
+        // for the first task to finish its own timeout.
+        tokio::select! {
+            maybe = set.join_next() => match maybe {
+                Some(Ok(v)) => {
+                    let _ = on_result.send(v.clone());
+                    out.push(v);
+                }
+                Some(Err(e)) => out.push(dead_result(
+                    "?".to_string(),
+                    "?".to_string(),
+                    0,
+                    short_error(&e.to_string()),
+                )),
+                None => break,
+            },
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                if cancel.load(Ordering::Relaxed) {
+                    set.abort_all();
+                    break;
+                }
             }
-            Err(e) => out.push(dead_result(
-                "?".to_string(),
-                "?".to_string(),
-                0,
-                short_error(&e.to_string()),
-            )),
         }
-        if cancel.load(Ordering::Relaxed) {
-            set.abort_all();
-            break;
-        }
+    }
+    if cancel.load(Ordering::Relaxed) {
+        set.abort_all();
     }
     out.sort_by(|a, b| {
         b.alive.cmp(&a.alive).then(
@@ -3094,6 +3118,45 @@ mod tests {
         let pairs: HashMap<_, _> = u.query_pairs().into_owned().collect();
         assert_eq!(pairs.get("key").map(String::as_str), Some("abc 123"));
         assert_eq!(pairs.get("fields").map(String::as_str), Some(GEO_FIELDS));
+    }
+
+    #[test]
+    fn candidate_budget_covers_deep_tls() {
+        let timeout = Duration::from_secs(5);
+        let flags = CheckFlags {
+            geo: true,
+            anon: true,
+            tamper: true,
+            tls: true,
+            precheck: true,
+            precheck_timeout: Duration::from_millis(1500),
+            judge: false,
+            ipapi_key: None,
+        };
+        // attempts (10s) + CONNECT/TCP/TLS (15s) + precheck (1.5s) + 5s margin
+        assert_eq!(
+            candidate_budget(timeout, 1, &flags),
+            Duration::from_millis(31_500)
+        );
+
+        let no_tls = CheckFlags {
+            tls: false,
+            ..flags.clone()
+        };
+        assert_eq!(
+            candidate_budget(timeout, 1, &no_tls),
+            Duration::from_millis(21_500)
+        );
+
+        let judge = CheckFlags {
+            judge: true,
+            tls: true,
+            ..flags
+        };
+        assert_eq!(
+            candidate_budget(timeout, 1, &judge),
+            Duration::from_millis(16_500)
+        );
     }
 
     #[test]

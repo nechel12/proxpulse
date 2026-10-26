@@ -666,7 +666,11 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
     onProgress?.(done, total);
   };
   const channel = new Channel<ProxyResult>();
+  // Messages may still arrive after `invoke` resolves. Ignore them so a late
+  // message cannot repaint progress or overwrite results of a newer run.
+  let finished = false;
   channel.onmessage = (r) => {
+    if (finished) return;
     pushLive(r);
     paint(out.length, list.length);
   };
@@ -693,6 +697,8 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
   } catch (e) {
     const msg = String(e);
     for (const p of list) pushLive(deadStub(p, msg));
+  } finally {
+    finished = true;
   }
   paint(out.length, list.length);
   out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
