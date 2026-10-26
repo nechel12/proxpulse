@@ -224,6 +224,19 @@ struct CheckFlags {
 
 // ================= http helpers =================
 
+/// Truncate to at most `max` bytes without splitting a UTF-8 code point.
+/// `String::truncate` panics when the byte index is not a char boundary.
+fn truncate_utf8(s: &mut String, max: usize) {
+    if s.len() <= max {
+        return;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s.truncate(end);
+}
+
 fn short_error(e: &str) -> String {
     // reqwest format: "error sending request for url (URL): cause".
     // The URL (often with ?direct_ip=...) only hides the real cause — drop it.
@@ -288,9 +301,7 @@ fn short_error(e: &str) -> String {
     if low.contains("incomplete message") || low.contains("incompletemessage") {
         return "incomplete response".to_string();
     }
-    if s.len() > 160 {
-        s.truncate(160);
-    }
+    truncate_utf8(&mut s, 160);
     s.trim().to_string()
 }
 
@@ -1646,9 +1657,7 @@ async fn check_proxies(
                 let e1 = r1.error.unwrap_or_default();
                 let e2 = r2.error.unwrap_or_default();
                 let mut combined = format!("http: {e1} / socks5: {e2}");
-                if combined.len() > 120 {
-                    combined.truncate(120);
-                }
+                truncate_utf8(&mut combined, 120);
                 dead_result(raw, "HTTP/SOCKS5".to_string(), r1.attempts, combined)
             }
         });
@@ -2991,6 +3000,29 @@ mod tests {
         assert!(is_self_upstream(&mk("0.0.0.0", 1080), 1080));
         assert!(!is_self_upstream(&mk("127.0.0.1", 1081), 1080));
         assert!(!is_self_upstream(&mk("1.2.3.4", 1080), 1080));
+    }
+
+    #[test]
+    fn utf8_truncation_is_safe() {
+        let mut s = format!("a{}", "é".repeat(100));
+        truncate_utf8(&mut s, 160);
+        assert!(s.len() <= 160);
+        assert!(s.is_char_boundary(s.len()));
+        assert!(s.starts_with('a'));
+        assert!(s.chars().skip(1).all(|c| c == 'é'));
+
+        let mut short = "ok".to_string();
+        truncate_utf8(&mut short, 160);
+        assert_eq!(short, "ok");
+    }
+
+    #[test]
+    fn short_error_handles_non_ascii() {
+        let input = format!("a{}", "é".repeat(100));
+        let out = short_error(&input);
+        assert!(out.len() <= 160);
+        assert!(out.is_char_boundary(out.len()));
+        assert!(out.chars().all(|c| c == 'a' || c == 'é'));
     }
 
     #[test]
