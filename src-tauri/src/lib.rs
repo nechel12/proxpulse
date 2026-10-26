@@ -224,7 +224,20 @@ fn body_hash(s: &str) -> u64 {
 #[derive(Debug, Default)]
 struct CheckState {
     cancel: Arc<AtomicBool>,
+    /// Prevents a manual check and an auto check (or two manual checks)
+    /// from running at the same time.
+    busy: Arc<AtomicBool>,
 }
+
+struct BusyGuard(Arc<AtomicBool>);
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+const CHECK_BUSY: &str = "another check is running";
 
 #[derive(Clone)]
 struct CheckFlags {
@@ -1604,26 +1617,18 @@ async fn fetch_baseline(flags: CheckFlags) -> Baseline {
     }
 }
 
-#[tauri::command]
 #[allow(clippy::too_many_arguments)]
-async fn check_proxies(
+async fn run_checks(
     proxies: Vec<String>,
     test_url: String,
-    timeout_ms: u64,
-    concurrency: usize,
-    default_proto: String,
-    repeats: Option<usize>,
-    with_geo: Option<bool>,
-    with_anonymity: Option<bool>,
-    with_tamper: Option<bool>,
-    with_tls: Option<bool>,
-    precheck: Option<bool>,
-    precheck_timeout_ms: Option<u64>,
-    judge_mode: Option<bool>,
-    ipapi_key: Option<String>,
-    geo_cache: Option<Vec<GeoCacheEntry>>,
-    state: State<'_, CheckState>,
-    on_result: Channel<ProxyResult>,
+    timeout: Duration,
+    conc: usize,
+    repeats: usize,
+    default_proto: &str,
+    flags: CheckFlags,
+    geo_cache: Vec<GeoCacheEntry>,
+    cancel: Arc<AtomicBool>,
+    on_result: Option<&Channel<ProxyResult>>,
 ) -> Result<Vec<ProxyResult>, String> {
     let test_url = test_url.trim().to_string();
     if test_url.is_empty() {
@@ -1632,27 +1637,6 @@ async fn check_proxies(
     if !is_http_url(&test_url) {
         return Err("test url must start with http(s)://".to_string());
     }
-    state.cancel.store(false, Ordering::SeqCst);
-    let cancel = state.cancel.clone();
-
-    let timeout = Duration::from_millis(timeout_ms.clamp(500, 60_000));
-    let conc = concurrency.clamp(1, 500);
-    let repeats = repeats.unwrap_or(1).clamp(1, 5);
-    let flags = CheckFlags {
-        geo: with_geo.unwrap_or(true),
-        anon: with_anonymity.unwrap_or(true),
-        tamper: with_tamper.unwrap_or(true),
-        tls: with_tls.unwrap_or(true),
-        precheck: precheck.unwrap_or(true),
-        precheck_timeout: Duration::from_millis(
-            precheck_timeout_ms.unwrap_or(1500).clamp(300, 10_000),
-        ),
-        judge: judge_mode.unwrap_or(false),
-        ipapi_key: ipapi_key
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .map(|s| Arc::from(s.as_str())),
-    };
 
     let mut jobs: Vec<(String, Vec<(String, String)>)> = Vec::new();
     let mut seen = HashSet::new();
@@ -1661,7 +1645,7 @@ async fn check_proxies(
         if t.is_empty() || !seen.insert(t.clone()) {
             continue;
         }
-        let cands = normalize_candidates(&t, &default_proto);
+        let cands = normalize_candidates(&t, default_proto);
         jobs.push((t, cands));
         if jobs.len() >= 20_000 {
             break;
@@ -1670,7 +1654,6 @@ async fn check_proxies(
 
     let geo_map: Arc<HashMap<String, GeoCacheEntry>> = Arc::new(
         geo_cache
-            .unwrap_or_default()
             .into_iter()
             .map(|e| (e.proxy.clone(), e))
             .collect(),
@@ -1789,7 +1772,9 @@ async fn check_proxies(
         tokio::select! {
             maybe = set.join_next() => match maybe {
                 Some(Ok(v)) => {
-                    let _ = on_result.send(v.clone());
+                    if let Some(ch) = on_result {
+                        let _ = ch.send(v.clone());
+                    }
                     out.push(v);
                 }
                 Some(Err(e)) => out.push(dead_result(
@@ -1819,6 +1804,73 @@ async fn check_proxies(
         )
     });
     Ok(out)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn check_proxies(
+    proxies: Vec<String>,
+    test_url: String,
+    timeout_ms: u64,
+    concurrency: usize,
+    default_proto: String,
+    repeats: Option<usize>,
+    with_geo: Option<bool>,
+    with_anonymity: Option<bool>,
+    with_tamper: Option<bool>,
+    with_tls: Option<bool>,
+    precheck: Option<bool>,
+    precheck_timeout_ms: Option<u64>,
+    judge_mode: Option<bool>,
+    ipapi_key: Option<String>,
+    geo_cache: Option<Vec<GeoCacheEntry>>,
+    state: State<'_, CheckState>,
+    on_result: Channel<ProxyResult>,
+) -> Result<Vec<ProxyResult>, String> {
+    let busy = state.busy.clone();
+    if busy.swap(true, Ordering::SeqCst) {
+        return Err(CHECK_BUSY.to_string());
+    }
+    let _guard = BusyGuard(busy);
+    state.cancel.store(false, Ordering::SeqCst);
+
+    let timeout = Duration::from_millis(timeout_ms.clamp(500, 60_000));
+    let conc = concurrency.clamp(1, 500);
+    let repeats = repeats.unwrap_or(1).clamp(1, 5);
+    let flags = CheckFlags {
+        geo: with_geo.unwrap_or(true),
+        anon: with_anonymity.unwrap_or(true),
+        tamper: with_tamper.unwrap_or(true),
+        tls: with_tls.unwrap_or(true),
+        precheck: precheck.unwrap_or(true),
+        precheck_timeout: Duration::from_millis(
+            precheck_timeout_ms.unwrap_or(1500).clamp(300, 10_000),
+        ),
+        judge: judge_mode.unwrap_or(false),
+        ipapi_key: ipapi_key
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(|s| Arc::from(s.as_str())),
+    };
+
+    run_checks(
+        proxies,
+        test_url,
+        timeout,
+        conc,
+        repeats,
+        &default_proto,
+        flags,
+        geo_cache.unwrap_or_default(),
+        state.cancel.clone(),
+        Some(&on_result),
+    )
+    .await
+}
+
+#[tauri::command]
+fn check_busy(state: State<'_, CheckState>) -> bool {
+    state.busy.load(Ordering::SeqCst)
 }
 
 #[tauri::command]
@@ -2971,6 +3023,7 @@ pub fn run() {
         .manage(TrayState::default())
         .invoke_handler(tauri::generate_handler![
             check_proxies,
+            check_busy,
             cancel_check,
             check_direct,
             write_text_file,
