@@ -40,6 +40,9 @@ let results: ProxyResult[] = [];
 let filter: "all" | "alive" | "dead" = "all";
 let renderLimit = 250;
 const RENDER_STEP = 250;
+const RENDER_MAX = 1000;
+const POOL_RENDER_MAX = 1000;
+const poolLimits = new Map<string, number>();
 let stopFlag = false;
 let running = false;
 let includeDead = false;
@@ -321,7 +324,15 @@ function updateCounts() {
   if (apc) apc.textContent = String(dispatchPool.length);
 }
 
+function screenVisible(id: string): boolean {
+  const el = document.getElementById(id);
+  return !!el && !el.classList.contains("hidden");
+}
+
 function render() {
+  // The results table lives on the check tab only; skip expensive rebuilds
+  // while another tab is visible (they are re-rendered on tab switch).
+  if (!screenVisible("screen-check")) return;
   const searchEl = document.getElementById("search") as HTMLInputElement | null;
   const q = (searchEl?.value || "").toLowerCase().trim();
   const tb = $("tbody") as HTMLTableSectionElement;
@@ -372,14 +383,19 @@ function render() {
     const td = document.createElement("td");
     td.colSpan = 11;
     td.style.textAlign = "center";
-    const b = document.createElement("button");
-    b.className = "btn ghost";
-    b.textContent = t("show_more", { n: rows.length - renderLimit });
-    b.addEventListener("click", () => {
-      renderLimit += RENDER_STEP;
-      render();
-    });
-    td.appendChild(b);
+    if (renderLimit < RENDER_MAX) {
+      const b = document.createElement("button");
+      b.className = "btn ghost";
+      b.textContent = t("show_more", { n: rows.length - renderLimit });
+      b.addEventListener("click", () => {
+        renderLimit = Math.min(RENDER_MAX, renderLimit + RENDER_STEP);
+        render();
+      });
+      td.appendChild(b);
+    } else {
+      td.className = "empty";
+      td.textContent = t("render_limit", { n: renderLimit, total: rows.length });
+    }
     tr.appendChild(td);
     tb.appendChild(tr);
   }
@@ -399,22 +415,28 @@ function getPoolView(tbodyId: string) {
   return rows;
 }
 
+function poolLimit(tbodyId: string): number {
+  return Math.min(poolLimits.get(tbodyId) ?? RENDER_STEP, POOL_RENDER_MAX);
+}
+
 function renderPoolInto(tbodyId: string) {
   const pb = document.getElementById(tbodyId) as HTMLTableSectionElement | null;
   if (!pb) return;
   pb.innerHTML = "";
-  const rows = getPoolView(tbodyId);
-  if (rows.length === 0) {
+  const cols = tbodyId === "pool-body" ? 4 : 3;
+  const all = getPoolView(tbodyId);
+  if (all.length === 0) {
     const tr = document.createElement("tr");
     tr.className = "empty";
     const td = document.createElement("td");
-    td.colSpan = tbodyId === "pool-body" ? 4 : 3;
+    td.colSpan = cols;
     td.textContent = t(dispatchPool.length === 0 ? "pool_empty" : "empty_filter");
     tr.appendChild(td);
     pb.appendChild(tr);
     return;
   }
-  rows.forEach((p, n) => {
+  const limit = poolLimit(tbodyId);
+  all.slice(0, limit).forEach((p, n) => {
     const tr = document.createElement("tr");
     const ping = p.latency == null ? "—" : `${p.latency} ms`;
     const geo = p.country ? ` <span class="geo-tag">${escapeHtml(p.country)}</span>` : "";
@@ -436,11 +458,33 @@ function renderPoolInto(tbodyId: string) {
     }
     pb.appendChild(tr);
   });
+  if (all.length > limit) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = cols;
+    td.style.textAlign = "center";
+    if (limit < POOL_RENDER_MAX) {
+      const b = document.createElement("button");
+      b.className = "btn ghost";
+      b.textContent = t("show_more", { n: all.length - limit });
+      b.addEventListener("click", () => {
+        poolLimits.set(tbodyId, Math.min(POOL_RENDER_MAX, limit + RENDER_STEP));
+        renderPoolInto(tbodyId);
+      });
+      td.appendChild(b);
+    } else {
+      td.className = "empty";
+      td.textContent = t("render_limit", { n: limit, total: all.length });
+    }
+    tr.appendChild(td);
+    pb.appendChild(tr);
+  }
 }
 
 function renderPool() {
-  renderPoolInto("pool-body");
-  renderPoolInto("auto-pool-body");
+  // The pool exists on two tabs; only the visible table is rebuilt.
+  if (screenVisible("screen-dispatch")) renderPoolInto("pool-body");
+  if (screenVisible("screen-auto")) renderPoolInto("auto-pool-body");
 }
 
 
@@ -1173,10 +1217,13 @@ window.addEventListener("DOMContentLoaded", () => {
       const scr = document.getElementById(`screen-${name}`);
       scr?.classList.remove("hidden");
       setPolling(name === "dispatch");
+      if (name === "check") render();
       if (name === "dispatch") {
         refreshSrvAddr();
         renderPool();
         void pollDispatch();
+      } else if (name === "auto") {
+        renderPool();
       }
     });
   });
@@ -1549,10 +1596,18 @@ window.addEventListener("DOMContentLoaded", () => {
   loadMaxPing();
   syncMaxPingInputs();
   document.querySelectorAll<HTMLInputElement>("[data-pool-filter]").forEach((el) => {
-    el.addEventListener("input", renderPool);
+    el.addEventListener("input", () => {
+      const id = el.dataset.poolFilter;
+      if (id) poolLimits.set(id, RENDER_STEP);
+      renderPool();
+    });
   });
   document.querySelectorAll<HTMLSelectElement>("[data-pool-sort]").forEach((el) => {
-    el.addEventListener("change", renderPool);
+    el.addEventListener("change", () => {
+      const id = el.dataset.poolSort;
+      if (id) poolLimits.set(id, RENDER_STEP);
+      renderPool();
+    });
   });
   loadPingHist();
   renderPingGraph();
