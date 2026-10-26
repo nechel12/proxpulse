@@ -14,6 +14,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "build:unsigned": "tauri build --config src-tauri/tauri.unsigned.conf.json",
     "test": "vitest run",
     "lint": "eslint src",
     "check:versions": "node scripts/check-versions.mjs"

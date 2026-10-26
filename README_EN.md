@@ -60,8 +60,15 @@ sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
 ```sh
 npm install           # or npm ci for a lockfile-based install
 npm run tauri dev     # development mode
-npm run tauri build   # build the installer
+npm run tauri build   # release build; requires TAURI_SIGNING_PRIVATE_KEY
+npm run build:unsigned # local build without updater artifacts or a key
 ```
+
+The release build signs updater artifacts with the CI key
+(`TAURI_SIGNING_PRIVATE_KEY`). For a local build without access to the key,
+use `npm run build:unsigned`: it disables `createUpdaterArtifacts` and does
+not try to sign installers. Do not publish such a build as an update — use it
+for local runs and checks only.
 
 Checks:
 
@@ -76,7 +83,9 @@ npm run check:versions
 ```
 
 CI (`.github/workflows/ci.yml`) runs these checks on pushes to `main` and on
-pull requests.
+pull requests, and also compiles the release binary without bundling
+(`npm run build:unsigned -- --no-bundle`) to catch Tauri package version
+mismatches and build errors.
 
 ## Checking (the “Check” tab)
 

@@ -2591,13 +2591,7 @@ async fn send_webhook(
     include_credentials: Option<bool>,
     items: Vec<DispatchItem>,
 ) -> Result<String, String> {
-    send_webhook_one(
-        &url,
-        &format,
-        include_credentials.unwrap_or(false),
-        &items,
-    )
-    .await
+    send_webhook_one(&url, &format, include_credentials.unwrap_or(false), &items).await
 }
 
 #[tauri::command]

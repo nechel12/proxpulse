@@ -153,19 +153,9 @@ pub(crate) fn from_columns(parts: &[String], default_proto: &str) -> Option<(Str
             let p: Vec<&str> = parts.iter().map(|x| x.trim()).collect();
             if let Some(host_first) = four_columns_host_first(&p) {
                 return if host_first {
-                    build_url(
-                        def,
-                        Some(&format!("{}:{}", p[2], p[3])),
-                        p[0],
-                        p[1],
-                    )
+                    build_url(def, Some(&format!("{}:{}", p[2], p[3])), p[0], p[1])
                 } else {
-                    build_url(
-                        def,
-                        Some(&format!("{}:{}", p[0], p[1])),
-                        p[2],
-                        p[3],
-                    )
+                    build_url(def, Some(&format!("{}:{}", p[0], p[1])), p[2], p[3])
                 };
             }
             None
