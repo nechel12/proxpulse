@@ -133,22 +133,28 @@ struct GeoCacheEntry {
     ip_type: Option<String>,
 }
 
-/// Base URL of a judge test URL: strips a trailing /judge|/generate_204.
-fn judge_base_url(test_url: &str) -> Option<String> {
+/// Direct judge endpoint used for the content hash baseline. For a custom
+/// path (e.g. `https://host/svc`) the URL is used as-is: the same endpoint
+/// is what the checked proxy requests.
+fn judge_direct_url(test_url: &str) -> Option<String> {
     let t = test_url.trim_end_matches('/');
-    for suffix in ["/judge", "/generate_204"] {
-        if let Some(base) = t.strip_suffix(suffix) {
-            if !base.is_empty() {
-                return Some(base.to_string());
-            }
+    if t.is_empty() {
+        return None;
+    }
+    if t.ends_with("/judge") {
+        return Some(t.to_string());
+    }
+    if let Some(base) = t.strip_suffix("/generate_204") {
+        if !base.is_empty() {
+            return Some(format!("{base}/judge"));
         }
     }
-    None
+    Some(t.to_string())
 }
 
-async fn fetch_direct_judge_sha(base: &str, timeout: Duration) -> Option<String> {
+async fn fetch_direct_judge_sha(judge_url: &str, timeout: Duration) -> Option<String> {
     let client = build_client(None, timeout, true).ok()?;
-    let r = client.get(format!("{base}/judge")).send().await.ok()?;
+    let r = client.get(judge_url).send().await.ok()?;
     if !r.status().is_success() {
         return None;
     }
@@ -1665,17 +1671,19 @@ async fn check_proxies(
             .collect(),
     );
 
-    // direct judge content hash (for tamper check in judge mode)
-    let judge_base = if flags.judge {
-        judge_base_url(&test_url)
+    // Direct judge content hash (for tamper check in judge mode). The fast
+    // mode returns an empty 204 body, so the hash would never be used; skip
+    // the extra /judge request entirely.
+    let judge_url = if flags.judge && !test_url.trim_end_matches('/').ends_with("/generate_204") {
+        judge_direct_url(&test_url)
     } else {
         None
     };
     let (baseline_res, judge_sha) = tokio::join!(
         tokio::time::timeout(Duration::from_secs(20), fetch_baseline(flags.clone())),
         async {
-            match &judge_base {
-                Some(b) => fetch_direct_judge_sha(b, timeout).await,
+            match &judge_url {
+                Some(u) => fetch_direct_judge_sha(u, timeout).await,
                 None => None,
             }
         }
@@ -3238,16 +3246,20 @@ mod tests {
     }
 
     #[test]
-    fn judge_base_url_strip() {
+    fn judge_direct_url_rules() {
         assert_eq!(
-            judge_base_url("https://proxycheck.lmtunnel.com/judge"),
-            Some("https://proxycheck.lmtunnel.com".to_string())
+            judge_direct_url("https://proxycheck.lmtunnel.com/judge"),
+            Some("https://proxycheck.lmtunnel.com/judge".to_string())
         );
         assert_eq!(
-            judge_base_url("https://proxycheck.lmtunnel.com/generate_204/"),
-            Some("https://proxycheck.lmtunnel.com".to_string())
+            judge_direct_url("https://proxycheck.lmtunnel.com/generate_204/"),
+            Some("https://proxycheck.lmtunnel.com/judge".to_string())
         );
-        assert_eq!(judge_base_url("https://example.com/"), None);
+        assert_eq!(
+            judge_direct_url("https://proxycheck.lmtunnel.com/svc"),
+            Some("https://proxycheck.lmtunnel.com/svc".to_string())
+        );
+        assert_eq!(judge_direct_url(""), None);
     }
 
     #[test]

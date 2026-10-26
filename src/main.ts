@@ -17,6 +17,7 @@ import {
 } from "./geocache.ts";
 import { type Lang, translate } from "./i18n.ts";
 import { resolveTestUrl } from "./ipapi.ts";
+import { resolveJudgeUrl } from "./judge.ts";
 import { extractProxiesFromText, parseInput, stripProxyCredentials } from "./parse.ts";
 import {
   BUILTIN_PROFILES,
@@ -71,15 +72,8 @@ function isJudgeMode(): boolean {
 }
 
 function judgeBase(): string {
-  const custom = ($("test-url-custom") as HTMLInputElement).value.trim();
-  const base = (custom || JUDGE_DEFAULT).replace(/\/+$/, "");
-  if (/\/(judge|generate_204)$/.test(base)) return base;
-  try {
-    const u = new URL(base);
-    // custom path on a self-hosted judge (e.g. https://host/svc) → use as-is
-    if (u.pathname && u.pathname !== "/") return base;
-  } catch { /* invalid URL — backend will report it */ }
-  return base + (judgeFull ? "/judge" : "/generate_204");
+  const custom = ($("test-url-custom") as HTMLInputElement).value;
+  return resolveJudgeUrl(custom, judgeFull, JUDGE_DEFAULT);
 }
 
 function effectiveTestUrl(): string {
