@@ -26,3 +26,6 @@ dist-ssr
 # Rust
 /target/
 src-tauri/target/
+
+# Local audit report (kept locally, not published)
+/audit.md

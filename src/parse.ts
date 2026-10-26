@@ -96,7 +96,19 @@ export function tryCsvLine(line: string): string | null {
   return null;
 }
 
-export const SCHEME_URL_RE = /\b(?:socks5h?|socks4a?|socks|https?)\:\/\/[^\s"'<>,;()\[\]]+/gi;
+export function stripProxyCredentials(raw: string): string {
+  const at = raw.lastIndexOf("@");
+  if (at < 0) return raw;
+  const host = raw.slice(at + 1);
+  if (!host) return raw;
+  const schemeSep = raw.indexOf("://");
+  if (schemeSep >= 0 && schemeSep < at) {
+    return raw.slice(0, schemeSep + 3) + host;
+  }
+  return host;
+}
+
+export const SCHEME_URL_RE = /\b(?:socks5h?|socks4a?|socks|https?):\/\/[^\s"'<>,;()[\]]+/gi;
 
 export function cleanTail(s: string): string {
   return s.replace(/[.,;!?)\]}>]+$/, "").replace(/^[(<{]+/, "").trim();
@@ -124,7 +136,7 @@ export function extractProxiesFromText(text: string): string[] {
   } catch { /* not json */ }
 
   const lines = text.split(/\r?\n/);
-  for (let raw of lines) {
+  for (const raw of lines) {
     let line = raw.trim();
     if (!line || line.startsWith("#") || line.startsWith("//")) continue;
     line = line.replace(/^(\d{1,6}[).\-:]\s+|[-*•>]\s+|\[\s*[xX✓]?\s*\]\s*)/, "").trim();

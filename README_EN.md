@@ -29,9 +29,10 @@ Ready builds are available in [Releases](https://github.com/nechel12/proxpulse/r
 - **Linux (x64):** `.AppImage`, `.deb`, `.rpm`;
 - **macOS:** `.dmg` for Apple Silicon and Intel.
 
-Installed builds can check for updates from the Info tab. Portable builds are
-updated manually by replacing the file. The file to download for each platform
-is described in the release notes.
+Built-in auto-update works for Windows NSIS (`-setup.exe`), macOS and the
+Linux AppImage. MSI, `.deb` and `.rpm` are installed and updated manually
+(installer or package manager). Portable builds are updated by replacing the
+file. The file to download for each platform is described in the release notes.
 
 > **macOS:** builds are not signed with an Apple certificate. On first launch,
 > open the app from the context menu → Open, or run `xattr -cr ProxPulse.app`.
@@ -41,9 +42,9 @@ is described in the release notes.
 
 ## Build from source
 
-Requirements: [Node.js 18+](https://nodejs.org/), [Rust](https://rustup.rs/)
-(stable) and WebView2 (built into Windows 10/11). Linux builds additionally
-need WebKitGTK and other system packages.
+Requirements: [Node.js 22.12+](https://nodejs.org/), [Rust](https://rustup.rs/)
+(stable, 1.90 or newer) and WebView2 (built into Windows 10/11). Linux builds
+additionally need WebKitGTK and other system packages.
 
 <details>
 <summary>Linux build dependencies (Debian/Ubuntu)</summary>
@@ -66,7 +67,9 @@ Checks:
 
 ```sh
 npm run build         # tsc + vite build
-npm test              # vitest: proxy parsing (frontend)
+npm test              # vitest: parsing, profiles, CSV, export, i18n, formatting
+npm run lint          # ESLint
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm run check:versions
@@ -144,11 +147,24 @@ ones. A profile can be selected, saved or deleted.
 Each deep check makes additional requests through the proxy, so all of them can
 be disabled. They are not needed in Judge mode: Judge returns the data itself.
 
+> **Public API limits.** Free ip-api has a per-minute request limit and
+> httpbin.org is regularly throttled. To avoid flooding ip-api at 500-way
+> concurrency, at most 8 geo lookups run at once; under load geo is skipped
+> for some proxies (run the check again). The geo cache (up to 2000 entries)
+> reduces repeated lookups but does not replace a self-hosted service. For
+> stable results, use [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge).
+
+Deep checks are heuristics. If a baseline request fails, anonymity may stay
+empty. The TLS check reports `mod` when a certificate is rejected and `n/v`
+(`unverified`) when the handshake fails for another reason (for example, the
+proxy blocks example.com:443).
+
 ### Export
 
-**Export** menu: `.txt` (proxies only), `.json` (full results), `.csv` (table),
-**Copy**. The **“dead”** toggle controls whether unavailable proxies are
-included in the export. Saving uses the system dialog.
+**Export** menu: `.txt` (normalized proxies, including the scheme), `.json`
+(full results), `.csv` (table with the original string and `url`), **Copy**.
+The **“dead”** toggle controls whether unavailable proxies are included in the
+export. Saving uses the system dialog.
 
 Below the table, a sparkline shows the average ping of working proxies across
 checks; the history is stored locally.
@@ -176,11 +192,16 @@ proxies are removed. After each auto-check, the pool is sent as POST requests
 to the configured webhooks (up to 10, TXT/JSON/CSV format). “Check now” and
 “Send now” run these actions manually.
 
+By default proxy credentials are stripped from URLs before posting. The
+**“Send credentials”** option includes them, but requires HTTPS; an
+`http://` webhook with credentials is rejected.
+
 ## Info, tray and diagnostics (the “Info” tab)
 
 - GitHub links: ProxPulse and ProxPulse Judge.
-- **Diagnostics**: app version, update check via GitHub Releases, install with
-  restart, report copy (version, counters, recent errors).
+- **Diagnostics**: app version, update check via GitHub Releases, install
+  (on Windows the installer closes the app; on macOS/Linux restart manually),
+  report copy (version, counters, recent errors).
 - The ⇲ button in the header minimizes the window to the system tray. The tray
   menu provides show/hide, dispatcher on/off with the current port, time until
   the next auto-check, webhook state and quit. Left-clicking the icon shows or
@@ -194,13 +215,15 @@ enabled; direct no-proxy requests for baselines (your IP and the example.com
 reference); requests to the selected Judge instance; a GitHub release check;
 POST requests to the configured webhooks; URL list downloads.
 
-Proxy credentials are sent only to the selected proxy using its authentication
-mechanism (HTTP `Proxy-Authorization` or SOCKS authentication) and are not sent
-anywhere else.
+Proxy credentials are sent to the selected proxy using its authentication
+mechanism (HTTP `Proxy-Authorization` or SOCKS authentication). They also
+appear in exports (TXT/JSON/CSV/clipboard) and — **only when the option is
+explicitly enabled** — in webhooks. By default webhooks receive URLs without
+credentials.
 
-Stored locally in the browser: language, ping limit, webhooks, geo cache (up to
-2000 entries), recent errors, ping history and settings profiles. Clearing
-`localStorage` removes this data.
+Stored locally in the browser: language, ping limit, webhook URLs (may contain
+tokens), geo cache (up to 2000 entries, credential-free keys), recent errors,
+ping history and settings profiles. Clearing `localStorage` removes this data.
 
 ## Security
 
@@ -213,14 +236,22 @@ See [SECURITY.md](SECURITY.md) for details.
 
 ```text
 index.html                     # screen markup
-src/main.ts                    # frontend logic and RU/EN dictionaries
+src/main.ts                    # screen logic and event wiring
+src/i18n.ts                    # RU/EN dictionaries
 src/parse.ts                   # proxy parsing (pure functions)
-src/parse.test.ts              # 19 parsing tests (vitest)
+src/profiles.ts                # settings profiles (pure functions)
+src/csv.ts                     # CSV escaping
+src/export.ts                  # TXT/JSON/CSV export
+src/format.ts                  # table formatting helpers
+src/types.ts                   # shared frontend types
+src/*.test.ts                  # pure-module tests (vitest)
 src/styles.css                 # dark theme
 src-tauri/src/lib.rs           # backend: checker, dispatcher, tray
+src-tauri/src/proxy.rs         # proxy parsing/normalization
 src-tauri/src/main.rs          # entry point
 src-tauri/tauri.conf.json      # Tauri configuration
 src-tauri/Cargo.toml           # Rust dependencies
+eslint.config.js               # ESLint
 .github/workflows/ci.yml       # tests, clippy and version check
 .github/workflows/release.yml  # release builds and auto-update files
 scripts/check-versions.mjs     # version synchronization

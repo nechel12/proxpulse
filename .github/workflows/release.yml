@@ -7,9 +7,48 @@ on:
 
 permissions:
   contents: write
+  checks: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  # A tag may only be published after the same checks CI runs on main.
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run lint
+      - run: npm run check:versions
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
+
   release:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -26,8 +65,9 @@ jobs:
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Linux build deps
         if: matrix.platform == 'ubuntu-22.04'
@@ -35,9 +75,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -51,7 +92,7 @@ jobs:
       # src-tauri/tauri.conf.json and src-tauri/Cargo.toml to match.
       # Signing key lives in repo secrets as TAURI_SIGNING_PRIVATE_KEY
       # (one minisign key signs every platform).
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -62,6 +103,8 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+          # README recommends the NSIS installer; keep latest.json in sync.
+          updaterJsonPreferNsis: true
 
       # Portable exe is not a Tauri bundle target — upload the raw binary.
       # Windows-only (Linux already ships portable AppImage,
@@ -81,10 +124,11 @@ jobs:
   notes:
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # gh resolves the repo via git, so checkout is required even though
       # no files are used.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -94,14 +138,14 @@ jobs:
           gh release edit "$TAG" --notes "## What to download
 
           **Windows (x64)**
-          - \`ProxPulse_${VER}_x64-setup.exe\` — installer (recommended, auto-updates)
-          - \`ProxPulse_${VER}_x64_en-US.msi\` — MSI installer (auto-updates)
-          - \`ProxPulse_${TAG}_portable.exe\` — portable, no install (update manually)
+          - \`ProxPulse_${VER}_x64-setup.exe\` — NSIS installer (recommended, auto-updates)
+          - \`ProxPulse_${VER}_x64_en-US.msi\` — MSI installer (manual updates)
+          - \`ProxPulse_${TAG}_portable.exe\` — portable, no install (manual updates)
 
           **Linux (x64)**
-          - \`ProxPulse_${VER}_amd64.AppImage\` — portable (update manually)
-          - \`ProxPulse_${VER}_amd64.deb\` — Debian/Ubuntu (auto-updates)
-          - \`ProxPulse-${VER}-1.x86_64.rpm\` — Fedora/openSUSE (auto-updates)
+          - \`ProxPulse_${VER}_amd64.AppImage\` — portable (auto-updates)
+          - \`ProxPulse_${VER}_amd64.deb\` — Debian/Ubuntu package (update via apt/dpkg)
+          - \`ProxPulse-${VER}-1.x86_64.rpm\` — Fedora/openSUSE package (update via rpm/dnf)
 
           **macOS (Apple Silicon)** — unsigned, see README for Gatekeeper steps
           - \`ProxPulse_${VER}_aarch64.dmg\`
@@ -109,4 +153,5 @@ jobs:
           **macOS (Intel)** — unsigned and untested
           - \`ProxPulse_${VER}_x64.dmg\`
 
-          \`latest.json\` and \`.sig\` files are for the built-in updater, you do not need to download them."
+          Linux auto-update is AppImage-only. \`latest.json\` and \`.sig\` files
+          are for the built-in updater; you do not need to download them."

@@ -4,6 +4,7 @@ import {
   cleanTail,
   extractProxiesFromText,
   proxiesFromJson,
+  stripProxyCredentials,
   tryCsvLine,
 } from "./parse.ts";
 
@@ -71,6 +72,23 @@ describe("proxiesFromJson", () => {
     const out: string[] = [];
     proxiesFromJson({ data: { proxies: ["1.2.3.4:8080", "5.6.7.8:3128"] } }, out);
     expect(out).toEqual(["1.2.3.4:8080", "5.6.7.8:3128"]);
+  });
+});
+
+describe("stripProxyCredentials", () => {
+  it("removes userinfo and keeps the scheme", () => {
+    expect(stripProxyCredentials("http://user:pass@1.2.3.4:8080")).toBe(
+      "http://1.2.3.4:8080"
+    );
+    expect(stripProxyCredentials("socks5://u:p@h:1080")).toBe("socks5://h:1080");
+  });
+  it("works without a scheme", () => {
+    expect(stripProxyCredentials("user:pass@1.2.3.4:8080")).toBe("1.2.3.4:8080");
+    expect(stripProxyCredentials("u:p@ss@host:80")).toBe("host:80");
+  });
+  it("leaves credentials-free values alone", () => {
+    expect(stripProxyCredentials("1.2.3.4:8080")).toBe("1.2.3.4:8080");
+    expect(stripProxyCredentials("http://1.2.3.4:8080")).toBe("http://1.2.3.4:8080");
   });
 });
 

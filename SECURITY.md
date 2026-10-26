@@ -29,4 +29,10 @@ This policy covers the ProxPulse desktop application, its updater, and the
 local proxy dispatcher. Vulnerabilities in third-party dependencies should be
 reported upstream; if they affect ProxPulse, a private report is still welcome.
 
+## Webhooks
+
+Webhook URLs may contain secrets (tokens). Proxy credentials are stripped from
+webhook payloads by default; the "send credentials" option requires HTTPS.
+Treat webhook URLs as secrets and do not include them in reports.
+
 Reports are reviewed on a best-effort basis. There is no bug bounty program.

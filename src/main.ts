@@ -1,229 +1,33 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { extractProxiesFromText, parseInput } from "./parse.ts";
-
-type ProxyResult = {
-  proxy: string;
-  proto: string;
-  alive: boolean;
-  latency_ms: number | null;
-  jitter_ms: number | null;
-  success_rate: number;
-  attempts: number;
-  ip: string | null;
-  country: string | null;
-  country_code: string | null;
-  city: string | null;
-  isp: string | null;
-  org: string | null;
-  asn: string | null;
-  ip_type: string | null;
-  anonymity: string | null;
-  tamper: string | null;
-  tls: string | null;
-  tls_info: string | null;
-  error: string | null;
-};
-
-type Lang = "ru" | "en";
+import { buildCsv, buildJson, buildTxt } from "./export.ts";
+import {
+  anonShort,
+  geoShort,
+  pingClass,
+  poolCountry,
+  rowTitle,
+  stabilityShort,
+  tlsShort,
+} from "./format.ts";
+import { type Lang, translate } from "./i18n.ts";
+import { extractProxiesFromText, parseInput, stripProxyCredentials } from "./parse.ts";
+import {
+  BUILTIN_PROFILES,
+  type ProfileData,
+  sanitizeProfile,
+} from "./profiles.ts";
+import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
 
-const I18N: Record<Lang, Record<string, string>> = {
-  ru: {
-    stat_total: "Всего", stat_alive: "Живые", stat_dead: "Мёртвые", stat_ping: "Ср. пинг",
-    tab_check: "Проверка", tab_dispatch: "Диспетчер",
-    src_title: "▸ Источник",
-    src_ph: "Вставь прокси в любом формате",
-    btn_clear: "Очистить", btn_import: "Импорт", btn_copy: "Копировать",
-    import_hint: "Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.",
-    import_url_ph: "https://… — список прокси", import_url_btn: "Загрузить",
-    url_loaded: "Импортировано по ссылке: {n}.", url_fail: "Не удалось загрузить ссылку",
-    set_title: "▸ Настройки", f_testurl: "Тестовый URL",
-    opt_google: "google generate_204 (быстро)", opt_cf: "cloudflare generate_204 (быстро)",
-    opt_ipify: "api.ipify.org (покажет IP)", opt_httpbin: "httpbin.org/ip (покажет IP)",
-    opt_ipapi: "ip-api.com/json (IP + гео)", opt_example: "example.com",
-    opt_judge: "ProxPulse Judge",
-    custom_ph: "или свой URL https://...",
-    custom_judge_ph: "свой judge, например https://...",
-    judge_fast: "Быстрая", judge_full: "Полная",
-    profile: "Профиль", profile_save: "Сохранить", profile_del: "Удалить",
-    profile_none: "— пресет —", profile_name: "Название профиля",
-    profile_limit: "Лимит профилей: 20.",
-    modal_ok: "Сохранить", modal_cancel: "Отмена",
-    prof_fast: "Быстрый", prof_deep: "Глубокий", prof_judge: "Judge",
-    f_timeout: "Таймаут, мс", f_threads: "Потоки", f_repeats: "Замеры",
-    f_protonoscheme: "Тип без схемы", opt_http: "HTTP",
-    chk_geo: "Гео и тип IP", chk_anon: "Анонимность", chk_tamper: "Целостность", chk_tls: "TLS-интегрити",
-    deep_hint: "Глубокие проверки медленнее: гео — через ip-api, анонимность — через httpbin, целостность — сверка с example.com, TLS — сверка сертификата.",
-    precheck_label: "Пречек порта", precheck_hint: "Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.",
-    btn_direct: "Проверить связь", btn_start: "▶ Старт", btn_stop: "■ Стоп",
-    res_title: "▸ Результат", chip_all: "Все", chip_alive: "Живые", chip_dead: "Мёртвые",
-    search_ph: "Фильтр: 1.2.3.4, :8080, socks, страна, isp...",
-    export_btn: "Экспорт", exp_copy: "Скопировать",
-    include_dead: "мёртвые", include_dead_t: "Включать мёртвые в экспорт",
-    th_proxy: "Прокси", th_type: "Тип", th_status: "Статус", th_ping: "Пинг",
-    th_stab: "Джиттер/SR", th_anon: "Анон", th_geo: "Гео", th_iptype: "Тип IP", th_info: "Инфо",
-    empty_idle: "Пока пусто — вставь список слева и жми Старт.",
-    empty_filter: "Ничего не найдено под фильтр.",
-    pill_alive: "ALIVE", pill_dead: "DEAD",
-    net_idle: "ожидание", net_work: "проверка {s}с", net_done: "готово", net_stopped: "остановлено",
-    st_ready: "Готов к проверке.", st_empty: "Список пуст — вставь прокси.",
-    st_badurl: "Тестовый URL должен начинаться с http(s)://",
-    st_done_trunc: "Готово за {secs}с. Живых: {alive}/{total}. Проверены первые {n} из списка.",
-    st_checking: "Проверка {done}/{total} ...", st_done: "Готово за {secs}с. Живых: {alive}/{total}.",
-    st_stopped: "Остановлено. Живых: {alive}/{total}.", st_stopping: "Останавливаю...",
-    st_cleared: "Результат очищен.", st_nocopy: "Нечего копировать.",
-    st_copied: "Скопировано: {n}.", st_nothing: "Нечего экспортировать.",
-    st_saved: "Сохранено: {path}", st_downloaded: "Скачано: {name} (браузерный режим).",
-    direct_ok: "прямой доступ OK {ms}ms", direct_fail: "связи нет: {e}",
-    file_loaded: "Импортировано: {n} из {f} ф.", file_none: "В {name} прокси не найдены.",
-    file_fail: "Не удалось прочитать {name}.",
-    srv_title: "▸ Локальный сервер", srv_hint: "Поднимает прокси 127.0.0.1:порт и гоняет трафик через живые из проверки.",
-    srv_port: "Порт", srv_mode: "Режим",
-    mode_rr: "Ротация", mode_fastest: "Самый быстрый", mode_failover: "Замена при падении",
-    srv_start: "Включить", srv_stop: "Выключить",
-    stat_req: "Запросы", stat_err: "Ошибки", stat_cur: "Текущий апстрим",
-    browser_hint: "Вставь в браузер как HTTP-прокси: 127.0.0.1 и порт выше.",
-    pool_title: "▸ Пул живых", pool_sync: "Синхронизировать",
-    pool_filter_ph: "Страна, IP…", pool_sort_added: "Порядок",
-    pool_sort_ping: "Пинг", pool_sort_country: "Страна",
-    pool_hint: "Пул пополняется автоматически после каждой проверки.",
-    pool_empty: "Пусто — запусти проверку.", pool_synced: "Пул: {n}.",
-    pool_sync_err: "Не удалось синхронизировать пул.",
-    srv_on: "Сервер на {addr}.", srv_off: "Сервер выключен.",
-    srv_err_empty: "Пул пуст — сначала проверь прокси.", srv_err: "Ошибка сервера: {e}",
-    tray_hide: "Скрыть в трей", tab_auto: "Авто", tab_info: "Инфо",
-    srv_listener: "Протокол сервера", lis_both: "HTTP + SOCKS5",
-    lis_http: "Только HTTP", lis_socks: "Только SOCKS5",
-    disp_auto_title: "▸ Автопроверка", auto_on: "Вкл", auto_every: "Каждые, мин",
-    max_ping: "Макс. пинг, мс", max_ping_ph: "0 — без лимита",
-    auto_title: "▸ Авторежим",
-    auto_hint: "Общий рабочий пул перепроверяется по таймеру, мёртвые вылетают, живые уходят на вебхук.",
-    auto_now: "Проверить сейчас",
-    webhook_title: "▸ Вебхук", webhook_url: "URL вебхука", webhook_format: "Формат",
-    webhook_add: "+ Добавить",
-    webhook_send: "Отправить сейчас",
-    webhook_hint: "После каждой автопроверки список уходит POST-запросом. Пусто — отправки нет.",
-    info_title: "▸ О приложении",
-    info_about: "Быстрый чекер прокси: проверка живости, гео, анонимности и TLS, локальный диспетчер и авторассылка пула на вебхук.",
-    show_more: "Показать ещё ({n})",
-    graph_title: "Средний пинг живых по проверкам",
-    diag_title: "▸ Диагностика", diag_ver: "Версия", diag_copy: "Копировать",
-    diag_upd: "Проверить обновления", upd_open: "Открыть релиз",
-    upd_latest: "Установлена последняя ({v})", upd_found: "Доступна {v} (у тебя {cur})",
-    upd_fail: "Не удалось проверить",
-    upd_install: "Установить", upd_confirm: "Установить {v}? Приложение перезапустится.",
-    upd_installing: "Установка…", upd_restart: "Установлено, перезапусти приложение",
-    auto_running: "Автопроверка {n} шт...",
-    auto_pruned: "Автопроверка: живых {alive}/{total}.",
-    auto_skip: "Пропуск: идёт другая проверка.",
-    auto_err: "Ошибка автопроверки: {e}",
-    webhook_sent: "Вебхук: {r}", webhook_fail: "Вебхук не ушёл: {e}",
-    webhook_empty: "Пул пуст, отправлять нечего.",
-  },
-  en: {
-    stat_total: "Total", stat_alive: "Alive", stat_dead: "Dead", stat_ping: "Avg ping",
-    tab_check: "Check", tab_dispatch: "Dispatcher",
-    src_title: "▸ Source",
-    src_ph: "Paste proxies in any format",
-    btn_clear: "Clear", btn_import: "Import", btn_copy: "Copy",
-    import_hint: "Import: txt, csv, json, log and anything else — formats are auto-detected.",
-    import_url_ph: "https://… — proxy list", import_url_btn: "Load",
-    url_loaded: "Imported from URL: {n}.", url_fail: "URL fetch failed",
-    set_title: "▸ Settings", f_testurl: "Test URL",
-    opt_google: "google generate_204 (fast)", opt_cf: "cloudflare generate_204 (fast)",
-    opt_ipify: "api.ipify.org (shows IP)", opt_httpbin: "httpbin.org/ip (shows IP)",
-    opt_ipapi: "ip-api.com/json (IP + geo)", opt_example: "example.com",
-    opt_judge: "ProxPulse Judge",
-    custom_ph: "or custom URL https://...",
-    custom_judge_ph: "custom judge, e.g. https://...",
-    judge_fast: "Fast", judge_full: "Full",
-    profile: "Profile", profile_save: "Save", profile_del: "Delete",
-    profile_none: "— preset —", profile_name: "Profile name",
-    profile_limit: "Profile limit: 20.",
-    modal_ok: "Save", modal_cancel: "Cancel",
-    prof_fast: "Fast", prof_deep: "Deep", prof_judge: "Judge",
-    f_timeout: "Timeout, ms", f_threads: "Threads", f_repeats: "Samples",
-    f_protonoscheme: "No-scheme type", opt_http: "HTTP",
-    chk_geo: "Geo & IP type", chk_anon: "Anonymity", chk_tamper: "Integrity", chk_tls: "TLS integrity",
-    deep_hint: "Deep checks are slower: geo via ip-api, anonymity via httpbin, integrity vs example.com, TLS vs certificate.",
-    precheck_label: "Port precheck", precheck_hint: "Fast TCP precheck drops dead hosts before the full check.",
-    btn_direct: "Test connection", btn_start: "▶ Start", btn_stop: "■ Stop",
-    res_title: "▸ Results", chip_all: "All", chip_alive: "Alive", chip_dead: "Dead",
-    search_ph: "Filter: 1.2.3.4, :8080, socks, country, isp...",
-    export_btn: "Export", exp_copy: "Copy",
-    include_dead: "dead", include_dead_t: "Include dead in export",
-    th_proxy: "Proxy", th_type: "Type", th_status: "Status", th_ping: "Ping",
-    th_stab: "Jitter/SR", th_anon: "Anon", th_geo: "Geo", th_iptype: "IP type", th_info: "Info",
-    empty_idle: "Empty — paste a list on the left and hit Start.",
-    empty_filter: "Nothing matches the filter.",
-    pill_alive: "ALIVE", pill_dead: "DEAD",
-    net_idle: "idle", net_work: "checking {s}s", net_done: "done", net_stopped: "stopped",
-    st_ready: "Ready.", st_empty: "List is empty — paste proxies.",
-    st_badurl: "Test URL must start with http(s)://",
-    st_done_trunc: "Done in {secs}s. Alive: {alive}/{total}. Only the first {n} were checked.",
-    st_checking: "Checking {done}/{total} ...", st_done: "Done in {secs}s. Alive: {alive}/{total}.",
-    st_stopped: "Stopped. Alive: {alive}/{total}.", st_stopping: "Stopping...",
-    st_cleared: "Results cleared.", st_nocopy: "Nothing to copy.",
-    st_copied: "Copied: {n}.", st_nothing: "Nothing to export.",
-    st_saved: "Saved: {path}", st_downloaded: "Downloaded: {name} (browser mode).",
-    direct_ok: "direct OK {ms}ms", direct_fail: "no connection: {e}",
-    file_loaded: "Imported: {n} from {f} file(s).", file_none: "No proxies found in {name}.",
-    file_fail: "Failed to read {name}.",
-    srv_title: "▸ Local server", srv_hint: "Serves a proxy on 127.0.0.1:port routed through alive proxies from checks.",
-    srv_port: "Port", srv_mode: "Mode",
-    mode_rr: "Rotation", mode_fastest: "Fastest", mode_failover: "Failover",
-    srv_start: "Enable", srv_stop: "Disable",
-    stat_req: "Requests", stat_err: "Errors", stat_cur: "Current upstream",
-    browser_hint: "Put it into your browser as HTTP proxy: 127.0.0.1 and the port above.",
-    pool_title: "▸ Alive pool", pool_sync: "Sync",
-    pool_filter_ph: "Country, IP…", pool_sort_added: "Added",
-    pool_sort_ping: "Ping", pool_sort_country: "Country",
-    pool_hint: "Pool auto-fills after every check.",
-    pool_empty: "Empty — run a check.", pool_synced: "Pool: {n}.",
-    pool_sync_err: "Failed to sync the pool.",
-    srv_on: "Server on {addr}.", srv_off: "Server off.",
-    srv_err_empty: "Pool is empty — check proxies first.", srv_err: "Server error: {e}",
-    tray_hide: "Hide to tray", tab_auto: "Auto", tab_info: "Info",
-    srv_listener: "Server protocol", lis_both: "HTTP + SOCKS5",
-    lis_http: "HTTP only", lis_socks: "SOCKS5 only",
-    disp_auto_title: "▸ Auto-check", auto_on: "On", auto_every: "Every, min",
-    max_ping: "Max ping, ms", max_ping_ph: "0 — no limit",
-    auto_title: "▸ Auto mode",
-    auto_hint: "Shared alive pool is re-checked on a timer; dead drop out, alive go to the webhook.",
-    auto_now: "Check now",
-    webhook_title: "▸ Webhook", webhook_url: "Webhook URL", webhook_format: "Format",
-    webhook_add: "+ Add",
-    webhook_send: "Send now",
-    webhook_hint: "After each auto-check the list is POSTed. Empty — no send.",
-    info_title: "▸ About",
-    info_about: "Fast proxy checker: liveness, geo, anonymity and TLS checks, local dispatcher and pool auto-posting to a webhook.",
-    show_more: "Show more ({n})",
-    graph_title: "Alive avg ping per check",
-    diag_title: "▸ Diagnostics", diag_ver: "Version", diag_copy: "Copy",
-    diag_upd: "Check for updates", upd_open: "Open release",
-    upd_latest: "Up to date ({v})", upd_found: "Available {v} (yours {cur})",
-    upd_fail: "Check failed",
-    upd_install: "Install", upd_confirm: "Install {v}? The app will restart.",
-    upd_installing: "Installing…", upd_restart: "Installed — restart the app",
-    auto_running: "Auto-checking {n}...",
-    auto_pruned: "Auto-check: {alive}/{total} alive.",
-    auto_skip: "Skipped: another check is running.",
-    auto_err: "Auto-check failed: {e}",
-    webhook_sent: "Webhook: {r}", webhook_fail: "Webhook failed: {e}",
-    webhook_empty: "Pool is empty, nothing to send.",
-  },
-};
-
-let lang: Lang = (localStorage.getItem("pp-lang") as Lang) || "ru";
-if (lang !== "ru" && lang !== "en") lang = "ru";
+let lang: Lang = "ru";
+try {
+  const savedLang = localStorage.getItem("pp-lang");
+  if (savedLang === "ru" || savedLang === "en") lang = savedLang;
+} catch { /* localStorage may be unavailable */ }
 
 function t(key: string, params?: Record<string, string | number>): string {
-  let s = I18N[lang][key] ?? I18N.ru[key] ?? key;
-  if (params) {
-    for (const [k, v] of Object.entries(params)) s = s.split(`{${k}}`).join(String(v));
-  }
-  return s;
+  return translate(lang, key, params);
 }
 
 let lastStatus: { key: string; params?: Record<string, string | number> } = { key: "st_ready" };
@@ -238,7 +42,7 @@ const RENDER_STEP = 250;
 let stopFlag = false;
 let running = false;
 let includeDead = false;
-type PoolItem = { raw: string; latency: number | null; country: string | null };
+type PoolItem = { raw: string; url: string; latency: number | null; country: string | null };
 let dispatchPool: PoolItem[] = [];
 let poolGen = 0;
 let pollTimer: number | undefined;
@@ -291,103 +95,6 @@ function setJudgeFull(full: boolean): void {
 }
 
 // ---------- settings profiles ----------
-
-type ProfileData = {
-  testUrlSel: string;
-  customUrl: string;
-  timeout: string;
-  concurrency: string;
-  repeats: string;
-  defaultProto: string;
-  geo: boolean;
-  anon: boolean;
-  tamper: boolean;
-  tls: boolean;
-  precheck: boolean;
-  precheckTimeout: string;
-  judgeFull: boolean;
-};
-
-const PROFILE_DEFAULTS: ProfileData = {
-  testUrlSel: "https://www.google.com/generate_204",
-  customUrl: "",
-  timeout: "5000",
-  concurrency: "50",
-  repeats: "1",
-  defaultProto: "http",
-  geo: true,
-  anon: true,
-  tamper: true,
-  tls: true,
-  precheck: true,
-  precheckTimeout: "1500",
-  judgeFull: true,
-};
-
-const TEST_URL_VALUES = [
-  "https://www.google.com/generate_204",
-  "https://cp.cloudflare.com/generate_204",
-  "https://api.ipify.org",
-  "https://httpbin.org/ip",
-  "https://ip-api.com/json",
-  "https://example.com",
-  "judge",
-];
-
-function sanitizeProfile(raw: unknown): ProfileData | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Partial<ProfileData>;
-  const str = (v: unknown, fb: string, re?: RegExp) =>
-    typeof v === "string" && (!re || re.test(v)) ? v : fb;
-  const bool = (v: unknown, fb: boolean) => (typeof v === "boolean" ? v : fb);
-  const urlSel = str(o.testUrlSel, PROFILE_DEFAULTS.testUrlSel);
-  const proto = str(o.defaultProto, PROFILE_DEFAULTS.defaultProto);
-  return {
-    testUrlSel: TEST_URL_VALUES.includes(urlSel) ? urlSel : PROFILE_DEFAULTS.testUrlSel,
-    customUrl: str(o.customUrl, ""),
-    timeout: str(o.timeout, PROFILE_DEFAULTS.timeout, /^\d+$/),
-    concurrency: str(o.concurrency, PROFILE_DEFAULTS.concurrency, /^\d+$/),
-    repeats: str(o.repeats, PROFILE_DEFAULTS.repeats, /^\d+$/),
-    defaultProto: ["http", "socks5", "socks4"].includes(proto) ? proto : "http",
-    geo: bool(o.geo, true),
-    anon: bool(o.anon, true),
-    tamper: bool(o.tamper, true),
-    tls: bool(o.tls, true),
-    precheck: bool(o.precheck, true),
-    precheckTimeout: str(o.precheckTimeout, PROFILE_DEFAULTS.precheckTimeout, /^\d+$/),
-    judgeFull: bool(o.judgeFull, true),
-  };
-}
-
-const BUILTIN_PROFILES: { id: string; nameKey: string; data: ProfileData }[] = [
-  {
-    id: "builtin:fast", nameKey: "prof_fast",
-    data: {
-      testUrlSel: "https://www.google.com/generate_204", customUrl: "",
-      timeout: "5000", concurrency: "100", repeats: "1", defaultProto: "http",
-      geo: false, anon: false, tamper: false, tls: false,
-      precheck: true, precheckTimeout: "1500", judgeFull: false,
-    },
-  },
-  {
-    id: "builtin:deep", nameKey: "prof_deep",
-    data: {
-      testUrlSel: "https://ip-api.com/json", customUrl: "",
-      timeout: "8000", concurrency: "50", repeats: "3", defaultProto: "http",
-      geo: true, anon: true, tamper: true, tls: true,
-      precheck: true, precheckTimeout: "1500", judgeFull: false,
-    },
-  },
-  {
-    id: "builtin:judge", nameKey: "prof_judge",
-    data: {
-      testUrlSel: "judge", customUrl: "",
-      timeout: "5000", concurrency: "50", repeats: "1", defaultProto: "http",
-      geo: false, anon: false, tamper: false, tls: false,
-      precheck: true, precheckTimeout: "1500", judgeFull: true,
-    },
-  },
-];
 
 let customProfiles: { name: string; data: ProfileData }[] = [];
 let currentProfileId = "";
@@ -576,58 +283,6 @@ function updateCounts() {
   if (apc) apc.textContent = String(dispatchPool.length);
 }
 
-function pingClass(ms: number | null): string {
-  if (ms == null) return "";
-  if (ms < 800) return "ping-fast";
-  if (ms < 2500) return "ping-mid";
-  return "ping-slow";
-}
-
-function anonShort(a: string | null): { txt: string; cls: string } {
-  if (!a) return { txt: "—", cls: "" };
-  if (a === "elite") return { txt: "elite", cls: "anon-elite" };
-  if (a === "anonymous") return { txt: "anon", cls: "anon-anon" };
-  if (a === "transparent") return { txt: "transp", cls: "anon-trans" };
-  return { txt: a, cls: "" };
-}
-
-function tlsShort(v: string | null): { txt: string; cls: string } {
-  if (v === "ok") return { txt: "ok", cls: "anon-elite" };
-  if (v === "modified") return { txt: "mod", cls: "anon-trans" };
-  return { txt: "—", cls: "" };
-}
-
-function geoShort(r: ProxyResult): string {
-  if (r.country_code && r.city) return `${r.country_code} ${r.city}`;
-  if (r.country_code) return r.country_code;
-  if (r.country) return r.country;
-  return "—";
-}
-
-function stabilityShort(r: ProxyResult): string {
-  if (!r.alive) return "—";
-  if ((r.attempts ?? 1) <= 1) return "—";
-  const j = r.jitter_ms == null ? "?" : `±${r.jitter_ms}`;
-  const sr = `${Math.round((r.success_rate ?? 1) * 100)}%`;
-  return `${j} ${sr}`;
-}
-
-function rowTitle(r: ProxyResult): string {
-  const parts: string[] = [];
-  if (r.ip) parts.push(`IP ${r.ip}`);
-  if (r.country || r.city) parts.push(`geo ${[r.country, r.city].filter(Boolean).join(", ")}`);
-  if (r.isp) parts.push(`isp ${r.isp}`);
-  if (r.org) parts.push(`org ${r.org}`);
-  if (r.asn) parts.push(r.asn);
-  if (r.ip_type) parts.push(`type ${r.ip_type}`);
-  if (r.anonymity) parts.push(`anon ${r.anonymity}`);
-  if (r.tamper) parts.push(`tamper ${r.tamper}`);
-  if (r.tls) parts.push(`tls ${r.tls}${r.tls_info ? ` (${r.tls_info})` : ""}`);
-  else if (r.tls_info) parts.push(`tls ? (${r.tls_info})`);
-  if (r.error) parts.push(r.error);
-  return parts.join(" | ");
-}
-
 function render() {
   const searchEl = document.getElementById("search") as HTMLInputElement | null;
   const q = (searchEl?.value || "").toLowerCase().trim();
@@ -750,14 +405,12 @@ function renderPool() {
   renderPoolInto("auto-pool-body");
 }
 
-function poolCountry(r: ProxyResult): string | null {
-  return r.country_code ?? r.country ?? null;
-}
+
 
 /** merge: keep existing entries, add new ones, refresh latency.
  *  Entries over maxPingMs never enter the pool; re-checked entries
  *  that went over the limit are dropped. */
-function mergePool(items: { raw: string; latency: number | null; country?: string | null }[]) {
+function mergePool(items: { raw: string; url?: string | null; latency: number | null; country?: string | null }[]) {
   const idx = new Map(dispatchPool.map((p, i) => [p.raw, i]));
   const drop = new Set<number>();
   for (const it of items) {
@@ -769,8 +422,14 @@ function mergePool(items: { raw: string; latency: number | null; country?: strin
     if (at == null) {
       if (dispatchPool.length >= MAX_PROXIES) continue;
       idx.set(it.raw, dispatchPool.length);
-      dispatchPool.push({ raw: it.raw, latency: it.latency, country: it.country ?? null });
+      dispatchPool.push({
+        raw: it.raw,
+        url: it.url || it.raw,
+        latency: it.latency,
+        country: it.country ?? null,
+      });
     } else {
+      if (it.url) dispatchPool[at].url = it.url;
       if (it.latency != null) dispatchPool[at].latency = it.latency;
       if (it.country != null) dispatchPool[at].country = it.country;
     }
@@ -815,7 +474,7 @@ type GeoFields = {
   ip_type: string | null;
 };
 
-let geoCache = new Map<string, GeoFields>();
+const geoCache = new Map<string, GeoFields>();
 const GEO_CACHE_MAX = 2000;
 
 function loadGeoCache(): void {
@@ -827,7 +486,7 @@ function loadGeoCache(): void {
     for (const [k, v] of arr.slice(-GEO_CACHE_MAX)) {
       if (typeof k !== "string" || !v || typeof v !== "object") continue;
       const g = v as Partial<GeoFields>;
-      geoCache.set(k, {
+      geoCache.set(stripProxyCredentials(k), {
         ip: str(g.ip),
         country: str(g.country),
         country_code: str(g.country_code),
@@ -851,7 +510,7 @@ function learnGeo(list: ProxyResult[]): void {
   let changed = false;
   for (const r of list) {
     if (!r.alive || r.ip == null) continue;
-    geoCache.set(r.proxy, {
+    geoCache.set(stripProxyCredentials(r.proxy), {
       ip: r.ip, country: r.country, country_code: r.country_code, city: r.city,
       isp: r.isp, org: r.org, asn: r.asn, ip_type: r.ip_type,
     });
@@ -870,8 +529,9 @@ function learnGeo(list: ProxyResult[]): void {
 function relevantGeoCache(list: string[]): (GeoFields & { proxy: string })[] {
   const out: (GeoFields & { proxy: string })[] = [];
   for (const p of list) {
-    const f = geoCache.get(p);
-    if (f) out.push({ proxy: p, ...f });
+    const key = stripProxyCredentials(p);
+    const f = geoCache.get(key);
+    if (f) out.push({ proxy: key, ...f });
   }
   return out;
 }
@@ -895,6 +555,13 @@ function readCheckSettings() {
 }
 
 const MAX_PROXIES = 20_000;
+const MAX_INPUT_CHARS = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_MB = 10;
+
+function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
 
 async function runCheckList(list: string[], onProgress?: (done: number, total: number) => void, onLive?: (live: ProxyResult[]) => void): Promise<ProxyResult[]> {
   const s = readCheckSettings();
@@ -976,8 +643,8 @@ function loadPingHist(): void {
   } catch { /* ignore */ }
 }
 
-function pushPingPoint(): void {
-  const alive = results.filter((r) => r.alive);
+function pushPingPoint(list: ProxyResult[] = results): void {
+  const alive = list.filter((r) => r.alive);
   const lat = alive
     .map((r) => r.latency_ms)
     .filter((x): x is number => x != null);
@@ -1015,13 +682,13 @@ function renderPingGraph(): void {
 }
 
 function deadStub(proxy: string, msg: string): ProxyResult {
-  return { proxy, proto: "ERR", alive: false, latency_ms: null, jitter_ms: null, success_rate: 0, attempts: 0, ip: null, country: null, country_code: null, city: null, isp: null, org: null, asn: null, ip_type: null, anonymity: null, tamper: null, tls: null, tls_info: null, error: msg.slice(0, 120) };
+  return { proxy, url: proxy, proto: "ERR", alive: false, latency_ms: null, jitter_ms: null, success_rate: 0, attempts: 0, ip: null, country: null, country_code: null, city: null, isp: null, org: null, asn: null, ip_type: null, anonymity: null, tamper: null, tls: null, tls_info: null, error: msg.slice(0, 120) };
 }
 
 async function syncPool(notify: boolean): Promise<number> {
   try {
     const n = await invoke<number>("set_dispatch_pool", {
-      items: dispatchPool.map((p) => ({ raw: p.raw, latency: p.latency })),
+      items: dispatchPool.map((p) => ({ raw: p.raw, url: p.url, latency: p.latency })),
     });
     if (notify) setStatusT("pool_synced", { n });
     return n;
@@ -1048,7 +715,7 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
   ($("btn-stop") as HTMLButtonElement).disabled = false;
   try {
     if (el) el.textContent = t("auto_running", { n: dispatchPool.length });
-    const res = await runCheckList(dispatchPool.map((p) => p.raw));
+    const res = await runCheckList(dispatchPool.map((p) => p.url));
     if (stopFlag) {
       if (el) el.textContent = t("st_stopped", { alive: res.filter((r) => r.alive).length, total: res.length });
       return;
@@ -1059,7 +726,7 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
     }
     const alive = res.filter((r) => r.alive && passPing(r.latency_ms));
     learnGeo(res);
-    dispatchPool = alive.map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) }));
+    dispatchPool = alive.map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) }));
     renderPool();
     updateCounts();
     const synced = await syncPool(false);
@@ -1067,7 +734,7 @@ async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
       if (el) el.textContent = t("pool_sync_err");
       return;
     }
-    pushPingPoint();
+    pushPingPoint(res);
     if (el) el.textContent = `${t("auto_pruned", { alive: alive.length, total: res.length })} ${new Date().toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US")}`;
     if (sendHook) await sendWebhook(false);
   } catch (e) {
@@ -1119,11 +786,27 @@ async function updateTray(): Promise<void> {
       autoNext: a,
       webhookOn: autoOn && urls.length > 0,
       webhookUrl: urls[0] ?? "",
+      lang,
     });
   } catch { /* tray may be unavailable */ }
 }
 
 let webhookUrls: string[] = [""];
+let webhookIncludeCreds = false;
+
+function loadWebhookCreds(): void {
+  try {
+    webhookIncludeCreds = localStorage.getItem("pp-webhook-creds") === "1";
+  } catch {
+    webhookIncludeCreds = false;
+  }
+}
+
+function saveWebhookCreds(): void {
+  try {
+    localStorage.setItem("pp-webhook-creds", webhookIncludeCreds ? "1" : "0");
+  } catch { /* ignore */ }
+}
 
 function loadWebhooks(): void {
   try {
@@ -1189,12 +872,17 @@ async function sendWebhook(manual: boolean): Promise<void> {
     return;
   }
   const format = ($("webhook-format") as HTMLSelectElement).value;
-  const items = dispatchPool.map((p) => ({ raw: p.raw, latency: p.latency }));
+  const items = dispatchPool.map((p) => ({ raw: p.raw, url: p.url, latency: p.latency }));
   statusEl.textContent = "...";
   const lines: string[] = [];
   for (let i = 0; i < urls.length; i++) {
     try {
-      const r = await invoke<string>("send_webhook", { url: urls[i], format, items });
+      const r = await invoke<string>("send_webhook", {
+        url: urls[i],
+        format,
+        items,
+        includeCredentials: webhookIncludeCreds,
+      });
       lines.push(`#${i + 1} ${t("webhook_sent", { r })}`);
     } catch (e) {
       lines.push(`#${i + 1} ${t("webhook_fail", { e: String(e).slice(0, 120) })}`);
@@ -1205,7 +893,12 @@ async function sendWebhook(manual: boolean): Promise<void> {
 
 async function start() {
   if (running || autoBusy) return;
-  let list = parseInput(($("proxy-input") as HTMLTextAreaElement).value);
+  const source = ($("proxy-input") as HTMLTextAreaElement).value;
+  if (source.length > MAX_INPUT_CHARS) {
+    setStatusT("st_input_too_big", { mb: MAX_FILE_MB });
+    return;
+  }
+  let list = parseInput(source);
   if (list.length === 0) {
     setStatusT("st_empty");
     return;
@@ -1264,45 +957,17 @@ async function start() {
   setNet("done", stopFlag ? t("net_stopped") : t("net_done"));
 
   // merge alive into dispatcher pool (existing entries kept)
-  mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) })));
+  mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
   renderPool();
   updateCounts();
   await syncPool(false);
-  pushPingPoint();
+  pushPingPoint(results);
 }
 
 // ---------- export ----------
 
 function exportScope(): ProxyResult[] {
   return includeDead ? results : results.filter((r) => r.alive);
-}
-
-function csvCell(v: unknown): string {
-  const s = v == null ? "" : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function buildTxt(list: ProxyResult[]): string {
-  return list.map((r) => r.proxy).join("\n");
-}
-
-function buildJson(list: ProxyResult[]): string {
-  return JSON.stringify(list, null, 2);
-}
-
-function buildCsv(list: ProxyResult[]): string {
-  const head = ["proxy", "proto", "alive", "latency_ms", "jitter_ms", "success_rate", "attempts", "ip", "country_code", "country", "city", "isp", "org", "asn", "ip_type", "anonymity", "tamper", "tls", "tls_info", "error"];
-  const lines = [head.join(",")];
-  for (const r of list) {
-    lines.push([
-      r.proxy, r.proto, r.alive ? 1 : 0, r.latency_ms ?? "", r.jitter_ms ?? "",
-      Math.round((r.success_rate ?? 0) * 100), r.attempts ?? "", r.ip ?? "",
-      r.country_code ?? "", r.country ?? "", r.city ?? "", r.isp ?? "", r.org ?? "",
-      r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tamper ?? "",
-      r.tls ?? "", r.tls_info ?? "", r.error ?? "",
-    ].map(csvCell).join(","));
-  }
-  return lines.join("\n");
 }
 
 function browserDownload(name: string, text: string, mime = "text/plain;charset=utf-8") {
@@ -1324,7 +989,13 @@ async function saveViaDialog(suggested: string, text: string, filters: { name: s
     await invoke("write_text_file", { path, contents: text });
     lastStatus = { key: "st_saved", params: { path: String(path) } };
     $("status-line").textContent = t("st_saved", { path: String(path) });
-  } catch {
+  } catch (e) {
+    if (isTauriRuntime()) {
+      const msg = String(e).slice(0, 120);
+      lastStatus = { key: "st_savefail", params: { e: msg } };
+      $("status-line").textContent = t("st_savefail", { e: msg });
+      return;
+    }
     browserDownload(suggested, text);
     lastStatus = { key: "st_downloaded", params: { name: suggested } };
     $("status-line").textContent = t("st_downloaded", { name: suggested });
@@ -1389,7 +1060,7 @@ async function pollDispatch() {
     pill.className = s.running ? "pill alive on" : "pill dead";
     ($("btn-srv-start") as HTMLButtonElement).disabled = s.running;
     ($("btn-srv-stop") as HTMLButtonElement).disabled = !s.running;
-    if (s.last_error && !s.running) {
+    if (s.last_error && s.running) {
       ($("srv-status") as HTMLElement).textContent = s.last_error;
     }
   } catch { /* ignore */ }
@@ -1471,7 +1142,13 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   const input = $("proxy-input") as HTMLTextAreaElement;
-  const upd = () => { ($("src-count") as HTMLElement).textContent = String(parseInput(input.value).length); };
+  const upd = () => {
+    if (input.value.length > MAX_INPUT_CHARS) {
+      ($("src-count") as HTMLElement).textContent = "!";
+      return;
+    }
+    ($("src-count") as HTMLElement).textContent = String(parseInput(input.value).length);
+  };
   let updT: number | undefined;
   input.addEventListener("input", () => { window.clearTimeout(updT); updT = window.setTimeout(upd, 250); });
   upd();
@@ -1517,7 +1194,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
   async function doPoolSync(statusElId: string): Promise<void> {
-    mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) })));
+    mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
     renderPool();
     updateCounts();
     const n = await syncPool(false);
@@ -1546,6 +1223,11 @@ window.addEventListener("DOMContentLoaded", () => {
     if (!files || files.length === 0) return;
     const parts: string[] = [];
     for (const f of Array.from(files)) {
+      if (f.size > MAX_FILE_BYTES) {
+        lastStatus = { key: "file_too_big", params: { name: f.name, mb: MAX_FILE_MB } };
+        $("status-line").textContent = t("file_too_big", { name: f.name, mb: MAX_FILE_MB });
+        continue;
+      }
       try {
         const txt = await f.text();
         const found = extractProxiesFromText(txt);
@@ -1654,6 +1336,7 @@ window.addEventListener("DOMContentLoaded", () => {
     currentProfileId = "";
     renderProfileList();
   });
+  ($("test-url") as HTMLSelectElement).addEventListener("change", updateJudgeUI);
   ($("judge-fast") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(false));
   ($("judge-full") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(true));
 
@@ -1685,7 +1368,7 @@ window.addEventListener("DOMContentLoaded", () => {
     ($("srv-status") as HTMLElement).textContent = "...";
     try {
       if (dispatchPool.length === 0) {
-        mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, latency: r.latency_ms, country: poolCountry(r) })));
+        mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
         renderPool();
         updateCounts();
       }
@@ -1830,6 +1513,12 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   }
   loadWebhooks();
+  loadWebhookCreds();
+  ($("chk-webhook-creds") as HTMLInputElement).checked = webhookIncludeCreds;
+  ($("chk-webhook-creds") as HTMLInputElement).addEventListener("change", (e) => {
+    webhookIncludeCreds = (e.target as HTMLInputElement).checked;
+    saveWebhookCreds();
+  });
   renderWebhookList();
   ($("btn-webhook-add") as HTMLButtonElement).addEventListener("click", () => {
     if (webhookUrls.length >= 10) return;
