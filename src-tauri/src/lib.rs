@@ -812,25 +812,56 @@ fn basic_proxy_auth(user: Option<&str>, pass: Option<&str>) -> Option<String> {
     })
 }
 
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
+}
+
+/// Remove one header from the header block, preserving the body. The client's
+/// local-proxy credentials must never be forwarded to an upstream proxy or
+/// to the origin.
+fn strip_header(buf: &[u8], hdr_end: usize, name: &str) -> Vec<u8> {
+    let end = hdr_end.min(buf.len());
+    let head = &buf[..end];
+    let mut out = Vec::with_capacity(buf.len());
+    let mut start = 0;
+    for (i, &b) in head.iter().enumerate() {
+        if b != b'\n' {
+            continue;
+        }
+        let line = &head[start..=i];
+        let is_target = String::from_utf8_lossy(line)
+            .split_once(':')
+            .map(|(k, _)| k.trim().eq_ignore_ascii_case(name))
+            .unwrap_or(false);
+        if !is_target {
+            out.extend_from_slice(line);
+        }
+        start = i + 1;
+    }
+    out.extend_from_slice(&head[start..]);
+    out.extend_from_slice(&buf[end..]);
+    out
+}
+
 /// For plain HTTP through an HTTP(S) proxy, the request must be sent in
 /// absolute-form with Proxy-Authorization. Unlike CONNECT, this works with
 /// proxies that only allow CONNECT to port 443.
 fn prepare_forward_request(buf: &[u8], hdr_end: usize, up: &Upstream) -> Vec<u8> {
+    // Drop any Proxy-Authorization sent by the client: it is meant for the
+    // local listener, not for the upstream. Then add this upstream's own
+    // credentials, if any.
+    let stripped = strip_header(buf, hdr_end, "proxy-authorization");
     let Some(auth) = basic_proxy_auth(up.user.as_deref(), up.pass.as_deref()) else {
-        return buf.to_vec();
+        return stripped;
     };
-    let end = hdr_end.min(buf.len());
-    let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
-    if head.contains("proxy-authorization:") {
-        return buf.to_vec();
-    }
+    let end = find_header_end(&stripped).unwrap_or(stripped.len());
     let head_end = end.saturating_sub(4);
-    let mut out = Vec::with_capacity(buf.len() + auth.len() + 48);
-    out.extend_from_slice(&buf[..head_end]);
+    let mut out = Vec::with_capacity(stripped.len() + auth.len() + 48);
+    out.extend_from_slice(&stripped[..head_end]);
     out.extend_from_slice(b"\r\nProxy-Authorization: Basic ");
     out.extend_from_slice(auth.as_bytes());
     out.extend_from_slice(b"\r\n\r\n");
-    out.extend_from_slice(&buf[end..]);
+    out.extend_from_slice(&stripped[end..]);
     out
 }
 
@@ -2146,6 +2177,12 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
         return;
     }
 
+    // Retrying a request after a partial write is only safe for methods
+    // without a request body.
+    let can_retry = matches!(
+        method.to_ascii_uppercase().as_str(),
+        "GET" | "HEAD" | "OPTIONS" | "TRACE"
+    );
     let mut last_err = String::new();
     for up in &order {
         // Plain HTTP via an HTTP(S) proxy is forwarded in absolute-form;
@@ -2160,25 +2197,46 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
             Ok(mut ups) => {
                 *st.current.lock().await = Some(strip_credentials(&up.raw));
                 st.requests.fetch_add(1, Ordering::Relaxed);
-                let res: std::io::Result<()> = async {
-                    if is_connect {
+                if is_connect {
+                    // The client already received 200 before the tunnel
+                    // starts, so a failure here cannot be retried.
+                    let res: std::io::Result<()> = async {
                         client
                             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                             .await?;
                         if hdr_end < buf.len() {
                             ups.write_all(&buf[hdr_end..]).await?;
                         }
-                    } else if use_forward {
-                        let forward = prepare_forward_request(&buf, hdr_end, up);
-                        ups.write_all(&forward).await?;
-                    } else {
-                        ups.write_all(&buf).await?;
+                        tokio::io::copy_bidirectional(&mut client, &mut ups).await?;
+                        Ok(())
                     }
-                    tokio::io::copy_bidirectional(&mut client, &mut ups).await?;
-                    Ok(())
+                    .await;
+                    if res.is_err() {
+                        st.errors.fetch_add(1, Ordering::Relaxed);
+                    }
+                    return;
                 }
-                .await;
-                if res.is_err() {
+                let write_res = if use_forward {
+                    let forward = prepare_forward_request(&buf, hdr_end, up);
+                    ups.write_all(&forward).await
+                } else {
+                    // SOCKS tunnel: strip the client's proxy credentials
+                    // before handing the request to the origin.
+                    let stripped = strip_header(&buf, hdr_end, "proxy-authorization");
+                    ups.write_all(&stripped).await
+                };
+                if let Err(e) = write_res {
+                    st.errors.fetch_add(1, Ordering::Relaxed);
+                    last_err = e.to_string();
+                    if can_retry {
+                        continue;
+                    }
+                    return;
+                }
+                if tokio::io::copy_bidirectional(&mut client, &mut ups)
+                    .await
+                    .is_err()
+                {
                     st.errors.fetch_add(1, Ordering::Relaxed);
                 }
                 return;
@@ -3279,7 +3337,7 @@ mod tests {
     }
 
     #[test]
-    fn forward_request_keeps_existing_auth_header() {
+    fn forward_request_replaces_client_proxy_auth() {
         let up = Upstream {
             raw: "http://u:p@proxy:8080".into(),
             scheme: "http".into(),
@@ -3297,7 +3355,43 @@ mod tests {
             .unwrap();
         let text = String::from_utf8(prepare_forward_request(body, hdr_end, &up)).unwrap();
         assert_eq!(text.matches("Proxy-Authorization").count(), 1);
-        assert!(text.contains("Basic old"));
+        assert!(text.contains("Basic dTpw"));
+        assert!(!text.contains("Basic old"));
+    }
+
+    #[test]
+    fn forward_request_strips_client_auth_without_upstream_creds() {
+        let up = Upstream {
+            raw: "http://proxy:8080".into(),
+            scheme: "http".into(),
+            host: "proxy".into(),
+            port: 8080,
+            user: None,
+            pass: None,
+            latency: None,
+        };
+        let body = b"GET http://example.com/ HTTP/1.1\r\nproxy-authorization: Basic old\r\nHost: example.com\r\n\r\nBODY";
+        let hdr_end = body
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|p| p + 4)
+            .unwrap();
+        let out = strip_header(body, hdr_end, "proxy-authorization");
+        let text = String::from_utf8(out.clone()).unwrap();
+        assert!(!text.to_ascii_lowercase().contains("proxy-authorization"));
+        assert!(text.ends_with("BODY"));
+        assert_eq!(prepare_forward_request(body, hdr_end, &up), out);
+    }
+
+    #[test]
+    fn strip_header_keeps_other_headers_and_body() {
+        let body = b"GET / HTTP/1.1\r\nX-Test: 1\r\nProxy-Authorization: x\r\n\r\nP";
+        let end = find_header_end(body).unwrap();
+        let stripped = strip_header(body, end, "Proxy-Authorization");
+        let text = String::from_utf8(stripped).unwrap();
+        assert!(text.contains("X-Test: 1"));
+        assert!(!text.contains("Proxy-Authorization"));
+        assert!(text.ends_with("P"));
     }
 
     #[test]
