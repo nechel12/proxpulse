@@ -207,7 +207,7 @@ struct CheckState {
     cancel: Arc<AtomicBool>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct CheckFlags {
     geo: bool,
     anon: bool,
@@ -216,6 +216,10 @@ struct CheckFlags {
     precheck: bool,
     precheck_timeout: Duration,
     judge: bool,
+    /// Optional ip-api Pro key. Used only for the separate geo lookup; the
+    /// main test URL is built by the frontend. The key is visible to the
+    /// checked proxy because the request originates from it; see README.
+    ipapi_key: Option<Arc<str>>,
 }
 
 // ================= http helpers =================
@@ -405,14 +409,33 @@ fn try_parse_test_body(res: &mut ProxyResult, test_url: &str, body: &str) {
     }
 }
 
-async fn fetch_geo(client: &reqwest::Client) -> Option<IpApi> {
+const GEO_FIELDS: &str =
+    "status,message,query,country,countryCode,city,isp,org,as,mobile,proxy,hosting";
+
+/// The free ip-api tier is HTTP-only. Pro uses the same schema over HTTPS
+/// and is authenticated by a key GET parameter (see members.ip-api.com).
+fn geo_url(ipapi_key: Option<&str>) -> String {
+    match ipapi_key.map(str::trim).filter(|k| !k.is_empty()) {
+        Some(key) => {
+            let mut u = reqwest::Url::parse("https://pro.ip-api.com/json/")
+                .expect("static ip-api Pro URL is valid");
+            u.query_pairs_mut()
+                .append_pair("key", key)
+                .append_pair("fields", GEO_FIELDS);
+            u.to_string()
+        }
+        None => format!("http://ip-api.com/json/?fields={GEO_FIELDS}"),
+    }
+}
+
+async fn fetch_geo(client: &reqwest::Client, ipapi_key: Option<&str>) -> Option<IpApi> {
     {
         let until = *GEO_COOLDOWN_UNTIL.lock().await;
         if until.is_some_and(|t| Instant::now() < t) {
             return None;
         }
     }
-    let url = "http://ip-api.com/json/?fields=status,message,query,country,countryCode,city,isp,org,as,mobile,proxy,hosting";
+    let url = geo_url(ipapi_key);
     let r = client.get(url).send().await.ok()?;
     let status = r.status();
     if status.as_u16() == 429 || status.as_u16() == 403 {
@@ -1332,7 +1355,7 @@ async fn check_candidate_inner(
                 // Skip geo instead of waiting: waiting would eat the
                 // per-proxy check budget and turn live proxies into timeouts.
                 let _permit = geo_semaphore().try_acquire().ok()?;
-                fetch_geo(&client).await
+                fetch_geo(&client, flags.ipapi_key.as_deref()).await
             },
             async {
                 if want_anon {
@@ -1469,6 +1492,7 @@ async fn check_proxies(
     precheck: Option<bool>,
     precheck_timeout_ms: Option<u64>,
     judge_mode: Option<bool>,
+    ipapi_key: Option<String>,
     geo_cache: Option<Vec<GeoCacheEntry>>,
     state: State<'_, CheckState>,
     on_result: Channel<ProxyResult>,
@@ -1496,6 +1520,10 @@ async fn check_proxies(
             precheck_timeout_ms.unwrap_or(1500).clamp(300, 10_000),
         ),
         judge: judge_mode.unwrap_or(false),
+        ipapi_key: ipapi_key
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(|s| Arc::from(s.as_str())),
     };
 
     let mut jobs: Vec<(String, Vec<(String, String)>)> = Vec::new();
@@ -1527,7 +1555,7 @@ async fn check_proxies(
         None
     };
     let (baseline_res, judge_sha) = tokio::join!(
-        tokio::time::timeout(Duration::from_secs(20), fetch_baseline(flags)),
+        tokio::time::timeout(Duration::from_secs(20), fetch_baseline(flags.clone())),
         async {
             match &judge_base {
                 Some(b) => fetch_direct_judge_sha(b, timeout).await,
@@ -1559,6 +1587,7 @@ async fn check_proxies(
         let base = baseline.clone();
         let gc = geo_map.clone();
         let cl = cancel.clone();
+        let fl = flags.clone();
         set.spawn(async move {
             let _p = sem_c.acquire_owned().await.unwrap();
             if cands.len() == 1 {
@@ -1570,7 +1599,7 @@ async fn check_proxies(
                     tu,
                     timeout,
                     repeats,
-                    flags,
+                    fl,
                     base,
                     gc,
                     cl,
@@ -1585,7 +1614,7 @@ async fn check_proxies(
                     tu.clone(),
                     timeout,
                     repeats,
-                    flags,
+                    fl.clone(),
                     base.clone(),
                     gc.clone(),
                     cl.clone(),
@@ -1605,7 +1634,7 @@ async fn check_proxies(
                     tu,
                     timeout,
                     repeats,
-                    flags,
+                    fl,
                     base,
                     gc,
                     cl,
@@ -2962,6 +2991,21 @@ mod tests {
         assert!(is_self_upstream(&mk("0.0.0.0", 1080), 1080));
         assert!(!is_self_upstream(&mk("127.0.0.1", 1081), 1080));
         assert!(!is_self_upstream(&mk("1.2.3.4", 1080), 1080));
+    }
+
+    #[test]
+    fn ipapi_geo_url_modes() {
+        let free = geo_url(None);
+        assert!(free.starts_with("http://ip-api.com/json/?fields="));
+        assert!(free.contains("status,message,query"));
+        assert_eq!(geo_url(Some("   ")), free);
+
+        let pro = geo_url(Some("abc 123"));
+        assert!(pro.starts_with("https://pro.ip-api.com/json/?"));
+        let u = reqwest::Url::parse(&pro).unwrap();
+        let pairs: HashMap<_, _> = u.query_pairs().into_owned().collect();
+        assert_eq!(pairs.get("key").map(String::as_str), Some("abc 123"));
+        assert_eq!(pairs.get("fields").map(String::as_str), Some(GEO_FIELDS));
     }
 
     #[test]

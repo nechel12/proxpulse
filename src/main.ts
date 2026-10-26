@@ -10,6 +10,7 @@ import {
   tlsShort,
 } from "./format.ts";
 import { type Lang, translate } from "./i18n.ts";
+import { resolveTestUrl } from "./ipapi.ts";
 import { extractProxiesFromText, parseInput, stripProxyCredentials } from "./parse.ts";
 import {
   BUILTIN_PROFILES,
@@ -76,7 +77,43 @@ function effectiveTestUrl(): string {
   if (isJudgeMode()) return judgeBase();
   const sel = ($("test-url") as HTMLSelectElement).value.trim();
   const custom = ($("test-url-custom") as HTMLInputElement).value.trim();
-  return custom || sel;
+  const pro = ($("chk-ipapi-pro") as HTMLInputElement).checked;
+  const key = ($("ipapi-key") as HTMLInputElement).value;
+  return resolveTestUrl(sel, custom, pro, key);
+}
+
+function activeIpapiKey(): string | null {
+  const pro = ($("chk-ipapi-pro") as HTMLInputElement).checked;
+  const key = ($("ipapi-key") as HTMLInputElement).value.trim();
+  return pro && key ? key : null;
+}
+
+function updateIpapiUI(): void {
+  const el = document.getElementById("ipapi-hint");
+  if (!el) return;
+  const pro = ($("chk-ipapi-pro") as HTMLInputElement).checked;
+  const key = ($("ipapi-key") as HTMLInputElement).value.trim();
+  el.textContent = t(pro && !key ? "ipapi_key_missing" : "ipapi_hint");
+}
+
+function loadIpapiSettings(): void {
+  try {
+    const pro = localStorage.getItem("pp-ipapi-pro") === "1";
+    const key = localStorage.getItem("pp-ipapi-key") ?? "";
+    ($("chk-ipapi-pro") as HTMLInputElement).checked = pro;
+    ($("ipapi-key") as HTMLInputElement).value = key;
+  } catch { /* localStorage may be unavailable */ }
+  updateIpapiUI();
+}
+
+function saveIpapiSettings(): void {
+  try {
+    const pro = ($("chk-ipapi-pro") as HTMLInputElement).checked;
+    const key = ($("ipapi-key") as HTMLInputElement).value;
+    localStorage.setItem("pp-ipapi-pro", pro ? "1" : "0");
+    localStorage.setItem("pp-ipapi-key", key);
+  } catch { /* ignore quota/unavailable */ }
+  updateIpapiUI();
 }
 
 function updateJudgeUI(): void {
@@ -259,6 +296,7 @@ function applyI18n() {
   renderProfileList();
   updateCounts();
   updateJudgeUI();
+  updateIpapiUI();
 }
 
 function updateCounts() {
@@ -551,6 +589,7 @@ function readCheckSettings() {
     precheck: ($("chk-precheck") as HTMLInputElement).checked,
     precheckTimeoutMs: Math.max(300, Math.min(10000, Number(($("precheck-timeout") as HTMLInputElement).value) || 1500)),
     judgeMode: judge,
+    ipapiKey: activeIpapiKey(),
   };
 }
 
@@ -602,6 +641,7 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
       precheck: s.precheck,
       precheckTimeoutMs: s.precheckTimeoutMs,
       judgeMode: s.judgeMode,
+      ipapiKey: s.ipapiKey,
       geoCache: relevantGeoCache(list),
       onResult: channel,
     });
@@ -1340,6 +1380,20 @@ window.addEventListener("DOMContentLoaded", () => {
   ($("judge-fast") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(false));
   ($("judge-full") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(true));
 
+  // ip-api Pro key. The key is stored locally and is visible to checked
+  // proxies (the request must originate from the proxy); see README.
+  ($("chk-ipapi-pro") as HTMLInputElement).addEventListener("change", saveIpapiSettings);
+  ($("ipapi-key") as HTMLInputElement).addEventListener("input", saveIpapiSettings);
+  $("btn-ipapi-pro").addEventListener("click", async () => {
+    const url = "https://members.ip-api.com/";
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    } catch {
+      window.open(url, "_blank");
+    }
+  });
+
   // auto toggles (sqchk style)
   const bindSqchk = (id: string, get: () => boolean, set: (v: boolean) => void) => {
     $(id).addEventListener("click", () => {
@@ -1514,6 +1568,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   loadWebhooks();
   loadWebhookCreds();
+  loadIpapiSettings();
   ($("chk-webhook-creds") as HTMLInputElement).checked = webhookIncludeCreds;
   ($("chk-webhook-creds") as HTMLInputElement).addEventListener("change", (e) => {
     webhookIncludeCreds = (e.target as HTMLInputElement).checked;

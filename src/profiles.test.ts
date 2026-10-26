@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { IPAPI_FREE_URL, IPAPI_OLD_HTTPS_URL } from "./ipapi.ts";
 import {
   BUILTIN_PROFILES,
   DEFAULT_PROTO_VALUES,
@@ -64,5 +65,13 @@ describe("sanitizeProfile", () => {
     for (const profile of BUILTIN_PROFILES) {
       expect(sanitizeProfile(profile.data)).toEqual(profile.data);
     }
+  });
+
+  it("migrates the obsolete ip-api HTTPS URL", () => {
+    const data = sanitizeProfile({
+      ...PROFILE_DEFAULTS,
+      testUrlSel: IPAPI_OLD_HTTPS_URL,
+    });
+    expect(data?.testUrlSel).toBe(IPAPI_FREE_URL);
   });
 });

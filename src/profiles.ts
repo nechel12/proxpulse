@@ -1,4 +1,6 @@
 // Settings profiles: pure data + validation, covered by profiles.test.ts.
+import { IPAPI_FREE_URL, IPAPI_OLD_HTTPS_URL } from "./ipapi.ts";
+
 export type ProfileData = {
   testUrlSel: string;
   customUrl: string;
@@ -36,7 +38,7 @@ export const TEST_URL_VALUES = [
   "https://cp.cloudflare.com/generate_204",
   "https://api.ipify.org",
   "https://httpbin.org/ip",
-  "https://ip-api.com/json",
+  IPAPI_FREE_URL,
   "https://example.com",
   "judge",
 ];
@@ -49,7 +51,9 @@ export function sanitizeProfile(raw: unknown): ProfileData | null {
   const str = (v: unknown, fb: string, re?: RegExp) =>
     typeof v === "string" && (!re || re.test(v)) ? v : fb;
   const bool = (v: unknown, fb: boolean) => (typeof v === "boolean" ? v : fb);
-  const urlSel = str(o.testUrlSel, PROFILE_DEFAULTS.testUrlSel);
+  const rawSel = str(o.testUrlSel, PROFILE_DEFAULTS.testUrlSel);
+  // Older profiles stored the free endpoint with HTTPS, which always failed.
+  const urlSel = rawSel === IPAPI_OLD_HTTPS_URL ? IPAPI_FREE_URL : rawSel;
   const proto = str(o.defaultProto, PROFILE_DEFAULTS.defaultProto);
   return {
     testUrlSel: TEST_URL_VALUES.includes(urlSel) ? urlSel : PROFILE_DEFAULTS.testUrlSel,
@@ -92,7 +96,7 @@ export const BUILTIN_PROFILES: { id: string; nameKey: string; data: ProfileData 
     id: "builtin:deep",
     nameKey: "prof_deep",
     data: {
-      testUrlSel: "https://ip-api.com/json",
+      testUrlSel: IPAPI_FREE_URL,
       customUrl: "",
       timeout: "8000",
       concurrency: "50",

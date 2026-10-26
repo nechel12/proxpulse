@@ -82,12 +82,18 @@
               <option value="https://cp.cloudflare.com/generate_204" data-i18n="opt_cf">cloudflare generate_204 (быстро)</option>
               <option value="https://api.ipify.org" data-i18n="opt_ipify">api.ipify.org (покажет IP)</option>
               <option value="https://httpbin.org/ip" data-i18n="opt_httpbin">httpbin.org/ip (покажет IP)</option>
-              <option value="https://ip-api.com/json" data-i18n="opt_ipapi">ip-api.com/json (IP + гео)</option>
+              <option value="http://ip-api.com/json" data-i18n="opt_ipapi">ip-api.com/json (IP + гео, HTTP)</option>
               <option value="https://example.com" data-i18n="opt_example">example.com</option>
               <option value="judge" data-i18n="opt_judge">ProxPulse Judge</option>
             </select>
           </label>
           <input id="test-url-custom" data-i18n-ph="custom_ph" placeholder="или свой URL https://..." />
+          <div class="row2">
+            <label class="chk"><input id="chk-ipapi-pro" type="checkbox" /><span data-i18n="ipapi_pro">ip-api Pro (HTTPS)</span></label>
+            <button id="btn-ipapi-pro" class="btn ghost" data-i18n="ipapi_go_pro">Go Pro</button>
+          </div>
+          <label class="fld"><span data-i18n="ipapi_key">Ключ ip-api Pro</span><input id="ipapi-key" type="password" autocomplete="off" spellcheck="false" data-i18n-ph="ipapi_key_ph" placeholder="ключ (необязательно)" /></label>
+          <div class="hint" id="ipapi-hint" data-i18n="ipapi_hint">Free ip-api — только HTTP: прокси и сеть видят запросы и IP. Ключ Pro передаётся через проверяемые прокси и виден им — используйте отдельный ключ. Подробности — в README.</div>
           <label class="fld" style="margin-top:8px"><span data-i18n="profile">Профиль</span></label>
           <div class="row2" style="margin-top:0">
             <select id="profile-sel" style="flex:1"></select>

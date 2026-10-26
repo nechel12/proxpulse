@@ -110,7 +110,7 @@ file (TXT, CSV, JSON, LOG) or from a URL: the built-in client downloads up to
 
 - `google generate_204`, `cloudflare generate_204` — fast, empty body;
 - `api.ipify.org`, `httpbin.org/ip` — show the exit IP;
-- `ip-api.com/json` — IP and geolocation in one request;
+- `http://ip-api.com/json` — IP and geolocation in one request (free tier is HTTP-only);
 - `example.com` — a regular page;
 - [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge) — a dedicated
   check backend. In Judge mode, the public instance is used by default; the
@@ -119,6 +119,21 @@ file (TXT, CSV, JSON, LOG) or from a URL: the built-in client downloads up to
   plus a content-hash integrity check).
 
 A custom URL can also be entered manually.
+
+> **ip-api: free tier vs Pro.** The free ip-api endpoint is HTTP-only: the
+> proxy and the network see requests and your IP, and a response can be
+> modified in transit. This is a deliberate trade-off; using the free HTTP
+> endpoint is at your own risk. The Pro plan enables HTTPS and uses an API
+> key (`https://pro.ip-api.com/...?key=...`, Pro page:
+> <https://members.ip-api.com/>). Enable "ip-api Pro" and enter the key in
+> the check settings; ip-api requests (both the main test URL and the deep
+> geo lookup) will then use HTTPS.
+>
+> ip-api requests are made **through the checked proxy**, so the proxy sees
+> both the key and the traffic. Use a dedicated key for this app; ip-api IP
+> restrictions will not work when requests go through proxies. The key is
+> stored locally in `localStorage` (like webhook URLs). Do not use the free
+> tier for commercial use — that is an ip-api restriction.
 
 ### Check settings
 
