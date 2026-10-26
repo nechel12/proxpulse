@@ -99,6 +99,33 @@ pub(crate) fn strip_list_prefix(s: &str) -> &str {
     t
 }
 
+/// Heuristic for ambiguous four-column rows. A host usually looks like an
+/// IP address or contains a dot; usernames are commonly bare words.
+pub(crate) fn looks_like_host(s: &str) -> bool {
+    let t = s.trim().trim_matches(|c| c == '[' || c == ']');
+    if t.is_empty() {
+        return false;
+    }
+    if t.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    t.contains('.') || t.contains(':') || t.eq_ignore_ascii_case("localhost")
+}
+
+/// `true` means `host,port,user,pass`, `false` means `user,pass,host,port`.
+/// When both interpretations have a valid port (a numeric password is
+/// common), the host-looking column wins.
+fn four_columns_host_first(p: &[&str]) -> Option<bool> {
+    let host_first = valid_port(p[1]) && !p[0].is_empty();
+    let host_last = valid_port(p[3]) && !p[2].is_empty();
+    match (host_first, host_last) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        (true, true) => Some(!(looks_like_host(p[2]) && !looks_like_host(p[0]))),
+        _ => None,
+    }
+}
+
 pub(crate) fn from_columns(parts: &[String], default_proto: &str) -> Option<(String, String)> {
     let def = match default_proto.to_lowercase().as_str() {
         "socks5" => "socks5",
@@ -108,52 +135,50 @@ pub(crate) fn from_columns(parts: &[String], default_proto: &str) -> Option<(Str
     match parts.len() {
         2 => {
             let (host, port) = (parts[0].trim(), parts[1].trim());
-            if !host.is_empty() && valid_port(port) {
-                let scheme = canonical_scheme(def);
-                return Some((format!("{scheme}://{host}:{port}"), proto_label(&scheme)));
-            }
-            None
+            build_url(def, None, host, port)
         }
         3 => {
             let a = parts[0].trim();
             let b = parts[1].trim();
             let c = parts[2].trim();
             if valid_port(b) && is_proto_name(c) {
-                let scheme = canonical_scheme(c);
-                return Some((format!("{scheme}://{a}:{b}"), proto_label(&scheme)));
+                return build_url(&canonical_scheme(c), None, a, b);
             }
             if is_proto_name(a) && valid_port(c) {
-                let scheme = canonical_scheme(a);
-                return Some((format!("{scheme}://{b}:{c}"), proto_label(&scheme)));
+                return build_url(&canonical_scheme(a), None, b, c);
             }
             None
         }
         4 => {
             let p: Vec<&str> = parts.iter().map(|x| x.trim()).collect();
-            if valid_port(p[1]) && !p[0].is_empty() {
-                let scheme = canonical_scheme(def);
-                return Some((
-                    format!("{scheme}://{}:{}@{}:{}", p[2], p[3], p[0], p[1]),
-                    proto_label(&scheme),
-                ));
-            }
-            if valid_port(p[3]) && !p[2].is_empty() {
-                let scheme = canonical_scheme(def);
-                return Some((
-                    format!("{scheme}://{}:{}@{}:{}", p[0], p[1], p[2], p[3]),
-                    proto_label(&scheme),
-                ));
+            if let Some(host_first) = four_columns_host_first(&p) {
+                return if host_first {
+                    build_url(
+                        def,
+                        Some(&format!("{}:{}", p[2], p[3])),
+                        p[0],
+                        p[1],
+                    )
+                } else {
+                    build_url(
+                        def,
+                        Some(&format!("{}:{}", p[0], p[1])),
+                        p[2],
+                        p[3],
+                    )
+                };
             }
             None
         }
         5 => {
             let p: Vec<&str> = parts.iter().map(|x| x.trim()).collect();
             if is_proto_name(p[0]) && valid_port(p[2]) {
-                let scheme = canonical_scheme(p[0]);
-                return Some((
-                    format!("{scheme}://{}:{}@{}:{}", p[3], p[4], p[1], p[2]),
-                    proto_label(&scheme),
-                ));
+                return build_url(
+                    &canonical_scheme(p[0]),
+                    Some(&format!("{}:{}", p[3], p[4])),
+                    p[1],
+                    p[2],
+                );
             }
             None
         }
@@ -167,9 +192,17 @@ pub(crate) fn build_url(
     host: &str,
     port: &str,
 ) -> Option<(String, String)> {
+    let host = host.trim();
     if host.is_empty() || !valid_port(port) {
         return None;
     }
+    // Column/CSV input often contains bare IPv6 addresses. Bracket them so
+    // the resulting URL is actually parseable.
+    let host = if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
     let scheme = canonical_scheme(scheme);
     let url = match userinfo {
         Some(u) if !u.is_empty() => format!("{scheme}://{u}@{host}:{port}"),
@@ -238,7 +271,10 @@ pub(crate) fn normalize_proxy(raw: &str, default_proto: &str) -> Option<(String,
     }
 
     let (explicit_scheme, mut authority) = match s.split_once("://") {
-        Some((sch, rest)) => (Some(sch.to_lowercase()), rest.to_string()),
+        Some((sch, rest)) if !sch.trim().is_empty() => {
+            (Some(sch.trim().to_lowercase()), rest.to_string())
+        }
+        Some(_) => return None,
         None => (None, s.clone()),
     };
     for sep in ['/', '?', '#'] {
@@ -323,15 +359,15 @@ pub(crate) fn normalize_proxy(raw: &str, default_proto: &str) -> Option<(String,
             if userinfo.is_some() {
                 return None;
             }
-            if valid_port(parts[1]) {
+            if let Some(host_first) = four_columns_host_first(&parts) {
                 let scheme = scheme_for();
-                let u = format!("{}:{}", parts[2], parts[3]);
-                return build_url(&scheme, Some(&u), parts[0], parts[1]);
-            }
-            if valid_port(parts[3]) && !valid_port(parts[1]) {
-                let scheme = scheme_for();
-                let u = format!("{}:{}", parts[0], parts[1]);
-                return build_url(&scheme, Some(&u), parts[2], parts[3]);
+                return if host_first {
+                    let u = format!("{}:{}", parts[2], parts[3]);
+                    build_url(&scheme, Some(&u), parts[0], parts[1])
+                } else {
+                    let u = format!("{}:{}", parts[0], parts[1]);
+                    build_url(&scheme, Some(&u), parts[2], parts[3])
+                };
             }
             None
         }

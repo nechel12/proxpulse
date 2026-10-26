@@ -26,6 +26,14 @@ describe("buildFromParts", () => {
       "u@1.2.3.4:8080"
     );
   });
+  it("brackets bare IPv6 hosts", () => {
+    expect(buildFromParts("2001:db8::1", "8080")).toBe(
+      "[2001:db8::1]:8080"
+    );
+    expect(buildFromParts("[2001:db8::1]", "8080")).toBe(
+      "[2001:db8::1]:8080"
+    );
+  });
 });
 
 describe("tryCsvLine", () => {
@@ -45,6 +53,23 @@ describe("tryCsvLine", () => {
   });
   it("space columns", () => {
     expect(tryCsvLine("1.2.3.4 8080 u p")).toBe("u:p@1.2.3.4:8080");
+  });
+  it("keeps the documented order with a numeric password", () => {
+    expect(tryCsvLine("user,1234,1.2.3.4,9090")).toBe(
+      "user:1234@1.2.3.4:9090"
+    );
+    expect(tryCsvLine("1.2.3.4,9090,user,1234")).toBe(
+      "user:1234@1.2.3.4:9090"
+    );
+    expect(tryCsvLine("user,1234,proxy.example.com,9090")).toBe(
+      "user:1234@proxy.example.com:9090"
+    );
+    expect(tryCsvLine("proxy.example.com,9090,user,1234")).toBe(
+      "user:1234@proxy.example.com:9090"
+    );
+  });
+  it("brackets IPv6 columns", () => {
+    expect(tryCsvLine("2001:db8::1,8080")).toBe("[2001:db8::1]:8080");
   });
   it("rejects junk", () => {
     expect(tryCsvLine("hello world foo")).toBeNull();
@@ -124,5 +149,28 @@ describe("extractProxiesFromText", () => {
     expect(
       extractProxiesFromText("1.2.3.4:8080, comment\n5.6.7.8:3128; note\nuser:pass@9.9.9.9:1080 here")
     ).toEqual(["1.2.3.4:8080", "5.6.7.8:3128", "user:pass@9.9.9.9:1080"]);
+  });
+  it("drops invalid ports and JSON metadata", () => {
+    expect(extractProxiesFromText('{"version":"1.0.0"}')).toEqual([]);
+    expect(
+      extractProxiesFromText("1.2.3.4:0\n1.2.3.4:65536\n://host:80")
+    ).toEqual([]);
+    expect(extractProxiesFromText("hello world")).toEqual([]);
+  });
+  it("keeps documented colon formats", () => {
+    expect(
+      extractProxiesFromText(
+        "1.2.3.4:8080:user:pass\nuser:pass:1.2.3.4:8080\n1.2.3.4:8080:socks5",
+      ),
+    ).toEqual([
+      "1.2.3.4:8080:user:pass",
+      "user:pass:1.2.3.4:8080",
+      "1.2.3.4:8080:socks5",
+    ]);
+  });
+  it("extracts an IPv4 proxy from prose", () => {
+    expect(extractProxiesFromText("use 1.2.3.4:8080 here")).toEqual([
+      "1.2.3.4:8080",
+    ]);
   });
 });

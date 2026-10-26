@@ -2837,6 +2837,46 @@ mod tests {
     }
 
     #[test]
+    fn numeric_passwords_keep_column_order() {
+        let expected = Some(("http://user:1234@1.2.3.4:9090".into(), "HTTP".into()));
+        assert_eq!(norm("user:1234:1.2.3.4:9090", "http"), expected);
+        assert_eq!(norm("1.2.3.4:9090:user:1234", "http"), expected);
+        assert_eq!(norm("user,1234,1.2.3.4,9090", "http"), expected);
+        assert_eq!(norm("1.2.3.4,9090,user,1234", "http"), expected);
+        assert_eq!(
+            norm("user,1234,proxy.example.com,9090", "http"),
+            Some((
+                "http://user:1234@proxy.example.com:9090".into(),
+                "HTTP".into()
+            ))
+        );
+        assert_eq!(
+            norm("proxy.example.com,9090,user,1234", "http"),
+            Some((
+                "http://user:1234@proxy.example.com:9090".into(),
+                "HTTP".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn csv_ipv6_is_bracketed() {
+        assert_eq!(
+            norm("2001:db8::1,8080", "http"),
+            Some(("http://[2001:db8::1]:8080".into(), "HTTP".into()))
+        );
+        assert_eq!(
+            norm("[2001:db8::1],8080", "http"),
+            Some(("http://[2001:db8::1]:8080".into(), "HTTP".into()))
+        );
+    }
+
+    #[test]
+    fn empty_scheme_is_rejected() {
+        assert_eq!(norm("://host:80", "http"), None);
+    }
+
+    #[test]
     fn dual_mode_expands() {
         let c = normalize_candidates("1.2.3.4:8080", "http+socks5");
         assert_eq!(c.len(), 2);

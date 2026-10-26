@@ -17,8 +17,67 @@ export function getKey(obj: Record<string, unknown>, keys: string[]): string | n
   return null;
 }
 
+function hostForUrl(host: string): string {
+  const h = host.trim();
+  return h.includes(":") && !h.startsWith("[") ? `[${h}]` : h;
+}
+
+function looksLikeHost(s: string): boolean {
+  const t = s.trim().replace(/^\[|\]$/g, "");
+  if (!t) return false;
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(t)) return true;
+  if (t.includes(":") || t.includes(".")) return true;
+  return t.toLowerCase() === "localhost";
+}
+
+function isPortValue(s: string): boolean {
+  return /^\d{1,5}$/.test(s) && Number(s) >= 1 && Number(s) <= 65535;
+}
+
+function isProtoValue(s: string): boolean {
+  return /^(https?|socks5h?|socks4a?|socks)$/i.test(s.trim());
+}
+
+/** Port at the end of the authority (after the last @), not a numeric password. */
+function hasValidPort(s: string): boolean {
+  const afterScheme = s.includes("://") ? s.split("://", 2)[1] : s;
+  const authority = afterScheme
+    .slice(afterScheme.lastIndexOf("@") + 1)
+    .split(/[/?#]/)[0];
+  // Bare IPv6 is not a supported proxy form; require brackets for IPv6.
+  if (!authority.includes("]") && (authority.match(/:/g)?.length ?? 0) > 1) {
+    return false;
+  }
+  const m = authority.match(/:(\d{1,5})$/);
+  if (!m) return false;
+  const n = Number(m[1]);
+  return n >= 1 && n <= 65535;
+}
+
+function isColonColumns(s: string): boolean {
+  const parts = s.split(":");
+  if (parts.length === 3) {
+    return (
+      (isPortValue(parts[1]) && isProtoValue(parts[2])) ||
+      (isProtoValue(parts[0]) && isPortValue(parts[2]))
+    );
+  }
+  if (parts.length === 4) {
+    const hostFirst = isPortValue(parts[1]) && !!parts[0];
+    const hostLast = isPortValue(parts[3]) && !!parts[2];
+    return hostFirst || hostLast;
+  }
+  return false;
+}
+
+function looksLikeProxyValue(s: string): boolean {
+  if (!s || s.startsWith("://")) return false;
+  if (/\s/.test(s)) return false;
+  return hasValidPort(s) || isColonColumns(s);
+}
+
 export function buildFromParts(host: string, port: string, user?: string | null, pass?: string | null, proto?: string | null): string | null {
-  host = host.trim().replace(/\/+$/, "");
+  host = hostForUrl(host.trim().replace(/\/+$/, ""));
   port = port.trim();
   if (!host || !/^\d{1,5}$/.test(port)) return null;
   const p = Number(port);
@@ -77,21 +136,35 @@ export function tryCsvLine(line: string): string | null {
     if (ws.length >= 2 && ws.length <= 5) parts = ws;
   }
   if (!parts || parts.length < 2 || parts.length > 5) return null;
-  const isPort = (s: string) => /^\d{2,5}$/.test(s) && Number(s) >= 1 && Number(s) <= 65535;
-  const isProto = (s: string) => /^(https?|socks5h?|socks4a?|socks)$/i.test(s.trim());
-  if (parts.length === 2 && isPort(parts[1])) return `${parts[0]}:${parts[1]}`;
+  const isPort = isPortValue;
+  const isProto = isProtoValue;
+  if (parts.length === 2 && isPort(parts[1])) {
+    return `${hostForUrl(parts[0])}:${parts[1]}`;
+  }
   if (parts.length === 3) {
-    if (isPort(parts[1]) && isProto(parts[2])) return `${parts[2]}://${parts[0]}:${parts[1]}`;
-    if (isProto(parts[0]) && isPort(parts[2])) return `${parts[0]}://${parts[1]}:${parts[2]}`;
+    if (isPort(parts[1]) && isProto(parts[2])) {
+      return `${parts[2]}://${hostForUrl(parts[0])}:${parts[1]}`;
+    }
+    if (isProto(parts[0]) && isPort(parts[2])) {
+      return `${parts[0]}://${hostForUrl(parts[1])}:${parts[2]}`;
+    }
     return null;
   }
   if (parts.length === 4) {
-    if (isPort(parts[1])) return `${parts[2]}:${parts[3]}@${parts[0]}:${parts[1]}`;
-    if (isPort(parts[3])) return `${parts[0]}:${parts[1]}@${parts[2]}:${parts[3]}`;
-    return null;
+    const hostFirst = isPort(parts[1]) && !!parts[0];
+    const hostLast = isPort(parts[3]) && !!parts[2];
+    if (!hostFirst && !hostLast) return null;
+    const first = hostFirst && !hostLast
+      ? true
+      : !hostFirst && hostLast
+        ? false
+        : !(looksLikeHost(parts[2]) && !looksLikeHost(parts[0]));
+    return first
+      ? `${parts[2]}:${parts[3]}@${hostForUrl(parts[0])}:${parts[1]}`
+      : `${parts[0]}:${parts[1]}@${hostForUrl(parts[2])}:${parts[3]}`;
   }
   if (parts.length === 5 && isProto(parts[0]) && isPort(parts[2])) {
-    return `${parts[0]}://${parts[3]}:${parts[4]}@${parts[1]}:${parts[2]}`;
+    return `${parts[0]}://${parts[3]}:${parts[4]}@${hostForUrl(parts[1])}:${parts[2]}`;
   }
   return null;
 }
@@ -120,6 +193,9 @@ export function extractProxiesFromText(text: string): string[] {
   const push = (s: string) => {
     s = cleanTail(s.trim().replace(/^["'`]+|["'`]+$/g, ""));
     if (s.length < 3 || s.length > 512 || s.startsWith("#") || s.startsWith("//")) return;
+    // Soft validation: proxies need a host:port-shaped authority, and a
+    // bare string from a JSON log or prose must not become a "proxy".
+    if (!looksLikeProxyValue(s)) return;
     if (seen.has(s)) return;
     seen.add(s);
     out.push(s);
