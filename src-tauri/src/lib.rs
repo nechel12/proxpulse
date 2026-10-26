@@ -916,12 +916,37 @@ async fn connect_to_http_proxy(up: &Upstream, timeout: Duration) -> std::io::Res
     }
 }
 
+/// socks4/socks5 resolve the destination locally; socks4a/socks5h send the
+/// hostname to the proxy. This matches the checker (reqwest) and strict
+/// SOCKS4 servers that do not implement the SOCKS4a extension.
+async fn socks_target_host(
+    scheme: &str,
+    t_host: &str,
+    t_port: u16,
+    timeout: Duration,
+) -> std::io::Result<String> {
+    let local = matches!(scheme, "socks4" | "socks5");
+    if !local || t_host.parse::<IpAddr>().is_ok() {
+        return Ok(t_host.to_string());
+    }
+    match tokio::time::timeout(timeout, tokio::net::lookup_host((t_host, t_port))).await {
+        Ok(Ok(mut addrs)) => addrs
+            .next()
+            .map(|a| a.ip().to_string())
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "socks target did not resolve")),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(Error::new(ErrorKind::TimedOut, "socks dns timeout")),
+    }
+}
+
 async fn connect_via(
     up: &Upstream,
     t_host: &str,
     t_port: u16,
     timeout: Duration,
 ) -> std::io::Result<ProxyStream> {
+    let target = socks_target_host(&up.scheme, t_host, t_port, timeout).await?;
+    let target = target.as_str();
     let addr = format!("{}:{}", host_for_connect(&up.host), up.port);
     let stream = match tokio::time::timeout(timeout, TcpStream::connect(addr.as_str())).await {
         Ok(Ok(s)) => s,
@@ -933,7 +958,7 @@ async fn connect_via(
         "socks5" | "socks5h" => {
             socks5_connect(
                 ProxyStream::Plain(stream),
-                t_host,
+                target,
                 t_port,
                 up.user.clone(),
                 up.pass.clone(),
@@ -944,7 +969,7 @@ async fn connect_via(
         "socks4" => {
             socks4_connect(
                 ProxyStream::Plain(stream),
-                t_host,
+                target,
                 t_port,
                 up.user.clone(),
                 false,
@@ -955,7 +980,7 @@ async fn connect_via(
         "socks4a" => {
             socks4_connect(
                 ProxyStream::Plain(stream),
-                t_host,
+                target,
                 t_port,
                 up.user.clone(),
                 true,
@@ -1155,11 +1180,12 @@ fn cancel_check(state: State<'_, CheckState>) -> Result<(), String> {
 fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckFlags) -> Duration {
     // Main attempts: repeats × timeout. Deep stages run concurrently; the
     // slowest is TLS via an HTTPS proxy: TCP + CONNECT + handshake = 3×.
+    // A local DNS lookup for socks4/socks5 adds one more timeout.
     // Without TLS, one timeout is enough for the whole deep group.
     let deep = if flags.judge {
         Duration::ZERO
     } else if flags.tls {
-        timeout * 3
+        timeout * 4
     } else {
         timeout
     };
@@ -3133,10 +3159,10 @@ mod tests {
             judge: false,
             ipapi_key: None,
         };
-        // attempts (10s) + CONNECT/TCP/TLS (15s) + precheck (1.5s) + 5s margin
+        // attempts (10s) + DNS/CONNECT/TCP/TLS (20s) + precheck (1.5s) + 5s margin
         assert_eq!(
             candidate_budget(timeout, 1, &flags),
-            Duration::from_millis(31_500)
+            Duration::from_millis(36_500)
         );
 
         let no_tls = CheckFlags {
@@ -3156,6 +3182,27 @@ mod tests {
         assert_eq!(
             candidate_budget(timeout, 1, &judge),
             Duration::from_millis(16_500)
+        );
+    }
+
+    #[tokio::test]
+    async fn socks_local_dns_modes() {
+        let timeout = Duration::from_secs(2);
+        let local = socks_target_host("socks5", "localhost", 80, timeout)
+            .await
+            .unwrap();
+        assert!(local.parse::<IpAddr>().unwrap().is_loopback());
+
+        let remote = socks_target_host("socks5h", "localhost", 80, timeout)
+            .await
+            .unwrap();
+        assert_eq!(remote, "localhost");
+
+        assert_eq!(
+            socks_target_host("socks4", "127.0.0.1", 80, timeout)
+                .await
+                .unwrap(),
+            "127.0.0.1"
         );
     }
 
