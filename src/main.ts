@@ -64,6 +64,8 @@ const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
 let judgeFull = true;
 let dispAutoOn = false;
 let autoOn = false;
+let srvRunning = false;
+let srvLastError: string | null = null;
 
 // ---------- ui helpers ----------
 
@@ -771,7 +773,12 @@ function deadStub(proxy: string, msg: string): ProxyResult {
 async function syncPool(notify: boolean): Promise<number> {
   try {
     const n = await invoke<number>("set_dispatch_pool", {
-      items: dispatchPool.map((p) => ({ raw: p.raw, url: p.url, latency: p.latency })),
+      items: dispatchPool.map((p) => ({
+        raw: p.raw,
+        url: p.url,
+        latency: p.latency,
+        country: p.country,
+      })),
     });
     if (notify) setStatusT("pool_synced", { n });
     return n;
@@ -1121,6 +1128,7 @@ type DispatchStatus = {
   running: boolean;
   port: number;
   mode: string;
+  listener: string;
   upstreams: number;
   current: string | null;
   requests: number;
@@ -1144,8 +1152,25 @@ async function pollDispatch() {
     pill.className = s.running ? "pill alive on" : "pill dead";
     ($("btn-srv-start") as HTMLButtonElement).disabled = s.running;
     ($("btn-srv-stop") as HTMLButtonElement).disabled = !s.running;
-    if (s.last_error && s.running) {
-      ($("srv-status") as HTMLElement).textContent = s.last_error;
+
+    const wasRunning = srvRunning;
+    const previousError = srvLastError;
+    srvRunning = s.running;
+    srvLastError = s.last_error;
+
+    if (s.running) {
+      ($("srv-port") as HTMLInputElement).value = String(s.port);
+      ($("srv-mode") as HTMLSelectElement).value = s.mode;
+      ($("srv-listener") as HTMLSelectElement).value = s.listener;
+      refreshSrvAddr();
+    }
+    const st = $("srv-status");
+    if (st && (s.running !== wasRunning || (s.running && s.last_error !== previousError))) {
+      st.textContent = s.running
+        ? (s.last_error ?? t("srv_on", { addr: `127.0.0.1:${s.port}` }))
+        : t("srv_off");
+    } else if (st && st.textContent === "—" && !s.running) {
+      st.textContent = t("srv_off");
     }
   } catch { /* ignore */ }
 }
@@ -1647,6 +1672,22 @@ window.addEventListener("DOMContentLoaded", () => {
   ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => void autoCycle("auto-status", true));
   ($("btn-webhook-send") as HTMLButtonElement).addEventListener("click", () => void sendWebhook(true));
   window.setInterval(() => void updateTray(), 5000);
+
+  // The renderer can be reloaded independently of the Rust process; restore
+  // the authoritative pool and dispatcher state instead of showing empty.
+  void invoke<PoolItem[]>("get_dispatch_pool")
+    .then((items) => {
+      dispatchPool = items.map((p) => ({
+        raw: p.raw,
+        url: p.url,
+        latency: p.latency,
+        country: p.country ?? null,
+      }));
+      renderPool();
+      updateCounts();
+    })
+    .catch(() => { /* older backend */ });
+  void pollDispatch();
 
   applyI18n();
   armTimers();

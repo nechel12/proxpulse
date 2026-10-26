@@ -593,12 +593,15 @@ async fn detect_tamper(
 #[derive(Debug, Clone)]
 struct Upstream {
     raw: String,
+    /// Normalized URL actually used for checks (keeps the real scheme).
+    url: String,
     scheme: String,
     host: String,
     port: u16,
     user: Option<String>,
     pass: Option<String>,
     latency: Option<u64>,
+    country: Option<String>,
 }
 
 type UpstreamParts = (String, String, u16, Option<String>, Option<String>);
@@ -1206,12 +1209,14 @@ async fn tls_via_proxy(
     };
     let up = Upstream {
         raw: proxy_url.to_string(),
+        url: proxy_url.to_string(),
         scheme,
         host,
         port,
         user,
         pass,
         latency: None,
+        country: None,
     };
     let stream = match connect_via(&up, "example.com", 443, timeout).await {
         Ok(s) => s,
@@ -1862,13 +1867,15 @@ async fn write_text_file(path: String, contents: String) -> Result<(), String> {
 
 // ================= local proxy dispatcher =================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct DispatchItem {
     raw: String,
     /// Normalized URL from the checker. Falls back to `raw` for old callers.
     #[serde(default)]
     url: Option<String>,
     latency: Option<u64>,
+    #[serde(default)]
+    country: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1882,6 +1889,29 @@ struct DispatchStatus {
     requests: u64,
     errors: u64,
     last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DispatchPoolItem {
+    raw: String,
+    url: String,
+    latency: Option<u64>,
+    country: Option<String>,
+}
+
+async fn pool_items(inner: &Arc<DispatchInner>) -> Vec<DispatchPoolItem> {
+    inner
+        .pool
+        .lock()
+        .await
+        .iter()
+        .map(|u| DispatchPoolItem {
+            raw: u.raw.clone(),
+            url: u.url.clone(),
+            latency: u.latency,
+            country: u.country.clone(),
+        })
+        .collect()
 }
 
 struct DispatchInner {
@@ -2535,6 +2565,7 @@ fn upstream_from_item(
     raw: &str,
     url: Option<&str>,
     latency: Option<u64>,
+    country: Option<String>,
 ) -> Option<(String, Upstream)> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -2544,15 +2575,17 @@ fn upstream_from_item(
     let (normalized, _) = normalize_proxy(source, "http")?;
     let (scheme, host, port, user, pass) = parse_upstream_url(&normalized)?;
     Some((
-        normalized,
+        normalized.clone(),
         Upstream {
             raw: raw.to_string(),
+            url: normalized,
             scheme,
             host,
             port,
             user,
             pass,
             latency,
+            country,
         },
     ))
 }
@@ -2565,7 +2598,9 @@ async fn set_dispatch_pool(
     let mut pool: Vec<Upstream> = Vec::new();
     let mut seen = HashSet::new();
     for it in items {
-        let Some((key, up)) = upstream_from_item(&it.raw, it.url.as_deref(), it.latency) else {
+        let Some((key, up)) =
+            upstream_from_item(&it.raw, it.url.as_deref(), it.latency, it.country.clone())
+        else {
             continue;
         };
         if !seen.insert(key) {
@@ -2704,6 +2739,13 @@ async fn start_local_proxy(
 async fn stop_local_proxy(state: State<'_, DispatchState>) -> Result<(), String> {
     stop_proxy_inner(&state.inner).await;
     Ok(())
+}
+
+#[tauri::command]
+async fn get_dispatch_pool(
+    state: State<'_, DispatchState>,
+) -> Result<Vec<DispatchPoolItem>, String> {
+    Ok(pool_items(&state.inner).await)
 }
 
 #[tauri::command]
@@ -2934,6 +2976,7 @@ pub fn run() {
             write_text_file,
             fetch_url_text,
             set_dispatch_pool,
+            get_dispatch_pool,
             start_local_proxy,
             stop_local_proxy,
             local_proxy_status,
@@ -3290,12 +3333,14 @@ mod tests {
     fn mk_upstream(host: &str, port: u16) -> Upstream {
         Upstream {
             raw: String::new(),
+            url: format!("http://{host}:{port}"),
             scheme: "http".into(),
             host: host.into(),
             port,
             user: None,
             pass: None,
             latency: None,
+            country: None,
         }
     }
 
@@ -3501,12 +3546,14 @@ mod tests {
     fn forward_request_adds_proxy_auth_once() {
         let up = Upstream {
             raw: "http://u:p@proxy:8080".into(),
+            url: "http://u:p@proxy:8080".into(),
             scheme: "http".into(),
             host: "proxy".into(),
             port: 8080,
             user: Some("u".into()),
             pass: Some("p".into()),
             latency: None,
+            country: None,
         };
         let body = b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\nBODY";
         let hdr_end = body
@@ -3535,12 +3582,14 @@ mod tests {
     fn forward_request_replaces_client_proxy_auth() {
         let up = Upstream {
             raw: "http://u:p@proxy:8080".into(),
+            url: "http://u:p@proxy:8080".into(),
             scheme: "http".into(),
             host: "proxy".into(),
             port: 8080,
             user: Some("u".into()),
             pass: Some("p".into()),
             latency: None,
+            country: None,
         };
         let body = b"GET http://example.com/ HTTP/1.1\r\nProxy-Authorization: Basic old\r\n\r\n";
         let hdr_end = body
@@ -3558,12 +3607,14 @@ mod tests {
     fn forward_request_strips_client_auth_without_upstream_creds() {
         let up = Upstream {
             raw: "http://proxy:8080".into(),
+            url: "http://proxy:8080".into(),
             scheme: "http".into(),
             host: "proxy".into(),
             port: 8080,
             user: None,
             pass: None,
             latency: None,
+            country: None,
         };
         let body = b"GET http://example.com/ HTTP/1.1\r\nproxy-authorization: Basic old\r\nHost: example.com\r\n\r\nBODY";
         let hdr_end = body
@@ -3591,16 +3642,24 @@ mod tests {
 
     #[test]
     fn dispatch_item_preserves_normalized_scheme() {
-        let (_, up) =
-            upstream_from_item("1.2.3.4:1080", Some("socks5://1.2.3.4:1080"), Some(42)).unwrap();
+        let (_, up) = upstream_from_item(
+            "1.2.3.4:1080",
+            Some("socks5://1.2.3.4:1080"),
+            Some(42),
+            Some("DE".into()),
+        )
+        .unwrap();
         assert_eq!(up.scheme, "socks5");
         assert_eq!(up.host, "1.2.3.4");
         assert_eq!(up.port, 1080);
         assert_eq!(up.raw, "1.2.3.4:1080");
+        assert_eq!(up.url, "socks5://1.2.3.4:1080");
         assert_eq!(up.latency, Some(42));
+        assert_eq!(up.country.as_deref(), Some("DE"));
 
-        let (_, explicit) = upstream_from_item("socks5://1.2.3.4:1080", None, None).unwrap();
+        let (_, explicit) = upstream_from_item("socks5://1.2.3.4:1080", None, None, None).unwrap();
         assert_eq!(explicit.scheme, "socks5");
+        assert_eq!(explicit.url, "socks5://1.2.3.4:1080");
     }
 
     #[test]
@@ -3610,11 +3669,13 @@ mod tests {
                 raw: "u:p@host:8080".to_string(),
                 url: Some("http://u:p@host:8080".to_string()),
                 latency: Some(10),
+                country: None,
             },
             DispatchItem {
                 raw: "socks5://host:1080".to_string(),
                 url: None,
                 latency: None,
+                country: None,
             },
         ];
         assert_eq!(
@@ -3680,6 +3741,7 @@ mod tests {
             raw: "u:p@host:8080".to_string(),
             url: Some("http://u:p@host:8080".to_string()),
             latency: Some(1),
+            country: None,
         }];
         let result = send_webhook_one(
             &format!("http://127.0.0.1:{redirect_port}/hook"),
@@ -3738,12 +3800,14 @@ mod tests {
         *st.inner.mode.lock().await = "failover".to_string();
         *st.inner.pool.lock().await = vec![Upstream {
             raw: format!("http://127.0.0.1:{mock_port}"),
+            url: format!("http://127.0.0.1:{mock_port}"),
             scheme: "http".to_string(),
             host: "127.0.0.1".to_string(),
             port: mock_port,
             user: None,
             pass: None,
             latency: None,
+            country: None,
         }];
         let inner = st.inner.clone();
         let h = tokio::spawn(async move {
@@ -3824,12 +3888,14 @@ mod tests {
         *st.inner.mode.lock().await = "failover".to_string();
         *st.inner.pool.lock().await = vec![Upstream {
             raw: format!("http://u:p@127.0.0.1:{mock_port}"),
+            url: format!("http://u:p@127.0.0.1:{mock_port}"),
             scheme: "http".to_string(),
             host: "127.0.0.1".to_string(),
             port: mock_port,
             user: Some("u".to_string()),
             pass: Some("p".to_string()),
             latency: None,
+            country: None,
         }];
         let inner = st.inner.clone();
         let h = tokio::spawn(async move {
