@@ -2514,23 +2514,34 @@ fn csv_cell(s: &str) -> String {
     }
 }
 
-#[tauri::command]
-async fn send_webhook(
-    url: String,
-    format: String,
-    include_credentials: Option<bool>,
-    items: Vec<DispatchItem>,
+fn webhook_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .use_rustls_tls()
+        .user_agent(concat!("ProxPulse/", env!("CARGO_PKG_VERSION")))
+        // A webhook may redirect to an arbitrary (including plain HTTP)
+        // host. Following such a redirect would re-send the body, including
+        // proxy credentials, outside the original HTTPS endpoint.
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+async fn send_webhook_one(
+    url: &str,
+    format: &str,
+    include_credentials: bool,
+    items: &[DispatchItem],
 ) -> Result<String, String> {
     let url = url.trim().to_string();
     if !is_http_url(&url) {
         return Err("bad webhook url".to_string());
     }
-    let include_credentials = include_credentials.unwrap_or(false);
     if include_credentials && url.to_ascii_lowercase().starts_with("http://") {
         return Err("https required when sending proxy credentials".to_string());
     }
-    let proxies = webhook_proxies(&items, include_credentials);
-    let (body, ctype) = match format.as_str() {
+    let proxies = webhook_proxies(items, include_credentials);
+    let (body, ctype) = match format {
         "json" => {
             let arr: Vec<serde_json::Value> = items
                 .iter()
@@ -2557,12 +2568,7 @@ async fn send_webhook(
         }
         _ => (proxies.join("\n"), "text/plain"),
     };
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .use_rustls_tls()
-        .user_agent(concat!("ProxPulse/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = webhook_client()?;
     let r = client
         .post(url)
         .header("Content-Type", ctype)
@@ -2576,6 +2582,22 @@ async fn send_webhook(
         .unwrap_or_default();
     let short: String = txt.chars().take(80).collect();
     Ok(format!("http {code} {short}"))
+}
+
+#[tauri::command]
+async fn send_webhook(
+    url: String,
+    format: String,
+    include_credentials: Option<bool>,
+    items: Vec<DispatchItem>,
+) -> Result<String, String> {
+    send_webhook_one(
+        &url,
+        &format,
+        include_credentials.unwrap_or(false),
+        &items,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -3242,6 +3264,45 @@ mod tests {
         assert_eq!(csv_cell("-1"), "'-1");
         assert_eq!(csv_cell("@SUM(A1)"), "'@SUM(A1)");
         assert_eq!(csv_cell("=a,b"), "\"'=a,b\"");
+    }
+
+    #[tokio::test]
+    async fn webhook_redirects_are_not_followed() {
+        let redirector = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let redirect_port = redirector.local_addr().unwrap().port();
+        let target = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let target_port = target.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut s, _) = redirector.accept().await.unwrap();
+            let mut buf = [0u8; 2048];
+            let _ = s.read(&mut buf).await;
+            let response = format!(
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:{target_port}/steal\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            let _ = s.write_all(response.as_bytes()).await;
+            let _ = s.shutdown().await;
+        });
+
+        let items = vec![DispatchItem {
+            raw: "u:p@host:8080".to_string(),
+            url: Some("http://u:p@host:8080".to_string()),
+            latency: Some(1),
+        }];
+        let result = send_webhook_one(
+            &format!("http://127.0.0.1:{redirect_port}/hook"),
+            "txt",
+            false,
+            &items,
+        )
+        .await
+        .unwrap();
+        assert!(result.starts_with("http 307"));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), target.accept())
+                .await
+                .is_err(),
+            "webhook client must not follow redirects"
+        );
     }
 
     #[tokio::test]
