@@ -9,6 +9,12 @@ import {
   stabilityShort,
   tlsShort,
 } from "./format.ts";
+import {
+  type GeoEntry,
+  type GeoFields,
+  isFreshGeo,
+  mergeGeoEntry,
+} from "./geocache.ts";
 import { type Lang, translate } from "./i18n.ts";
 import { resolveTestUrl } from "./ipapi.ts";
 import { extractProxiesFromText, parseInput, stripProxyCredentials } from "./parse.ts";
@@ -545,29 +551,18 @@ function syncMaxPingInputs(): void {
 
 // ---------- geo cache (skip repeated geo lookups for unchanged exit IPs) ----------
 
-type GeoFields = {
-  ip: string | null;
-  country: string | null;
-  country_code: string | null;
-  city: string | null;
-  isp: string | null;
-  org: string | null;
-  asn: string | null;
-  ip_type: string | null;
-};
-
-const geoCache = new Map<string, GeoFields>();
+const geoCache = new Map<string, GeoEntry>();
 const GEO_CACHE_MAX = 2000;
 
 function loadGeoCache(): void {
   try {
     const raw = localStorage.getItem("pp-geocache");
     if (!raw) return;
-    const arr = JSON.parse(raw) as [string, GeoFields][];
+    const arr = JSON.parse(raw) as [string, Partial<GeoEntry>][];
     const str = (v: unknown) => (typeof v === "string" ? v : null);
     for (const [k, v] of arr.slice(-GEO_CACHE_MAX)) {
       if (typeof k !== "string" || !v || typeof v !== "object") continue;
-      const g = v as Partial<GeoFields>;
+      const g = v;
       geoCache.set(stripProxyCredentials(k), {
         ip: str(g.ip),
         country: str(g.country),
@@ -577,6 +572,8 @@ function loadGeoCache(): void {
         org: str(g.org),
         asn: str(g.asn),
         ip_type: str(g.ip_type),
+        // Entries written before timestamps existed are treated as stale.
+        ts: typeof g.ts === "number" ? g.ts : 0,
       });
     }
   } catch { /* ignore */ }
@@ -592,10 +589,12 @@ function learnGeo(list: ProxyResult[]): void {
   let changed = false;
   for (const r of list) {
     if (!r.alive || r.ip == null) continue;
-    geoCache.set(stripProxyCredentials(r.proxy), {
+    const key = stripProxyCredentials(r.proxy);
+    const next: GeoFields = {
       ip: r.ip, country: r.country, country_code: r.country_code, city: r.city,
       isp: r.isp, org: r.org, asn: r.asn, ip_type: r.ip_type,
-    });
+    };
+    geoCache.set(key, mergeGeoEntry(geoCache.get(key), next));
     changed = true;
   }
   if (changed) {
@@ -608,12 +607,12 @@ function learnGeo(list: ProxyResult[]): void {
   }
 }
 
-function relevantGeoCache(list: string[]): (GeoFields & { proxy: string })[] {
-  const out: (GeoFields & { proxy: string })[] = [];
+function relevantGeoCache(list: string[]): (GeoEntry & { proxy: string })[] {
+  const out: (GeoEntry & { proxy: string })[] = [];
   for (const p of list) {
     const key = stripProxyCredentials(p);
     const f = geoCache.get(key);
-    if (f) out.push({ proxy: key, ...f });
+    if (f && isFreshGeo(f)) out.push({ proxy: key, ...f });
   }
   return out;
 }

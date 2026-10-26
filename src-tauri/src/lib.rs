@@ -388,6 +388,45 @@ fn apply_ipapi(res: &mut ProxyResult, g: &IpApi) {
     }
 }
 
+/// Fill geo from the frontend cache. The frontend filters entries by a TTL;
+/// when the test URL does not reveal the exit IP, the cached IP is used.
+/// Reusing a cached IP here also lets the frontend refresh its timestamp.
+fn apply_cached_geo(res: &mut ProxyResult, entry: &GeoCacheEntry) -> bool {
+    let use_cached = match (&res.ip, &entry.ip) {
+        (Some(a), Some(b)) => a == b,
+        (None, _) => true,
+        _ => false,
+    };
+    if !use_cached {
+        return false;
+    }
+    if res.ip.is_none() {
+        res.ip = entry.ip.clone();
+    }
+    if res.country.is_none() {
+        res.country = entry.country.clone();
+    }
+    if res.country_code.is_none() {
+        res.country_code = entry.country_code.clone();
+    }
+    if res.city.is_none() {
+        res.city = entry.city.clone();
+    }
+    if res.isp.is_none() {
+        res.isp = entry.isp.clone();
+    }
+    if res.org.is_none() {
+        res.org = entry.org.clone();
+    }
+    if res.asn.is_none() {
+        res.asn = entry.asn.clone();
+    }
+    if res.ip_type.is_none() {
+        res.ip_type = entry.ip_type.clone();
+    }
+    true
+}
+
 fn try_parse_test_body(res: &mut ProxyResult, test_url: &str, body: &str) {
     let low = test_url.to_lowercase();
     if low.contains("ip-api.com") {
@@ -464,6 +503,9 @@ async fn fetch_geo(client: &reqwest::Client, ipapi_key: Option<&str>) -> Option<
 }
 
 async fn detect_anonymity(client: &reqwest::Client, direct_ip: Option<&str>) -> Option<String> {
+    // Without a direct-IP baseline "elite" would be a guess, not a result.
+    // Return before spending a request through the proxy.
+    let d = direct_ip.filter(|d| !d.is_empty())?;
     let r = client
         .get("https://httpbin.org/headers")
         .send()
@@ -479,8 +521,6 @@ async fn detect_anonymity(client: &reqwest::Client, direct_ip: Option<&str>) -> 
     for (k, v) in headers {
         lower.insert(k.to_lowercase(), v);
     }
-    // Without a direct-IP baseline "elite" would be a guess, not a result.
-    let d = direct_ip.filter(|d| !d.is_empty())?;
     if lower.values().any(|v| v.contains(d)) {
         return Some("transparent".to_string());
     }
@@ -1389,35 +1429,11 @@ async fn check_candidate_inner(
             try_parse_test_body(&mut res, &test_url, &b);
         }
     }
-    // reuse previously seen geo when the exit IP is unchanged (saves a lookup)
+    // Reuse previously seen geo. When the test URL does not reveal the exit
+    // IP, the frontend-provided cache (TTL-filtered) is the only way to skip
+    // a geo lookup for the default generate_204 URL.
     if let Some(entry) = geo_cache.get(&strip_credentials(&raw)) {
-        let same_ip = match (&res.ip, &entry.ip) {
-            (Some(a), Some(b)) => a == b,
-            _ => false,
-        };
-        if same_ip {
-            if res.country.is_none() {
-                res.country = entry.country.clone();
-            }
-            if res.country_code.is_none() {
-                res.country_code = entry.country_code.clone();
-            }
-            if res.city.is_none() {
-                res.city = entry.city.clone();
-            }
-            if res.isp.is_none() {
-                res.isp = entry.isp.clone();
-            }
-            if res.org.is_none() {
-                res.org = entry.org.clone();
-            }
-            if res.asn.is_none() {
-                res.asn = entry.asn.clone();
-            }
-            if res.ip_type.is_none() {
-                res.ip_type = entry.ip_type.clone();
-            }
-        }
+        apply_cached_geo(&mut res, entry);
     }
     // deep stages run concurrently: worst case ~1 timeout instead of 4 in a row
     if !flags.judge && !cancel.load(Ordering::Relaxed) {
@@ -3298,6 +3314,32 @@ mod tests {
         assert!(out.len() <= 160);
         assert!(out.is_char_boundary(out.len()));
         assert!(out.chars().all(|c| c == 'a' || c == 'é'));
+    }
+
+    #[test]
+    fn cached_geo_is_used_without_exit_ip() {
+        let entry = GeoCacheEntry {
+            proxy: "1.2.3.4:8080".into(),
+            ip: Some("5.6.7.8".into()),
+            country: Some("Testland".into()),
+            country_code: Some("TL".into()),
+            city: Some("Testville".into()),
+            isp: Some("ISP".into()),
+            org: Some("ORG".into()),
+            asn: Some("AS1".into()),
+            ip_type: Some("residential/isp".into()),
+        };
+        let mut res = dead_result("1.2.3.4:8080".into(), "HTTP".into(), 0, String::new());
+        res.alive = true;
+        assert!(apply_cached_geo(&mut res, &entry));
+        assert_eq!(res.ip.as_deref(), Some("5.6.7.8"));
+        assert_eq!(res.country.as_deref(), Some("Testland"));
+        assert_eq!(res.city.as_deref(), Some("Testville"));
+
+        let mut other = dead_result("1.2.3.4:8080".into(), "HTTP".into(), 0, String::new());
+        other.ip = Some("9.9.9.9".into());
+        assert!(!apply_cached_geo(&mut other, &entry));
+        assert!(other.country.is_none());
     }
 
     #[test]

@@ -174,8 +174,9 @@ be disabled. They are not needed in Judge mode: Judge returns the data itself.
 > **Public API limits.** Free ip-api has a per-minute request limit and
 > httpbin.org is regularly throttled. To avoid flooding ip-api at 500-way
 > concurrency, at most 8 geo lookups run at once; under load geo is skipped
-> for some proxies (run the check again). The geo cache (up to 2000 entries)
-> reduces repeated lookups but does not replace a self-hosted service. For
+> for some proxies (run the check again). The geo cache (up to 2000 entries,
+> 6-hour TTL) reduces repeated lookups but does not replace a self-hosted
+> service. For
 > stable results, use [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge).
 
 Deep checks are heuristics. If a baseline request fails, anonymity may stay
@@ -249,7 +250,7 @@ explicitly enabled** — in webhooks. By default webhooks receive URLs without
 credentials.
 
 Stored locally in the browser: language, ping limit, webhook URLs (may contain
-tokens), geo cache (up to 2000 entries, credential-free keys), recent errors,
+tokens), geo cache (up to 2000 entries, 6-hour TTL, credential-free keys), recent errors,
 ping history and settings profiles. Clearing `localStorage` removes this data.
 
 ## Security
