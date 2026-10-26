@@ -1854,6 +1854,11 @@ struct DispatchInner {
     last_error: Mutex<Option<String>>,
     handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     lifecycle: Mutex<()>,
+    /// All active client connections, so Stop can terminate tunnels instead
+    /// of leaving them running after the listener is gone.
+    connections: Mutex<tokio::task::JoinSet<()>>,
+    /// Cached loopback checks for upstream hostnames (`host:port` -> result).
+    dns_cache: Mutex<HashMap<String, (bool, Instant)>>,
 }
 
 struct DispatchState {
@@ -1876,6 +1881,8 @@ impl Default for DispatchState {
                 last_error: Mutex::new(None),
                 handle: Mutex::new(None),
                 lifecycle: Mutex::new(()),
+                connections: Mutex::new(tokio::task::JoinSet::new()),
+                dns_cache: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -2102,37 +2109,99 @@ fn parse_target(method: &str, target: &str) -> Option<(String, u16)> {
 
 const MAX_UPSTREAM_ATTEMPTS: usize = 5;
 
-fn is_self_upstream(up: &Upstream, port: u16) -> bool {
-    if up.port != port {
-        return false;
-    }
-    let host = up
-        .host
+fn is_self_literal(host: &str) -> bool {
+    let host = host
         .trim()
         .trim_start_matches('[')
         .trim_end_matches(']')
         .trim_end_matches('.')
         .to_ascii_lowercase();
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return ip.is_loopback() || ip.is_unspecified();
+    }
     matches!(
         host.as_str(),
-        "127.0.0.1" | "localhost" | "::1" | "0.0.0.0" | "::" | "::ffff:127.0.0.1"
+        "localhost" | "localhost.localdomain" | "ip6-localhost"
     )
+}
+
+fn is_self_upstream(up: &Upstream, port: u16) -> bool {
+    up.port == port && is_self_literal(&up.host)
+}
+
+/// Resolve hostname aliases such as `127.0.0.1.nip.io` that point at the
+/// local listener. Results are cached for a few minutes; only entries with
+/// the listener's port are resolved, so the cost is normally tiny.
+async fn is_self_upstream_async(
+    up: &Upstream,
+    port: u16,
+    cache: &Mutex<HashMap<String, (bool, Instant)>>,
+) -> bool {
+    if up.port != port {
+        return false;
+    }
+    if is_self_literal(&up.host) {
+        return true;
+    }
+    if up.host.parse::<IpAddr>().is_ok() {
+        return false;
+    }
+    let key = format!("{}:{}", up.host.to_ascii_lowercase(), up.port);
+    {
+        let c = cache.lock().await;
+        if let Some((v, ts)) = c.get(&key) {
+            if ts.elapsed() < Duration::from_secs(300) {
+                return *v;
+            }
+        }
+    }
+    let is_self = match tokio::time::timeout(
+        Duration::from_millis(800),
+        tokio::net::lookup_host((up.host.as_str(), up.port)),
+    )
+    .await
+    {
+        Ok(Ok(addrs)) => addrs
+            .into_iter()
+            .any(|a| a.ip().is_loopback() || a.ip().is_unspecified()),
+        _ => false,
+    };
+    let mut c = cache.lock().await;
+    if c.len() > 1000 {
+        c.clear();
+    }
+    c.insert(key, (is_self, Instant::now()));
+    is_self
 }
 
 async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
     let port = *st.port.lock().await;
-    let pool = st.pool.lock().await;
-    if pool.is_empty() {
-        return vec![];
-    }
     let mode = st.mode.lock().await.clone();
-    let order = pick_order(pool.len(), &mode, &st.rr, MAX_UPSTREAM_ATTEMPTS + 4);
-    order
-        .iter()
-        .filter(|&&i| !is_self_upstream(&pool[i], port))
-        .take(MAX_UPSTREAM_ATTEMPTS)
-        .map(|&i| pool[i].clone())
-        .collect()
+    let candidates: Vec<Upstream> = {
+        let pool = st.pool.lock().await;
+        if pool.is_empty() {
+            return vec![];
+        }
+        let order = pick_order(pool.len(), &mode, &st.rr, MAX_UPSTREAM_ATTEMPTS + 4);
+        order.iter().map(|&i| pool[i].clone()).collect()
+    };
+    let mut out = Vec::new();
+    for up in candidates {
+        if out.len() >= MAX_UPSTREAM_ATTEMPTS {
+            break;
+        }
+        if is_self_upstream_async(&up, port, &st.dns_cache).await {
+            continue;
+        }
+        out.push(up);
+    }
+    out
+}
+
+async fn abort_connections(inner: &Arc<DispatchInner>) {
+    let mut conns = inner.connections.lock().await;
+    conns.abort_all();
+    while conns.join_next().await.is_some() {}
 }
 
 async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
@@ -2400,7 +2469,9 @@ async fn run_server(listener: TcpListener, st: Arc<DispatchInner>) {
             }
         };
         let stc = st.clone();
-        tokio::spawn(async move {
+        let mut conns = st.connections.lock().await;
+        while conns.try_join_next().is_some() {}
+        conns.spawn(async move {
             handle_conn(stream, stc).await;
         });
     }
@@ -2478,7 +2549,12 @@ async fn start_proxy_locked(
     }
     if let Some(h) = inner.handle.lock().await.take() {
         h.abort();
+        // Wait until the accept loop (and therefore the listener) is gone
+        // before binding; otherwise the old address may still be in use and
+        // the requested port silently drifts to +1.
+        let _ = h.await;
     }
+    abort_connections(inner).await;
     inner.running.store(false, Ordering::SeqCst);
     // fallback: requested port, then +1, +2, ... while busy
     let mut port = req_port;
@@ -2536,7 +2612,10 @@ async fn stop_proxy_inner(inner: &Arc<DispatchInner>) {
     let _lifecycle = inner.lifecycle.lock().await;
     if let Some(h) = inner.handle.lock().await.take() {
         h.abort();
+        let _ = h.await;
     }
+    // Stop must terminate active tunnels too, not only new connections.
+    abort_connections(inner).await;
     inner.running.store(false, Ordering::SeqCst);
     *inner.current.lock().await = None;
     *inner.last_error.lock().await = None;
@@ -3147,9 +3226,8 @@ mod tests {
         assert_eq!(v4.last(), Some(&0));
     }
 
-    #[test]
-    fn self_loop_detection() {
-        let mk = |host: &str, port: u16| Upstream {
+    fn mk_upstream(host: &str, port: u16) -> Upstream {
+        Upstream {
             raw: String::new(),
             scheme: "http".into(),
             host: host.into(),
@@ -3157,13 +3235,43 @@ mod tests {
             user: None,
             pass: None,
             latency: None,
-        };
-        assert!(is_self_upstream(&mk("127.0.0.1", 1080), 1080));
-        assert!(is_self_upstream(&mk("localhost", 1080), 1080));
-        assert!(is_self_upstream(&mk("[::1]", 1080), 1080));
-        assert!(is_self_upstream(&mk("0.0.0.0", 1080), 1080));
-        assert!(!is_self_upstream(&mk("127.0.0.1", 1081), 1080));
-        assert!(!is_self_upstream(&mk("1.2.3.4", 1080), 1080));
+        }
+    }
+
+    #[test]
+    fn self_loop_detection() {
+        assert!(is_self_upstream(&mk_upstream("127.0.0.1", 1080), 1080));
+        assert!(is_self_upstream(&mk_upstream("127.0.0.2", 1080), 1080));
+        assert!(is_self_upstream(&mk_upstream("localhost", 1080), 1080));
+        assert!(is_self_upstream(&mk_upstream("[::1]", 1080), 1080));
+        assert!(is_self_upstream(&mk_upstream("0.0.0.0", 1080), 1080));
+        assert!(is_self_upstream(&mk_upstream("::", 1080), 1080));
+        assert!(!is_self_upstream(&mk_upstream("127.0.0.1", 1081), 1080));
+        assert!(!is_self_upstream(&mk_upstream("1.2.3.4", 1080), 1080));
+        assert!(is_self_literal("localhost."));
+        assert!(is_self_literal("[::1]"));
+        assert!(!is_self_literal("example.com"));
+    }
+
+    #[tokio::test]
+    async fn self_loop_hostname_check_is_port_scoped() {
+        let cache = Mutex::new(HashMap::new());
+        let up = mk_upstream("localhost", 1080);
+        assert!(is_self_upstream_async(&up, 1080, &cache).await);
+        assert!(!is_self_upstream_async(&up, 1081, &cache).await);
+    }
+
+    #[tokio::test]
+    async fn abort_connections_drains_active_tasks() {
+        let st = DispatchState::default();
+        {
+            let mut conns = st.inner.connections.lock().await;
+            conns.spawn(async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            });
+        }
+        abort_connections(&st.inner).await;
+        assert_eq!(st.inner.connections.lock().await.len(), 0);
     }
 
     #[test]
