@@ -47,6 +47,44 @@ jobs:
       # the Tauri npm-vs-crate version check that plain cargo check misses.
       - run: npm run build:unsigned -- --no-bundle
 
+  windows-smoke:
+    # Build the real Windows bundles and verify that the application starts
+    # and the single-instance guard works. The release workflow only creates
+    # installers on tags, so this is the CI startup gate.
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - run: npm run build:unsigned
+      - name: Verify bundles and startup
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" -ErrorAction Stop
+          $nsis = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction Stop
+          if (-not $msi -or -not $nsis) { throw "installer bundle missing" }
+          $exe = "src-tauri/target/release/proxpulse.exe"
+          $p1 = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 20
+          if ($p1.HasExited) { throw "first instance exited with $($p1.ExitCode)" }
+          $p2 = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 5
+          if (-not $p2.HasExited) {
+            Stop-Process -Id $p2.Id -Force -ErrorAction SilentlyContinue
+            throw "second instance stayed alive"
+          }
+          $count = (Get-Process proxpulse -ErrorAction SilentlyContinue | Measure-Object).Count
+          if ($count -ne 1) { throw "expected one process, got $count" }
+          Get-Process proxpulse -ErrorAction SilentlyContinue | Stop-Process -Force
+
   rust-cross:
     # Compile-check the desktop backend on the other supported OSes.
     # The full bundle is still built by release.yml on tags.
