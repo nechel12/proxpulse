@@ -27,6 +27,7 @@ import { sanitizeProfile, type ProfileData } from "./profiles.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
 import { initUpdater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
+import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
 import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
@@ -53,15 +54,13 @@ let running = false;
 let starting = false;
 let includeDead = false;
 const pool = new PoolView();
-let pollTimer: number | undefined;
+const dispatchMonitor = new DispatchMonitor();
 let autoRunning = false;
 let autoCfgTimer: number | undefined;
 const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
 let judgeFull = true;
 let dispAutoOn = false;
 let autoOn = false;
-let srvRunning = false;
-let srvLastError: string | null = null;
 
 // ---------- ui helpers ----------
 
@@ -283,7 +282,7 @@ function applyI18n() {
   updateIpapiUI();
   renderNet();
   refreshStatusTexts();
-  renderSrvPill();
+  dispatchMonitor.renderPill(t);
   void updateTray();
 }
 
@@ -829,73 +828,6 @@ async function doExport(kind: ExportKind): Promise<void> {
 
 // ---------- dispatcher ----------
 
-type DispatchStatus = {
-  running: boolean;
-  port: number;
-  mode: string;
-  listener: string;
-  upstreams: number;
-  current: string | null;
-  requests: number;
-  errors: number;
-  last_error: string | null;
-};
-
-function refreshSrvAddr() {
-  const port = ($("srv-port") as HTMLInputElement).value || "1080";
-  ($("srv-addr") as HTMLElement).textContent = `127.0.0.1:${port}`;
-}
-
-async function pollDispatch() {
-  try {
-    const s = await invoke<DispatchStatus>("local_proxy_status");
-    ($("srv-req") as HTMLElement).textContent = String(s.requests);
-    ($("srv-err") as HTMLElement).textContent = String(s.errors);
-    ($("srv-cur") as HTMLElement).textContent = s.current ?? "—";
-    ($("btn-srv-start") as HTMLButtonElement).disabled = s.running;
-    ($("btn-srv-stop") as HTMLButtonElement).disabled = !s.running;
-
-    const wasRunning = srvRunning;
-    const previousError = srvLastError;
-    srvRunning = s.running;
-    srvLastError = s.last_error;
-    renderSrvPill();
-
-    if (s.running) {
-      ($("srv-port") as HTMLInputElement).value = String(s.port);
-      ($("srv-mode") as HTMLSelectElement).value = s.mode;
-      ($("srv-listener") as HTMLSelectElement).value = s.listener;
-      refreshSrvAddr();
-    }
-    const st = $("srv-status");
-    if (st && (s.running !== wasRunning || (s.running && s.last_error !== previousError))) {
-      if (s.running) {
-        const error = s.last_error;
-        const addr = `127.0.0.1:${s.port}`;
-        setStatusText("srv-status", () => error ?? t("srv_on", { addr }));
-      } else {
-        setStatusText("srv-status", () => t("srv_off"));
-      }
-    } else if (st && st.textContent === "—" && !s.running) {
-      setStatusText("srv-status", () => t("srv_off"));
-    }
-  } catch { /* ignore */ }
-}
-
-function renderSrvPill(): void {
-  const pill = $("srv-pill");
-  pill.textContent = srvRunning ? t("pill_on") : t("pill_off");
-  pill.className = srvRunning ? "pill alive on" : "pill dead";
-}
-
-function setPolling(on: boolean) {
-  window.clearInterval(pollTimer);
-  if (on) {
-    void pollDispatch();
-    pollTimer = window.setInterval(() => void pollDispatch(), 2000);
-  }
-}
-
 // ---------- diagnostics + updates ----------
 
 window.addEventListener("error", (e) => logErr("window: " + String(e.message || "error")));
@@ -924,12 +856,12 @@ window.addEventListener("DOMContentLoaded", () => {
       document.querySelectorAll(".screen").forEach((s) => s.classList.add("hidden"));
       const scr = document.getElementById(`screen-${name}`);
       scr?.classList.remove("hidden");
-      setPolling(name === "dispatch");
+      dispatchMonitor.setPolling(name === "dispatch", t, setStatusText);
       if (name === "check") render();
       if (name === "dispatch") {
-        refreshSrvAddr();
+        dispatchMonitor.refreshAddr();
         renderPool();
-        void pollDispatch();
+        void dispatchMonitor.poll(t, setStatusText);
       } else if (name === "auto") {
         renderPool();
       }
@@ -1036,7 +968,7 @@ window.addEventListener("DOMContentLoaded", () => {
     // refresh the status once the sync completes.
     void syncPool(false).then(() => {
       setStatusText("srv-status", () => t("srv_off"));
-      void pollDispatch();
+      void dispatchMonitor.poll(t, setStatusText);
     });
     renderPool();
     updateCounts();
@@ -1195,8 +1127,8 @@ window.addEventListener("DOMContentLoaded", () => {
   bindSqchk("auto-on", () => autoOn, (v) => { autoOn = v; });
 
   // dispatcher
-  ($("srv-port") as HTMLInputElement).addEventListener("input", refreshSrvAddr);
-  refreshSrvAddr();
+  ($("srv-port") as HTMLInputElement).addEventListener("input", () => dispatchMonitor.refreshAddr());
+  dispatchMonitor.refreshAddr();
   ($("btn-pool-sync") as HTMLButtonElement).addEventListener("click", () => void doPoolSync("srv-status"));
   ($("btn-auto-pool-sync") as HTMLButtonElement).addEventListener("click", () => void doPoolSync("auto-status"));
   ($("btn-srv-copy") as HTMLButtonElement).addEventListener("click", async () => {
@@ -1223,8 +1155,8 @@ window.addEventListener("DOMContentLoaded", () => {
         const st = await invoke<DispatchStatus>("local_proxy_status");
         ($("srv-port") as HTMLInputElement).value = String(st.port);
       } catch { /* keep typed value */ }
-      refreshSrvAddr();
-      void pollDispatch();
+      dispatchMonitor.refreshAddr();
+      void dispatchMonitor.poll(t, setStatusText);
       void updateTray();
     } catch (e) {
       const msg = String(e);
@@ -1241,7 +1173,7 @@ window.addEventListener("DOMContentLoaded", () => {
       await invoke("stop_local_proxy");
     } catch { /* ignore */ }
     setStatusText("srv-status", () => t("srv_off"));
-    void pollDispatch();
+    void dispatchMonitor.poll(t, setStatusText);
     void updateTray();
   });
 
@@ -1377,7 +1309,7 @@ window.addEventListener("DOMContentLoaded", () => {
       updateCounts();
     })
     .catch(() => { /* older backend */ });
-  void pollDispatch();
+  void dispatchMonitor.poll(t, setStatusText);
 
   applyI18n();
   armTimers();
