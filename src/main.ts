@@ -1956,6 +1956,15 @@ window.addEventListener("DOMContentLoaded", () => {
     notes: string | null;
   };
   let pendingVersion = "";
+  let installKindPromise: Promise<string> | null = null;
+  const getInstallKind = (): Promise<string> => {
+    if (!installKindPromise) {
+      installKindPromise = isTauriRuntime()
+        ? invoke<string>("install_kind").catch(() => "auto")
+        : Promise.resolve("auto");
+    }
+    return installKindPromise;
+  };
   ($("btn-check-upd") as HTMLButtonElement).addEventListener("click", async () => {
     const openBtn = $("btn-open-rel") as HTMLButtonElement;
     const instBtn = $("btn-install-upd") as HTMLButtonElement;
@@ -1973,9 +1982,14 @@ window.addEventListener("DOMContentLoaded", () => {
       const version = u.version;
       pendingVersion = version;
       releaseUrl = "https://github.com/nechel12/proxpulse/releases";
-      setStatusText("upd-status", () => t("upd_found", { v: version, cur: u.current }));
+      const kind = await getInstallKind();
+      if (kind === "nsis" || kind === "auto") {
+        setStatusText("upd-status", () => t("upd_found", { v: version, cur: u.current }));
+        instBtn.classList.remove("hidden");
+      } else {
+        setStatusText("upd-status", () => t("upd_manual", { v: version }));
+      }
       openBtn.classList.remove("hidden");
-      instBtn.classList.remove("hidden");
     } catch (e) {
       logErr("update-check: " + String(e).slice(0, 200));
       setStatusText("upd-status", () => t("upd_fail"));
