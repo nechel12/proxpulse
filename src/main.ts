@@ -23,11 +23,8 @@ import { resolveTestUrl } from "./ipapi.ts";
 import { resolveJudgeUrl } from "./judge.ts";
 import { extractProxiesFromText } from "./parse.ts";
 import { parseFallback, parseTextAsync, type ParseResult } from "./parse-runner.ts";
-import {
-  BUILTIN_PROFILES,
-  type ProfileData,
-  sanitizeProfile,
-} from "./profiles.ts";
+import { sanitizeProfile, type ProfileData } from "./profiles.ts";
+import { ProfilePanel } from "./profiles-panel.ts";
 import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
@@ -146,8 +143,7 @@ function setJudgeFull(full: boolean): void {
 
 // ---------- settings profiles ----------
 
-let customProfiles: { name: string; data: ProfileData }[] = [];
-let currentProfileId = "";
+const profiles = new ProfilePanel();
 
 function snapshotProfile(): ProfileData {
   const val = (id: string) => ($(id) as HTMLInputElement).value;
@@ -196,63 +192,6 @@ function loadCurrentSettings(): void {
     const data = sanitizeProfile(JSON.parse(raw));
     if (data) applyProfile(data);
   } catch { /* ignore */ }
-}
-
-function loadProfiles(): void {
-  customProfiles = [];
-  try {
-    const raw = localStorage.getItem("pp-profiles");
-    const arr = raw ? JSON.parse(raw) : null;
-    if (!Array.isArray(arr)) return;
-    for (const p of arr) {
-      if (!p || typeof p.name !== "string" || !p.name.trim()) continue;
-      const data = sanitizeProfile(p.data);
-      if (!data) continue;
-      customProfiles.push({ name: p.name.trim().slice(0, 40), data });
-      if (customProfiles.length >= 20) break;
-    }
-  } catch {
-    customProfiles = [];
-  }
-}
-
-function saveProfiles(): void {
-  try {
-    localStorage.setItem("pp-profiles", JSON.stringify(customProfiles.slice(0, 20)));
-  } catch { /* ignore */ }
-}
-
-function renderProfileList(): void {
-  const sel = $("profile-sel") as HTMLSelectElement;
-  sel.innerHTML = "";
-  const ph = document.createElement("option");
-  ph.value = "";
-  ph.textContent = t("profile_none");
-  sel.appendChild(ph);
-  for (const b of BUILTIN_PROFILES) {
-    const o = document.createElement("option");
-    o.value = b.id;
-    o.textContent = t(b.nameKey);
-    sel.appendChild(o);
-  }
-  for (const c of customProfiles) {
-    const o = document.createElement("option");
-    o.value = "custom:" + c.name;
-    o.textContent = c.name;
-    sel.appendChild(o);
-  }
-  sel.value = currentProfileId;
-  ($("btn-profile-del") as HTMLButtonElement).disabled = !currentProfileId.startsWith("custom:");
-}
-
-function findProfile(id: string): ProfileData | null {
-  const b = BUILTIN_PROFILES.find((x) => x.id === id);
-  if (b) return b.data;
-  if (id.startsWith("custom:")) {
-    const c = customProfiles.find((x) => "custom:" + x.name === id);
-    if (c) return c.data;
-  }
-  return null;
 }
 
 function setStatusT(key: string, params?: Record<string, string | number>) {
@@ -336,7 +275,7 @@ function applyI18n() {
   $("status-line").textContent = t(lastStatus.key, lastStatus.params);
   render();
   renderPool();
-  renderProfileList();
+  profiles.render(t);
   updateCounts();
   updateJudgeUI();
   updateIpapiUI();
@@ -1287,14 +1226,14 @@ window.addEventListener("DOMContentLoaded", () => {
   $("gh-card-judge").addEventListener("click", openGh("https://github.com/nechel12/proxpulse-judge"));
 
   // settings profiles
-  loadProfiles();
-  renderProfileList();
+  profiles.load();
+  profiles.render(t);
   ($("profile-sel") as HTMLSelectElement).addEventListener("change", (e) => {
     const id = (e.target as HTMLSelectElement).value;
-    currentProfileId = id;
-    const d = findProfile(id);
+    profiles.currentId = id;
+    const d = profiles.find(id);
     if (d) applyProfile(d);
-    ($("btn-profile-del") as HTMLButtonElement).disabled = !id.startsWith("custom:");
+    profiles.render(t);
   });
   ($("btn-profile-save") as HTMLButtonElement).addEventListener("click", async () => {
     const res = await askText(t("profile_name"));
@@ -1302,23 +1241,18 @@ window.addEventListener("DOMContentLoaded", () => {
     const name = res.trim().slice(0, 40);
     if (!name) return;
     const data = snapshotProfile();
-    const at = customProfiles.findIndex((c) => c.name === name);
-    if (at >= 0) customProfiles[at] = { name, data };
-    else if (customProfiles.length < 20) customProfiles.push({ name, data });
-    else {
+    if (!profiles.upsert(name, data)) {
       setStatusT("profile_limit");
       return;
     }
-    saveProfiles();
-    currentProfileId = "custom:" + name;
-    renderProfileList();
+    profiles.save();
+    profiles.currentId = "custom:" + name;
+    profiles.render(t);
   });
   ($("btn-profile-del") as HTMLButtonElement).addEventListener("click", () => {
-    if (!currentProfileId.startsWith("custom:")) return;
-    customProfiles = customProfiles.filter((c) => "custom:" + c.name !== currentProfileId);
-    saveProfiles();
-    currentProfileId = "";
-    renderProfileList();
+    profiles.deleteCurrent();
+    profiles.save();
+    profiles.render(t);
   });
   ($("test-url") as HTMLSelectElement).addEventListener("change", updateJudgeUI);
   ($("test-url-custom") as HTMLInputElement).addEventListener("input", updateJudgeUI);
