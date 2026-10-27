@@ -10,12 +10,12 @@ use std::sync::{
     Arc,
 };
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{
     ipc::Channel,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State,
+    Emitter, Manager, State,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
@@ -2013,12 +2013,164 @@ impl Default for DispatchState {
     }
 }
 
+// ================= scheduled checks =================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutoSettings {
+    disp_enabled: bool,
+    disp_interval_min: u64,
+    auto_enabled: bool,
+    auto_interval_min: u64,
+    max_ping_ms: u64,
+    webhook_urls: Vec<String>,
+    webhook_format: String,
+    webhook_include_credentials: bool,
+    test_url: String,
+    timeout_ms: u64,
+    concurrency: usize,
+    repeats: usize,
+    default_proto: String,
+    with_geo: bool,
+    with_anonymity: bool,
+    with_tamper: bool,
+    with_tls: bool,
+    precheck: bool,
+    precheck_timeout_ms: u64,
+    judge_mode: bool,
+    ipapi_key: Option<String>,
+}
+
+impl Default for AutoSettings {
+    fn default() -> Self {
+        Self {
+            disp_enabled: false,
+            disp_interval_min: 30,
+            auto_enabled: false,
+            auto_interval_min: 30,
+            max_ping_ms: 0,
+            webhook_urls: Vec::new(),
+            webhook_format: "txt".to_string(),
+            webhook_include_credentials: false,
+            test_url: "https://www.google.com/generate_204".to_string(),
+            timeout_ms: 5000,
+            concurrency: 50,
+            repeats: 1,
+            default_proto: "http".to_string(),
+            with_geo: true,
+            with_anonymity: true,
+            with_tamper: true,
+            with_tls: true,
+            precheck: true,
+            precheck_timeout_ms: 1500,
+            judge_mode: false,
+            ipapi_key: None,
+        }
+    }
+}
+
+struct AutoInner {
+    settings: Mutex<AutoSettings>,
+    disp_next: AtomicU64,
+    auto_next: AtomicU64,
+    running: Arc<AtomicBool>,
+}
+
+struct AutoState {
+    inner: Arc<AutoInner>,
+}
+
+impl Default for AutoState {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(AutoInner {
+                settings: Mutex::new(AutoSettings::default()),
+                disp_next: AtomicU64::new(0),
+                auto_next: AtomicU64::new(0),
+                running: Arc::new(AtomicBool::new(false)),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AutoKind {
+    Dispatch,
+    Auto,
+}
+
+impl AutoKind {
+    fn schedule(self) -> &'static str {
+        match self {
+            AutoKind::Dispatch => "disp",
+            AutoKind::Auto => "auto",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AutoStatus {
+    schedule: String,
+    state: String,
+    alive: usize,
+    total: usize,
+    avg_ms: Option<u64>,
+    error: Option<String>,
+    at: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AutoPoolPayload {
+    items: Vec<DispatchPoolItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WebhookResult {
+    index: usize,
+    ok: bool,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AutoWebhookPayload {
+    results: Vec<WebhookResult>,
+}
+
+fn epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn emit_auto_status(
+    app: &tauri::AppHandle,
+    kind: AutoKind,
+    state: &str,
+    alive: usize,
+    total: usize,
+    avg_ms: Option<u64>,
+    error: Option<String>,
+) {
+    let _ = app.emit(
+        "auto://status",
+        AutoStatus {
+            schedule: kind.schedule().to_string(),
+            state: state.to_string(),
+            alive,
+            total,
+            avg_ms,
+            error,
+            at: epoch_secs(),
+        },
+    );
+}
+
 // ================= tray status =================
 
 #[derive(Debug, Default, Clone)]
 struct TrayInfo {
-    disp_next: Option<u64>,
-    auto_next: Option<u64>,
     webhook_on: bool,
     webhook_url: String,
     lang: String,
@@ -2066,6 +2218,17 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
     let running = disp.inner.running.load(Ordering::SeqCst);
     let port = *disp.inner.port.lock().await;
     let info = tray.info.lock().await.clone();
+    let auto: State<AutoState> = app.state();
+    let now = epoch_secs();
+    let remaining = |v: u64| {
+        if v == 0 {
+            None
+        } else {
+            Some(v.saturating_sub(now))
+        }
+    };
+    let disp_next = remaining(auto.inner.disp_next.load(Ordering::SeqCst));
+    let auto_next = remaining(auto.inner.auto_next.load(Ordering::SeqCst));
     let ru = info.lang == "ru";
     let dispatch_txt = if running {
         if ru {
@@ -2085,7 +2248,7 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
         } else {
             "Next dispatch:"
         },
-        fmt_countdown(info.disp_next, ru)
+        fmt_countdown(disp_next, ru)
     );
     let next_auto_txt = format!(
         "{} {}",
@@ -2094,7 +2257,7 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
         } else {
             "Next auto:"
         },
-        fmt_countdown(info.auto_next, ru)
+        fmt_countdown(auto_next, ru)
     );
     let sig = format!(
         "{dispatch_txt}|{next_disp_txt}|{next_auto_txt}|{}|{}|{}",
@@ -2170,8 +2333,6 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
 async fn update_tray_status(
     app: tauri::AppHandle,
     tray: State<'_, TrayState>,
-    disp_next: Option<u64>,
-    auto_next: Option<u64>,
     webhook_on: bool,
     webhook_url: String,
     lang: Option<String>,
@@ -2181,8 +2342,6 @@ async fn update_tray_status(
         _ => "en",
     };
     *tray.info.lock().await = TrayInfo {
-        disp_next,
-        auto_next,
         webhook_on,
         webhook_url,
         lang: lang.to_string(),
@@ -2642,11 +2801,7 @@ fn upstream_from_item(
     ))
 }
 
-#[tauri::command]
-async fn set_dispatch_pool(
-    items: Vec<DispatchItem>,
-    state: State<'_, DispatchState>,
-) -> Result<usize, String> {
+async fn store_pool(inner: &Arc<DispatchInner>, items: Vec<DispatchItem>) -> usize {
     let mut pool: Vec<Upstream> = Vec::new();
     let mut seen = HashSet::new();
     for it in items {
@@ -2664,19 +2819,28 @@ async fn set_dispatch_pool(
         }
     }
     pool.sort_by_key(|u| u.latency.unwrap_or(u64::MAX));
-    if state.inner.running.load(Ordering::SeqCst) {
-        let port = *state.inner.port.lock().await;
+    let running = inner.running.load(Ordering::SeqCst);
+    if running {
+        let port = *inner.port.lock().await;
         pool.retain(|u| !is_self_upstream(u, port));
     }
     let n = pool.len();
-    let stop_empty = n == 0 && state.inner.running.load(Ordering::SeqCst);
-    *state.inner.pool.lock().await = pool;
+    let stop_empty = n == 0 && running;
+    *inner.pool.lock().await = pool;
     if stop_empty {
         // A listener with zero upstreams only replies 502. Clearing the pool
         // is an explicit user action, so stop the dispatcher with it.
-        stop_proxy_inner(&state.inner).await;
+        stop_proxy_inner(inner).await;
     }
-    Ok(n)
+    n
+}
+
+#[tauri::command]
+async fn set_dispatch_pool(
+    items: Vec<DispatchItem>,
+    state: State<'_, DispatchState>,
+) -> Result<usize, String> {
+    Ok(store_pool(&state.inner, items).await)
 }
 
 async fn start_proxy_locked(
@@ -2922,6 +3086,63 @@ async fn send_webhook_one(
     Ok(format!("http {code} {short}"))
 }
 
+async fn send_webhooks_inner(
+    urls: &[String],
+    format: &str,
+    include_credentials: bool,
+    items: Arc<Vec<DispatchItem>>,
+) -> Vec<WebhookResult> {
+    let mut set = tokio::task::JoinSet::new();
+    for (index, url) in urls.iter().take(10).cloned().enumerate() {
+        let format = format.to_string();
+        let items = items.clone();
+        set.spawn(async move {
+            let res = send_webhook_one(&url, &format, include_credentials, &items).await;
+            match res {
+                Ok(message) => WebhookResult {
+                    index,
+                    ok: true,
+                    message,
+                },
+                Err(message) => WebhookResult {
+                    index,
+                    ok: false,
+                    message,
+                },
+            }
+        });
+    }
+    let mut out = Vec::new();
+    while let Some(r) = set.join_next().await {
+        match r {
+            Ok(v) => out.push(v),
+            Err(e) => out.push(WebhookResult {
+                index: usize::MAX,
+                ok: false,
+                message: short_error(&e.to_string()),
+            }),
+        }
+    }
+    out.sort_by_key(|r| r.index);
+    out
+}
+
+#[tauri::command]
+async fn send_webhooks(
+    urls: Vec<String>,
+    format: String,
+    include_credentials: Option<bool>,
+    items: Vec<DispatchItem>,
+) -> Result<Vec<WebhookResult>, String> {
+    Ok(send_webhooks_inner(
+        &urls,
+        &format,
+        include_credentials.unwrap_or(false),
+        Arc::new(items),
+    )
+    .await)
+}
+
 #[tauri::command]
 async fn send_webhook(
     url: String,
@@ -2930,6 +3151,293 @@ async fn send_webhook(
     items: Vec<DispatchItem>,
 ) -> Result<String, String> {
     send_webhook_one(&url, &format, include_credentials.unwrap_or(false), &items).await
+}
+
+async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) {
+    let auto: State<'_, AutoState> = app.state();
+    if auto.inner.running.swap(true, Ordering::SeqCst) {
+        emit_auto_status(app, kind, "skipped", 0, 0, None, None);
+        return;
+    }
+    let _run_guard = BusyGuard(auto.inner.running.clone());
+
+    let settings = auto.inner.settings.lock().await.clone();
+    let disp: State<'_, DispatchState> = app.state();
+    let (urls, checked) = {
+        let pool = disp.inner.pool.lock().await;
+        let urls: Vec<String> = pool.iter().map(|u| u.url.clone()).collect();
+        let checked: HashSet<String> = urls.iter().cloned().collect();
+        (urls, checked)
+    };
+    let input_total = urls.len();
+    if input_total == 0 {
+        emit_auto_status(app, kind, "empty", 0, 0, None, None);
+        return;
+    }
+
+    let check: State<'_, CheckState> = app.state();
+    if check.busy.swap(true, Ordering::SeqCst) {
+        emit_auto_status(app, kind, "skipped", 0, input_total, None, None);
+        return;
+    }
+    let _busy_guard = BusyGuard(check.busy.clone());
+    check.cancel.store(false, Ordering::SeqCst);
+    emit_auto_status(app, kind, "running", 0, input_total, None, None);
+
+    let timeout = Duration::from_millis(settings.timeout_ms.clamp(500, 60_000));
+    let flags = CheckFlags {
+        geo: settings.with_geo,
+        anon: settings.with_anonymity,
+        tamper: settings.with_tamper,
+        tls: settings.with_tls,
+        precheck: settings.precheck,
+        precheck_timeout: Duration::from_millis(settings.precheck_timeout_ms.clamp(300, 10_000)),
+        judge: settings.judge_mode,
+        ipapi_key: settings
+            .ipapi_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(Arc::from),
+    };
+    let result = run_checks(
+        urls,
+        settings.test_url.clone(),
+        timeout,
+        settings.concurrency.clamp(1, 500),
+        settings.repeats.clamp(1, 5),
+        &settings.default_proto,
+        flags,
+        Vec::new(),
+        check.cancel.clone(),
+        None,
+    )
+    .await;
+    let canceled = check.cancel.load(Ordering::Relaxed);
+
+    match result {
+        Err(e) => emit_auto_status(app, kind, "error", 0, input_total, None, Some(e)),
+        Ok(results) => {
+            if canceled {
+                let alive = results.iter().filter(|r| r.alive).count();
+                emit_auto_status(app, kind, "stopped", alive, results.len(), None, None);
+                return;
+            }
+            let total = results.len();
+            let mut avg_sum = 0u64;
+            let mut avg_n = 0u64;
+            let mut items = Vec::new();
+            // Merge against the pool as it is *after* the check. A proxy
+            // deleted or a pool cleared by the user while the check was
+            // running must stay deleted; entries added meanwhile stay too.
+            let current: HashMap<String, (String, Option<u64>, Option<String>)> = {
+                let pool = disp.inner.pool.lock().await;
+                pool.iter()
+                    .map(|u| (u.url.clone(), (u.raw.clone(), u.latency, u.country.clone())))
+                    .collect()
+            };
+            for r in &results {
+                if !r.alive {
+                    continue;
+                }
+                if let Some(ms) = r.latency_ms {
+                    avg_sum += ms;
+                    avg_n += 1;
+                }
+                let Some((raw, _, old_country)) = current.get(&r.url) else {
+                    continue;
+                };
+                if settings.max_ping_ms > 0
+                    && r.latency_ms.is_some_and(|ms| ms > settings.max_ping_ms)
+                {
+                    continue;
+                }
+                let country = r
+                    .country_code
+                    .clone()
+                    .or_else(|| r.country.clone())
+                    .or_else(|| old_country.clone());
+                items.push(DispatchItem {
+                    raw: raw.clone(),
+                    url: Some(r.url.clone()),
+                    latency: r.latency_ms,
+                    country,
+                });
+            }
+            for (url, (raw, latency, country)) in current {
+                if checked.contains(&url) {
+                    continue;
+                }
+                items.push(DispatchItem {
+                    raw,
+                    url: Some(url),
+                    latency,
+                    country,
+                });
+            }
+            let kept = store_pool(&disp.inner, items).await;
+            let pool = pool_items(&disp.inner).await;
+            let _ = app.emit(
+                "auto://pool",
+                AutoPoolPayload {
+                    items: pool.clone(),
+                },
+            );
+            // The check and pool update are done; only webhook delivery
+            // remains, and it must not keep a manual check blocked.
+            drop(_busy_guard);
+            let avg = avg_sum.checked_div(avg_n);
+            emit_auto_status(app, kind, "done", kept, total, avg, None);
+
+            if matches!(kind, AutoKind::Auto) && !settings.webhook_urls.is_empty() {
+                let webhook_items: Vec<DispatchItem> = pool
+                    .iter()
+                    .map(|p| DispatchItem {
+                        raw: p.raw.clone(),
+                        url: Some(p.url.clone()),
+                        latency: p.latency,
+                        country: p.country.clone(),
+                    })
+                    .collect();
+                let results = send_webhooks_inner(
+                    &settings.webhook_urls,
+                    &settings.webhook_format,
+                    settings.webhook_include_credentials,
+                    Arc::new(webhook_items),
+                )
+                .await;
+                let _ = app.emit("auto://webhook", AutoWebhookPayload { results });
+            }
+        }
+    }
+}
+
+async fn auto_scheduler_loop(app: tauri::AppHandle) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let auto: State<'_, AutoState> = app.state();
+        if auto.inner.running.load(Ordering::SeqCst) {
+            continue;
+        }
+        let now = epoch_secs();
+        let settings = auto.inner.settings.lock().await.clone();
+        let disp_next = auto.inner.disp_next.load(Ordering::SeqCst);
+        let auto_next = auto.inner.auto_next.load(Ordering::SeqCst);
+        let kind = if settings.disp_enabled && disp_next != 0 && now >= disp_next {
+            Some(AutoKind::Dispatch)
+        } else if settings.auto_enabled && auto_next != 0 && now >= auto_next {
+            Some(AutoKind::Auto)
+        } else {
+            None
+        };
+        let Some(kind) = kind else {
+            continue;
+        };
+        run_auto_cycle(&app, kind).await;
+        let now = epoch_secs();
+        let settings = auto.inner.settings.lock().await.clone();
+        match kind {
+            AutoKind::Dispatch => auto.inner.disp_next.store(
+                if settings.disp_enabled {
+                    now + settings.disp_interval_min.clamp(1, 1440) * 60
+                } else {
+                    0
+                },
+                Ordering::SeqCst,
+            ),
+            AutoKind::Auto => auto.inner.auto_next.store(
+                if settings.auto_enabled {
+                    now + settings.auto_interval_min.clamp(1, 1440) * 60
+                } else {
+                    0
+                },
+                Ordering::SeqCst,
+            ),
+        }
+    }
+}
+
+#[tauri::command]
+async fn set_auto_config(
+    settings: AutoSettings,
+    state: State<'_, AutoState>,
+) -> Result<(), String> {
+    let mut s = settings;
+    s.disp_interval_min = s.disp_interval_min.clamp(1, 1440);
+    s.auto_interval_min = s.auto_interval_min.clamp(1, 1440);
+    s.timeout_ms = s.timeout_ms.clamp(500, 60_000);
+    s.concurrency = s.concurrency.clamp(1, 500);
+    s.repeats = s.repeats.clamp(1, 5);
+    s.precheck_timeout_ms = s.precheck_timeout_ms.clamp(300, 10_000);
+    s.test_url = s.test_url.trim().to_string();
+    if s.test_url.is_empty() {
+        s.test_url = AutoSettings::default().test_url;
+    }
+    s.webhook_format = match s.webhook_format.as_str() {
+        "json" => "json".to_string(),
+        "csv" => "csv".to_string(),
+        _ => "txt".to_string(),
+    };
+    s.webhook_urls = s
+        .webhook_urls
+        .into_iter()
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+        .take(10)
+        .collect();
+    s.ipapi_key = s
+        .ipapi_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty());
+
+    let old = {
+        let mut cur = state.inner.settings.lock().await;
+        let old = cur.clone();
+        *cur = s.clone();
+        old
+    };
+    let now = epoch_secs();
+    if s.disp_enabled {
+        if !old.disp_enabled
+            || old.disp_interval_min != s.disp_interval_min
+            || state.inner.disp_next.load(Ordering::SeqCst) == 0
+        {
+            state
+                .inner
+                .disp_next
+                .store(now + s.disp_interval_min * 60, Ordering::SeqCst);
+        }
+    } else {
+        state.inner.disp_next.store(0, Ordering::SeqCst);
+    }
+    if s.auto_enabled {
+        if !old.auto_enabled
+            || old.auto_interval_min != s.auto_interval_min
+            || state.inner.auto_next.load(Ordering::SeqCst) == 0
+        {
+            state
+                .inner
+                .auto_next
+                .store(now + s.auto_interval_min * 60, Ordering::SeqCst);
+        }
+    } else {
+        state.inner.auto_next.store(0, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn run_auto_now(app: tauri::AppHandle, schedule: String) -> Result<(), String> {
+    let kind = if schedule == "disp" {
+        AutoKind::Dispatch
+    } else {
+        AutoKind::Auto
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        run_auto_cycle(&app, kind).await;
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -3021,6 +3529,7 @@ pub fn run() {
         .manage(DispatchState::default())
         .manage(CheckState::default())
         .manage(TrayState::default())
+        .manage(AutoState::default())
         .invoke_handler(tauri::generate_handler![
             check_proxies,
             check_busy,
@@ -3034,6 +3543,9 @@ pub fn run() {
             stop_local_proxy,
             local_proxy_status,
             send_webhook,
+            send_webhooks,
+            set_auto_config,
+            run_auto_now,
             hide_to_tray,
             app_version,
             check_app_update,
@@ -3129,6 +3641,19 @@ pub fn run() {
                     })
                     .build(app)?;
             }
+            // Scheduling and webhooks run in Rust, so hiding the window or
+            // a throttled WebView does not stop scheduled checks.
+            let auto_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                auto_scheduler_loop(auto_handle).await;
+            });
+            let tray_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    refresh_tray_menu(&tray_handle).await;
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -3713,6 +4238,32 @@ mod tests {
         let (_, explicit) = upstream_from_item("socks5://1.2.3.4:1080", None, None, None).unwrap();
         assert_eq!(explicit.scheme, "socks5");
         assert_eq!(explicit.url, "socks5://1.2.3.4:1080");
+    }
+
+    #[tokio::test]
+    async fn store_pool_keeps_normalized_url_and_country() {
+        let st = DispatchState::default();
+        let items = vec![
+            DispatchItem {
+                raw: "u:p@1.2.3.4:8080".into(),
+                url: Some("socks5://u:p@1.2.3.4:8080".into()),
+                latency: Some(42),
+                country: Some("DE".into()),
+            },
+            DispatchItem {
+                raw: "1.2.3.4:8080".into(),
+                url: Some("socks5://u:p@1.2.3.4:8080".into()),
+                latency: Some(10),
+                country: Some("NL".into()),
+            },
+        ];
+        assert_eq!(store_pool(&st.inner, items).await, 1);
+        let pool = pool_items(&st.inner).await;
+        assert_eq!(pool.len(), 1);
+        assert_eq!(pool[0].url, "socks5://u:p@1.2.3.4:8080");
+        assert_eq!(pool[0].raw, "u:p@1.2.3.4:8080");
+        assert_eq!(pool[0].latency, Some(42));
+        assert_eq!(pool[0].country.as_deref(), Some("DE"));
     }
 
     #[test]

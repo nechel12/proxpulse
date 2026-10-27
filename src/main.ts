@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { buildCsv, buildJson, buildTxt, withExtension } from "./export.ts";
 import {
   anonShort,
@@ -55,11 +56,9 @@ let running = false;
 let includeDead = false;
 type PoolItem = { raw: string; url: string; latency: number | null; country: string | null };
 let dispatchPool: PoolItem[] = [];
-let poolGen = 0;
 let pollTimer: number | undefined;
-let autoBusy = false;
-let dispAutoTimer: number | undefined;
-let autoTimer: number | undefined;
+let autoRunning = false;
+let autoCfgTimer: number | undefined;
 const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
 let judgeFull = true;
 let dispAutoOn = false;
@@ -119,6 +118,7 @@ function saveIpapiSettings(): void {
     localStorage.setItem("pp-ipapi-key", key);
   } catch { /* ignore quota/unavailable */ }
   updateIpapiUI();
+  scheduleAutoConfig();
 }
 
 function updateJudgeUI(): void {
@@ -134,6 +134,7 @@ function setJudgeFull(full: boolean): void {
   judgeFull = full;
   ($("judge-fast") as HTMLButtonElement).classList.toggle("active", !full);
   ($("judge-full") as HTMLButtonElement).classList.toggle("active", full);
+  scheduleAutoConfig();
 }
 
 // ---------- settings profiles ----------
@@ -172,6 +173,22 @@ function applyProfile(d: ProfileData): void {
   setVal("precheck-timeout", d.precheckTimeout);
   setJudgeFull(d.judgeFull);
   updateJudgeUI();
+  scheduleAutoConfig();
+}
+
+function saveCurrentSettings(): void {
+  try {
+    localStorage.setItem("pp-settings", JSON.stringify(snapshotProfile()));
+  } catch { /* ignore */ }
+}
+
+function loadCurrentSettings(): void {
+  try {
+    const raw = localStorage.getItem("pp-settings");
+    if (!raw) return;
+    const data = sanitizeProfile(JSON.parse(raw));
+    if (data) applyProfile(data);
+  } catch { /* ignore */ }
 }
 
 function loadProfiles(): void {
@@ -691,6 +708,7 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
     for (const r of part) pushLive(r);
   } catch (e) {
     const msg = String(e);
+    if (msg.includes("another check is running")) throw e;
     for (const p of list) pushLive(deadStub(p, msg));
   } finally {
     finished = true;
@@ -728,21 +746,24 @@ function loadPingHist(): void {
   } catch { /* ignore */ }
 }
 
-function pushPingPoint(list: ProxyResult[] = results): void {
-  const alive = list.filter((r) => r.alive);
-  const lat = alive
-    .map((r) => r.latency_ms)
-    .filter((x): x is number => x != null);
-  pingHist.push({
-    t: Date.now(),
-    avg: lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null,
-    alive: alive.length,
-  });
+function pushPingPointStats(avg: number | null, alive: number): void {
+  pingHist.push({ t: Date.now(), avg, alive });
   if (pingHist.length > PING_HIST_MAX) pingHist.splice(0, pingHist.length - PING_HIST_MAX);
   try {
     localStorage.setItem("pp-pinghist", JSON.stringify(pingHist));
   } catch { /* ignore */ }
   renderPingGraph();
+}
+
+function pushPingPoint(list: ProxyResult[] = results): void {
+  const alive = list.filter((r) => r.alive);
+  const lat = alive
+    .map((r) => r.latency_ms)
+    .filter((x): x is number => x != null);
+  pushPingPointStats(
+    lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null,
+    alive.length,
+  );
 }
 
 function renderPingGraph(): void {
@@ -788,97 +809,217 @@ async function syncPool(notify: boolean): Promise<number> {
   }
 }
 
-/** full re-check of the shared pool; dead are pruned. if sendHook, POST pool to webhook after. */
-async function autoCycle(statusEl: string, sendHook: boolean): Promise<void> {
-  const el = document.getElementById(statusEl) as HTMLElement | null;
-  if (running || autoBusy) {
-    if (el) el.textContent = t("auto_skip");
-    return;
-  }
-  if (dispatchPool.length === 0) {
-    if (el) el.textContent = t("pool_empty");
-    return;
-  }
-  autoBusy = true;
-  stopFlag = false;
-  const gen = poolGen;
-  ($("btn-stop") as HTMLButtonElement).disabled = false;
-  try {
-    if (el) el.textContent = t("auto_running", { n: dispatchPool.length });
-    const res = await runCheckList(dispatchPool.map((p) => p.url));
-    if (stopFlag) {
-      if (el) el.textContent = t("st_stopped", { alive: res.filter((r) => r.alive).length, total: res.length });
-      return;
-    }
-    if (gen !== poolGen) {
-      if (el) el.textContent = t("pool_empty");
-      return;
-    }
-    const alive = res.filter((r) => r.alive && passPing(r.latency_ms));
-    learnGeo(res);
-    dispatchPool = alive.map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) }));
-    renderPool();
-    updateCounts();
-    const synced = await syncPool(false);
-    if (synced < 0) {
-      if (el) el.textContent = t("pool_sync_err");
-      return;
-    }
-    pushPingPoint(res);
-    if (el) el.textContent = `${t("auto_pruned", { alive: alive.length, total: res.length })} ${new Date().toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US")}`;
-    if (sendHook) await sendWebhook(false);
-  } catch (e) {
-    const msg = String(e);
-    if (el) el.textContent = msg.includes("badurl") ? t("st_badurl") : t("auto_err", { e: msg });
-  } finally {
-    autoBusy = false;
-    ($("btn-stop") as HTMLButtonElement).disabled = true;
-  }
-}
-
-let dispSched = { ms: 0, next: 0 };
-let autoSched = { ms: 0, next: 0 };
-
 function armTimers() {
-  window.clearInterval(dispAutoTimer);
-  window.clearInterval(autoTimer);
-  dispSched = { ms: 0, next: 0 };
-  autoSched = { ms: 0, next: 0 };
-  if (dispAutoOn) {
-    const mins = Math.max(1, Math.min(1440, Number(($("disp-auto-min") as HTMLInputElement).value) || 30));
-    const ms = mins * 60_000;
-    dispSched = { ms, next: Date.now() + ms };
-    dispAutoTimer = window.setInterval(() => {
-      dispSched.next = Date.now() + dispSched.ms;
-      void autoCycle("disp-auto-status", false);
-    }, ms);
-  }
-  if (autoOn) {
-    const mins = Math.max(1, Math.min(1440, Number(($("auto-min") as HTMLInputElement).value) || 30));
-    const ms = mins * 60_000;
-    autoSched = { ms, next: Date.now() + ms };
-    autoTimer = window.setInterval(() => {
-      autoSched.next = Date.now() + autoSched.ms;
-      void autoCycle("auto-status", true);
-    }, ms);
-  }
+  // Timing lives in Rust: persist the UI state and hand it to the scheduler.
+  saveAutoSettings();
+  scheduleAutoConfig();
   void updateTray();
 }
 
 async function updateTray(): Promise<void> {
   try {
-    const now = Date.now();
-    const d = dispAutoOn && dispSched.next > now ? Math.round((dispSched.next - now) / 1000) : null;
-    const a = autoOn && autoSched.next > now ? Math.round((autoSched.next - now) / 1000) : null;
     const urls = getWebhookUrls();
     await invoke("update_tray_status", {
-      dispNext: d,
-      autoNext: a,
       webhookOn: autoOn && urls.length > 0,
       webhookUrl: urls[0] ?? "",
       lang,
     });
   } catch { /* tray may be unavailable */ }
+}
+
+// ---------- scheduled checks (Rust scheduler events) ----------
+
+type WebhookResult = { index: number; ok: boolean; message: string };
+type AutoStatusEvent = {
+  schedule: "disp" | "auto";
+  state: "running" | "done" | "stopped" | "skipped" | "empty" | "error";
+  alive: number;
+  total: number;
+  avgMs: number | null;
+  error: string | null;
+  at: number;
+};
+type AutoPoolEvent = { items: PoolItem[] };
+type AutoWebhookEvent = { results: WebhookResult[] };
+
+function formatWebhookResults(results: WebhookResult[]): string {
+  return results
+    .map((r) => {
+      const n = r.index < 100 ? r.index + 1 : "?";
+      return `#${n} ${r.ok
+        ? t("webhook_sent", { r: r.message })
+        : t("webhook_fail", { e: r.message })}`;
+    })
+    .join(" | ");
+}
+
+function onAutoStatus(ev: AutoStatusEvent): void {
+  const el = document.getElementById(
+    ev.schedule === "disp" ? "disp-auto-status" : "auto-status",
+  );
+  const time = new Date(ev.at * 1000).toLocaleTimeString(
+    lang === "ru" ? "ru-RU" : "en-US",
+  );
+  if (ev.state === "running") {
+    if (el) el.textContent = t("auto_running", { n: ev.total });
+    autoRunning = true;
+    ($("btn-start") as HTMLButtonElement).disabled = true;
+    ($("btn-stop") as HTMLButtonElement).disabled = false;
+    ($("btn-auto-now") as HTMLButtonElement).disabled = true;
+    return;
+  }
+  if (ev.state === "skipped") {
+    if (el) el.textContent = t("auto_skip");
+    return;
+  }
+  autoRunning = false;
+  if (el) {
+    switch (ev.state) {
+      case "done":
+        el.textContent = `${t("auto_pruned", {
+          alive: ev.alive,
+          total: ev.total,
+        })} ${time}`;
+        break;
+      case "stopped":
+        el.textContent = t("st_stopped", {
+          alive: ev.alive,
+          total: ev.total,
+        });
+        break;
+      case "empty":
+        el.textContent = t("pool_empty");
+        break;
+      case "error":
+        el.textContent = t("auto_err", { e: ev.error ?? "" });
+        break;
+    }
+  }
+  if (ev.state === "done") {
+    pushPingPointStats(ev.avgMs ?? null, ev.alive);
+  }
+  if (!running) {
+    ($("btn-start") as HTMLButtonElement).disabled = false;
+    ($("btn-stop") as HTMLButtonElement).disabled = true;
+  }
+  ($("btn-auto-now") as HTMLButtonElement).disabled = false;
+}
+
+function onAutoPool(ev: AutoPoolEvent): void {
+  dispatchPool = ev.items.map((p) => ({
+    raw: p.raw,
+    url: p.url,
+    latency: p.latency,
+    country: p.country ?? null,
+  }));
+  renderPool();
+  updateCounts();
+}
+
+function onAutoWebhook(ev: AutoWebhookEvent): void {
+  const el = document.getElementById("webhook-status");
+  if (el) el.textContent = formatWebhookResults(ev.results);
+}
+
+function buildAutoSettings() {
+  const s = readCheckSettings();
+  const minutes = (id: string, fallback: number) =>
+    Math.max(
+      1,
+      Math.min(
+        1440,
+        Math.floor(Number(($(id) as HTMLInputElement).value) || fallback),
+      ),
+    );
+  return {
+    dispEnabled: dispAutoOn,
+    dispIntervalMin: minutes("disp-auto-min", 30),
+    autoEnabled: autoOn,
+    autoIntervalMin: minutes("auto-min", 30),
+    maxPingMs,
+    webhookUrls: getWebhookUrls(),
+    webhookFormat: ($("webhook-format") as HTMLSelectElement).value,
+    webhookIncludeCredentials: webhookIncludeCreds,
+    testUrl: s.testUrl,
+    timeoutMs: s.timeoutMs,
+    concurrency: s.concurrency,
+    repeats: s.repeats,
+    defaultProto: s.defaultProto,
+    withGeo: s.withGeo,
+    withAnonymity: s.withAnonymity,
+    withTamper: s.withTamper,
+    withTls: s.withTls,
+    precheck: s.precheck,
+    precheckTimeoutMs: s.precheckTimeoutMs,
+    judgeMode: s.judgeMode,
+    ipapiKey: s.ipapiKey,
+  };
+}
+
+function scheduleAutoConfig(): void {
+  if (!document.getElementById("timeout")) return;
+  window.clearTimeout(autoCfgTimer);
+  autoCfgTimer = window.setTimeout(() => {
+    try {
+      saveCurrentSettings();
+      void invoke("set_auto_config", { settings: buildAutoSettings() }).catch(
+        (e) => logErr("auto-config: " + String(e).slice(0, 200)),
+      );
+    } catch (e) {
+      logErr("auto-config: " + String(e).slice(0, 200));
+    }
+  }, 200);
+}
+
+function saveAutoSettings(): void {
+  try {
+    localStorage.setItem("pp-auto-on", autoOn ? "1" : "0");
+    localStorage.setItem("pp-disp-auto-on", dispAutoOn ? "1" : "0");
+    localStorage.setItem(
+      "pp-auto-min",
+      String(Math.max(1, Math.min(1440, Number(($("auto-min") as HTMLInputElement).value) || 30))),
+    );
+    localStorage.setItem(
+      "pp-disp-auto-min",
+      String(Math.max(1, Math.min(1440, Number(($("disp-auto-min") as HTMLInputElement).value) || 30))),
+    );
+    localStorage.setItem(
+      "pp-webhook-format",
+      ($("webhook-format") as HTMLSelectElement).value,
+    );
+  } catch { /* ignore */ }
+}
+
+function loadAutoSettings(): void {
+  try {
+    autoOn = localStorage.getItem("pp-auto-on") === "1";
+    dispAutoOn = localStorage.getItem("pp-disp-auto-on") === "1";
+    const autoMin = Number(localStorage.getItem("pp-auto-min"));
+    if (autoMin) {
+      ($("auto-min") as HTMLInputElement).value = String(
+        Math.max(1, Math.min(1440, Math.floor(autoMin))),
+      );
+    }
+    const dispMin = Number(localStorage.getItem("pp-disp-auto-min"));
+    if (dispMin) {
+      ($("disp-auto-min") as HTMLInputElement).value = String(
+        Math.max(1, Math.min(1440, Math.floor(dispMin))),
+      );
+    }
+    const fmt = localStorage.getItem("pp-webhook-format");
+    if (fmt === "txt" || fmt === "json" || fmt === "csv") {
+      ($("webhook-format") as HTMLSelectElement).value = fmt;
+    }
+  } catch {
+    autoOn = false;
+    dispAutoOn = false;
+  }
+  const setPressed = (id: string, on: boolean) => {
+    const el = document.getElementById(id) as HTMLButtonElement | null;
+    if (el) el.setAttribute("aria-pressed", String(on));
+  };
+  setPressed("auto-on", autoOn);
+  setPressed("disp-auto-on", dispAutoOn);
 }
 
 let webhookUrls: string[] = [""];
@@ -915,6 +1056,7 @@ function saveWebhooks(): void {
   try {
     localStorage.setItem("pp-webhooks", JSON.stringify(webhookUrls.slice(0, 10)));
   } catch { /* ignore */ }
+  scheduleAutoConfig();
 }
 
 function renderWebhookList(): void {
@@ -938,6 +1080,7 @@ function renderWebhookList(): void {
       webhookUrls.splice(i, 1);
       if (webhookUrls.length === 0) webhookUrls.push("");
       saveWebhooks();
+      scheduleAutoConfig();
       renderWebhookList();
     });
     row.appendChild(inp);
@@ -962,27 +1105,38 @@ async function sendWebhook(manual: boolean): Promise<void> {
     return;
   }
   const format = ($("webhook-format") as HTMLSelectElement).value;
-  const items = dispatchPool.map((p) => ({ raw: p.raw, url: p.url, latency: p.latency }));
+  const items = dispatchPool.map((p) => ({
+    raw: p.raw,
+    url: p.url,
+    latency: p.latency,
+    country: p.country,
+  }));
   statusEl.textContent = "...";
-  const lines: string[] = [];
-  for (let i = 0; i < urls.length; i++) {
-    try {
-      const r = await invoke<string>("send_webhook", {
-        url: urls[i],
-        format,
-        items,
-        includeCredentials: webhookIncludeCreds,
-      });
-      lines.push(`#${i + 1} ${t("webhook_sent", { r })}`);
-    } catch (e) {
-      lines.push(`#${i + 1} ${t("webhook_fail", { e: String(e).slice(0, 120) })}`);
-    }
+  try {
+    const results = await invoke<WebhookResult[]>("send_webhooks", {
+      urls,
+      format,
+      items,
+      includeCredentials: webhookIncludeCreds,
+    });
+    statusEl.textContent = formatWebhookResults(results);
+  } catch (e) {
+    statusEl.textContent = t("webhook_fail", { e: String(e).slice(0, 120) });
   }
-  statusEl.textContent = lines.join(" | ");
 }
 
 async function start() {
-  if (running || autoBusy) return;
+  if (running) return;
+  if (autoRunning) {
+    setStatusT("auto_skip");
+    return;
+  }
+  try {
+    if (await invoke<boolean>("check_busy")) {
+      setStatusT("auto_skip");
+      return;
+    }
+  } catch { /* older backend */ }
   const source = ($("proxy-input") as HTMLTextAreaElement).value;
   if (source.length > MAX_INPUT_CHARS) {
     setStatusT("st_input_too_big", { mb: MAX_FILE_MB });
@@ -1015,6 +1169,7 @@ async function start() {
   setProgress(0, list.length);
   const t0 = performance.now();
 
+  let busy = false;
   try {
     results = await runCheckList(list, (done, total) => {
       lastStatus = { key: "st_checking", params: { done, total } };
@@ -1027,12 +1182,18 @@ async function start() {
     }, (live) => {
       results = live;
     });
-  } catch {
-    /* keep partial results delivered through the channel */
+  } catch (e) {
+    if (String(e).includes("another check is running")) busy = true;
+    /* otherwise keep partial results delivered through the channel */
   } finally {
     running = false;
     ($("btn-start") as HTMLButtonElement).disabled = false;
-    ($("btn-stop") as HTMLButtonElement).disabled = true;
+    ($("btn-stop") as HTMLButtonElement).disabled = !autoRunning;
+  }
+  if (busy) {
+    setStatusT("auto_skip");
+    setNet("idle", t("net_idle"));
+    return;
   }
   learnGeo(results);
   render();
@@ -1268,8 +1429,10 @@ window.addEventListener("DOMContentLoaded", () => {
   $("btn-start").addEventListener("click", () => void start());
   $("btn-stop").addEventListener("click", () => {
     stopFlag = true;
-    lastStatus = { key: "st_stopping" };
-    $("status-line").textContent = t("st_stopping");
+    if (running) {
+      lastStatus = { key: "st_stopping" };
+      $("status-line").textContent = t("st_stopping");
+    }
     void invoke("cancel_check").catch(() => { /* backend may already be idle */ });
   });
   $("search").addEventListener("input", () => { renderLimit = RENDER_STEP; render(); });
@@ -1321,7 +1484,6 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   function doPoolClear(): void {
-    poolGen++;
     dispatchPool = [];
     // The backend stops a running dispatcher when the pool becomes empty;
     // refresh the status once the sync completes.
@@ -1650,15 +1812,19 @@ window.addEventListener("DOMContentLoaded", () => {
         localStorage.setItem("pp-maxping", String(maxPingMs));
       } catch { /* ignore */ }
       syncMaxPingInputs();
+      scheduleAutoConfig();
     });
   }
   loadWebhooks();
   loadWebhookCreds();
   loadIpapiSettings();
+  loadAutoSettings();
+  loadCurrentSettings();
   ($("chk-webhook-creds") as HTMLInputElement).checked = webhookIncludeCreds;
   ($("chk-webhook-creds") as HTMLInputElement).addEventListener("change", (e) => {
     webhookIncludeCreds = (e.target as HTMLInputElement).checked;
     saveWebhookCreds();
+    scheduleAutoConfig();
   });
   renderWebhookList();
   ($("btn-webhook-add") as HTMLButtonElement).addEventListener("click", () => {
@@ -1666,12 +1832,41 @@ window.addEventListener("DOMContentLoaded", () => {
     webhookUrls.push("");
     saveWebhooks();
     renderWebhookList();
+    scheduleAutoConfig();
     const inputs = document.querySelectorAll<HTMLInputElement>("#webhook-list input");
     inputs[inputs.length - 1]?.focus();
   });
-  ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => void autoCycle("auto-status", true));
+  ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => {
+    void invoke("run_auto_now", { schedule: "auto" }).catch((e) => {
+      const el = document.getElementById("auto-status");
+      if (el) el.textContent = t("auto_err", { e: String(e).slice(0, 120) });
+    });
+  });
   ($("btn-webhook-send") as HTMLButtonElement).addEventListener("click", () => void sendWebhook(true));
   window.setInterval(() => void updateTray(), 5000);
+
+  // Settings can be changed anywhere in the three panels; push a debounced
+  // snapshot to the Rust scheduler.
+  document.querySelectorAll(".settings").forEach((el) => {
+    el.addEventListener("input", scheduleAutoConfig);
+    el.addEventListener("change", scheduleAutoConfig);
+  });
+  ($("webhook-format") as HTMLSelectElement).addEventListener("change", () => {
+    saveAutoSettings();
+    scheduleAutoConfig();
+  });
+  void listen<AutoStatusEvent>("auto://status", (e) => onAutoStatus(e.payload)).catch(() => {});
+  void listen<AutoPoolEvent>("auto://pool", (e) => onAutoPool(e.payload)).catch(() => {});
+  void listen<AutoWebhookEvent>("auto://webhook", (e) => onAutoWebhook(e.payload)).catch(() => {});
+  void invoke<boolean>("check_busy")
+    .then((busy) => {
+      if (!busy) return;
+      autoRunning = true;
+      ($("btn-start") as HTMLButtonElement).disabled = true;
+      ($("btn-stop") as HTMLButtonElement).disabled = false;
+      ($("btn-auto-now") as HTMLButtonElement).disabled = true;
+    })
+    .catch(() => {});
 
   // The renderer can be reloaded independently of the Rust process; restore
   // the authoritative pool and dispatcher state instead of showing empty.

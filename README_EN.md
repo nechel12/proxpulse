@@ -221,6 +221,11 @@ proxies are removed. After each auto-check, the pool is sent as POST requests
 to the configured webhooks (up to 10, TXT/JSON/CSV format). “Check now” and
 “Send now” run these actions manually.
 
+The scheduler and webhook delivery run in the Rust backend, so checks keep
+running while the window is hidden in the tray. The on/off state and intervals
+are persisted; after a restart the schedule is restored from the current
+settings.
+
 By default proxy credentials are stripped from URLs before posting. The
 **“Send credentials”** option includes them, but requires HTTPS; an
 `http://` webhook with credentials is rejected.
@@ -251,8 +256,10 @@ explicitly enabled** — in webhooks. By default webhooks receive URLs without
 credentials.
 
 Stored locally in the browser: language, ping limit, webhook URLs (may contain
-tokens), geo cache (up to 2000 entries, 6-hour TTL, credential-free keys), recent errors,
-ping history and settings profiles. Clearing `localStorage` removes this data.
+tokens), the ip-api Pro key (if set), geo cache (up to 2000 entries, 6-hour TTL,
+credential-free keys), recent errors, ping history, current check settings,
+auto-check state and settings profiles. Clearing `localStorage` removes this
+data.
 
 ## Security
 
