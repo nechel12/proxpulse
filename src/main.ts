@@ -19,12 +19,10 @@ import {
 import { GeoCacheStore } from "./geo-store.ts";
 import { WebhookPanel } from "./webhooks.ts";
 import { type Lang, translate } from "./i18n.ts";
-import { resolveTestUrl } from "./ipapi.ts";
-import { resolveJudgeUrl } from "./judge.ts";
 import { extractProxiesFromText } from "./parse.ts";
 import { parseFallback, parseTextAsync, type ParseResult } from "./parse-runner.ts";
-import { sanitizeProfile, type ProfileData } from "./profiles.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
+import { SettingsPanel } from "./settings-panel.ts";
 import { initUpdater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
 import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
@@ -60,141 +58,8 @@ let starting = false;
 let includeDead = false;
 const pool = new PoolView();
 const dispatchMonitor = new DispatchMonitor();
-const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
-let judgeFull = true;
-
-// ---------- ui helpers ----------
-
-function isJudgeMode(): boolean {
-  return ($("test-url") as HTMLSelectElement).value === "judge";
-}
-
-function judgeBase(): string {
-  const custom = ($("test-url-custom") as HTMLInputElement).value;
-  return resolveJudgeUrl(custom, judgeFull, JUDGE_DEFAULT);
-}
-
-function effectiveTestUrl(): string {
-  if (isJudgeMode()) return judgeBase();
-  const sel = ($("test-url") as HTMLSelectElement).value.trim();
-  const custom = ($("test-url-custom") as HTMLInputElement).value.trim();
-  const pro = ($("chk-ipapi-pro") as HTMLInputElement).checked;
-  const key = ($("ipapi-key") as HTMLInputElement).value;
-  return resolveTestUrl(sel, custom, pro, key);
-}
-
-function activeIpapiKey(): string | null {
-  const pro = ($("chk-ipapi-pro") as HTMLInputElement).checked;
-  const key = ($("ipapi-key") as HTMLInputElement).value.trim();
-  return pro && key ? key : null;
-}
-
-function updateIpapiUI(): void {
-  const el = document.getElementById("ipapi-hint");
-  if (!el) return;
-  const pro = ($("chk-ipapi-pro") as HTMLInputElement).checked;
-  const key = ($("ipapi-key") as HTMLInputElement).value.trim();
-  el.textContent = t(pro && !key ? "ipapi_key_missing" : "ipapi_hint");
-}
-
-function loadIpapiSettings(): void {
-  try {
-    const pro = localStorage.getItem("pp-ipapi-pro") === "1";
-    const key = localStorage.getItem("pp-ipapi-key") ?? "";
-    ($("chk-ipapi-pro") as HTMLInputElement).checked = pro;
-    ($("ipapi-key") as HTMLInputElement).value = key;
-  } catch { /* localStorage may be unavailable */ }
-  updateIpapiUI();
-}
-
-function saveIpapiSettings(): void {
-  try {
-    const pro = ($("chk-ipapi-pro") as HTMLInputElement).checked;
-    const key = ($("ipapi-key") as HTMLInputElement).value;
-    localStorage.setItem("pp-ipapi-pro", pro ? "1" : "0");
-    localStorage.setItem("pp-ipapi-key", key);
-  } catch { /* ignore quota/unavailable */ }
-  updateIpapiUI();
-  scheduleAutoConfig();
-}
-
-function updateJudgeUI(): void {
-  const j = isJudgeMode();
-  for (const id of ["deep-checks", "deep-hint", "precheck-row", "precheck-hint"]) {
-    document.getElementById(id)?.classList.toggle("hidden", j);
-  }
-  document.getElementById("judge-mode-row")?.classList.toggle("hidden", !j);
-  let insecure = false;
-  if (j) {
-    try {
-      const u = new URL(judgeBase());
-      const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(u.hostname);
-      insecure = u.protocol === "http:" && !local;
-    } catch { /* invalid URL is reported by the backend */ }
-  }
-  document.getElementById("judge-http-hint")?.classList.toggle("hidden", !insecure);
-  ($("test-url-custom") as HTMLInputElement).placeholder = t(j ? "custom_judge_ph" : "custom_ph");
-}
-
-function setJudgeFull(full: boolean): void {
-  judgeFull = full;
-  ($("judge-fast") as HTMLButtonElement).classList.toggle("active", !full);
-  ($("judge-full") as HTMLButtonElement).classList.toggle("active", full);
-  scheduleAutoConfig();
-}
-
-// ---------- settings profiles ----------
-
 const profiles = new ProfilePanel();
-
-function snapshotProfile(): ProfileData {
-  const val = (id: string) => ($(id) as HTMLInputElement).value;
-  const chk = (id: string) => ($(id) as HTMLInputElement).checked;
-  return {
-    testUrlSel: ($("test-url") as HTMLSelectElement).value,
-    customUrl: val("test-url-custom"),
-    timeout: val("timeout"), concurrency: val("concurrency"), repeats: val("repeats"),
-    defaultProto: ($("default-proto") as HTMLSelectElement).value,
-    geo: chk("chk-geo"), anon: chk("chk-anon"), tamper: chk("chk-tamper"), tls: chk("chk-tls"),
-    precheck: chk("chk-precheck"), precheckTimeout: val("precheck-timeout"),
-    judgeFull,
-  };
-}
-
-function applyProfile(d: ProfileData): void {
-  const setVal = (id: string, v: string) => { ($(id) as HTMLInputElement).value = v; };
-  const setChk = (id: string, v: boolean) => { ($(id) as HTMLInputElement).checked = v; };
-  ($("test-url") as HTMLSelectElement).value = d.testUrlSel;
-  setVal("test-url-custom", d.customUrl);
-  setVal("timeout", d.timeout);
-  setVal("concurrency", d.concurrency);
-  setVal("repeats", d.repeats);
-  ($("default-proto") as HTMLSelectElement).value = d.defaultProto;
-  setChk("chk-geo", d.geo);
-  setChk("chk-anon", d.anon);
-  setChk("chk-tamper", d.tamper);
-  setChk("chk-tls", d.tls);
-  setChk("chk-precheck", d.precheck);
-  setVal("precheck-timeout", d.precheckTimeout);
-  setJudgeFull(d.judgeFull);
-  updateJudgeUI();
-  scheduleAutoConfig();
-}
-
-function saveCurrentSettings(): void {
-  try {
-    localStorage.setItem("pp-settings", JSON.stringify(snapshotProfile()));
-  } catch { /* ignore */ }
-}
-
-function loadCurrentSettings(): void {
-  try {
-    const raw = localStorage.getItem("pp-settings");
-    if (!raw) return;
-    const data = sanitizeProfile(JSON.parse(raw));
-    if (data) applyProfile(data);
-  } catch { /* ignore */ }
-}
+const settings = new SettingsPanel({ t, schedule: () => scheduleAutoConfig() });
 
 function setStatusT(key: string, params?: Record<string, string | number>) {
   lastStatus = { key, params };
@@ -279,8 +144,8 @@ function applyI18n() {
   renderPool();
   profiles.render(t);
   updateCounts();
-  updateJudgeUI();
-  updateIpapiUI();
+  settings.updateJudgeUI();
+  settings.updateIpapiUI();
   renderNet();
   refreshStatusTexts();
   dispatchMonitor.renderPill(t);
@@ -364,9 +229,9 @@ function syncMaxPingInputs(): void {
 const geoCache = new GeoCacheStore();
 
 function readCheckSettings() {
-  const judge = isJudgeMode();
+  const judge = settings.isJudgeMode();
   return {
-    testUrl: effectiveTestUrl(),
+    testUrl: settings.effectiveTestUrl(),
     timeoutMs: Math.max(1000, Math.min(30000, Number(($("timeout") as HTMLInputElement).value) || 5000)),
     concurrency: Math.max(1, Math.min(500, Number(($("concurrency") as HTMLInputElement).value) || 50)),
     repeats: Math.max(1, Math.min(5, Number(($("repeats") as HTMLInputElement).value) || 1)),
@@ -378,7 +243,7 @@ function readCheckSettings() {
     precheck: ($("chk-precheck") as HTMLInputElement).checked,
     precheckTimeoutMs: Math.max(300, Math.min(10000, Number(($("precheck-timeout") as HTMLInputElement).value) || 1500)),
     judgeMode: judge,
-    ipapiKey: activeIpapiKey(),
+    ipapiKey: settings.activeIpapiKey(),
   };
 }
 
@@ -526,7 +391,7 @@ const autoSettings = new AutoSettingsStore({
   readCheckSettings,
   maxPingMs: () => maxPingMs,
   webhooks,
-  saveCurrentSettings,
+  saveCurrentSettings: () => settings.saveCurrentSettings(),
   updateTray,
 });
 
@@ -579,7 +444,7 @@ async function startInner() {
     setStatusT("st_input_too_big", { mb: MAX_FILE_MB });
     return;
   }
-  if (!/^https?:\/\//i.test(effectiveTestUrl())) {
+  if (!/^https?:\/\//i.test(settings.effectiveTestUrl())) {
     setStatusT("st_badurl");
     return;
   }
@@ -796,7 +661,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   $("btn-direct").addEventListener("click", async () => {
-    const url = effectiveTestUrl();
+    const url = settings.effectiveTestUrl();
     setStatusText("direct-res", () => "...");
     try {
       const ms = await invoke<number>("check_direct", { testUrl: url, timeoutMs: 10000 });
@@ -814,7 +679,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const id = (e.target as HTMLSelectElement).value;
     profiles.currentId = id;
     const d = profiles.find(id);
-    if (d) applyProfile(d);
+    if (d) settings.applyProfile(d);
     profiles.render(t);
   });
   ($("btn-profile-save") as HTMLButtonElement).addEventListener("click", async () => {
@@ -822,7 +687,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (res == null) return;
     const name = res.trim().slice(0, 40);
     if (!name) return;
-    const data = snapshotProfile();
+    const data = settings.snapshotProfile();
     if (!profiles.upsert(name, data)) {
       setStatusT("profile_limit");
       return;
@@ -836,15 +701,15 @@ window.addEventListener("DOMContentLoaded", () => {
     profiles.save();
     profiles.render(t);
   });
-  ($("test-url") as HTMLSelectElement).addEventListener("change", updateJudgeUI);
-  ($("test-url-custom") as HTMLInputElement).addEventListener("input", updateJudgeUI);
-  ($("judge-fast") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(false));
-  ($("judge-full") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(true));
+  ($("test-url") as HTMLSelectElement).addEventListener("change", () => settings.updateJudgeUI());
+  ($("test-url-custom") as HTMLInputElement).addEventListener("input", () => settings.updateJudgeUI());
+  ($("judge-fast") as HTMLButtonElement).addEventListener("click", () => settings.setJudgeFull(false));
+  ($("judge-full") as HTMLButtonElement).addEventListener("click", () => settings.setJudgeFull(true));
 
   // ip-api Pro key. The key is stored locally and is visible to checked
   // proxies (the request must originate from the proxy); see README.
-  ($("chk-ipapi-pro") as HTMLInputElement).addEventListener("change", saveIpapiSettings);
-  ($("ipapi-key") as HTMLInputElement).addEventListener("input", saveIpapiSettings);
+  ($("chk-ipapi-pro") as HTMLInputElement).addEventListener("change", () => settings.saveIpapiSettings());
+  ($("ipapi-key") as HTMLInputElement).addEventListener("input", () => settings.saveIpapiSettings());
   $("btn-ipapi-pro").addEventListener("click", async () => {
     const url = "https://members.ip-api.com/";
     try {
@@ -935,7 +800,7 @@ window.addEventListener("DOMContentLoaded", () => {
       results: results.length,
       alive: results.filter((r) => r.alive).length,
       pool: pool.count,
-      judge: isJudgeMode() ? effectiveTestUrl() : null,
+      judge: settings.isJudgeMode() ? settings.effectiveTestUrl() : null,
       errors: errorLog.recent(20),
     }),
   });
@@ -975,9 +840,9 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   }
   webhooks.load();
-  loadIpapiSettings();
+  settings.loadIpapiSettings();
   loadAutoSettings();
-  loadCurrentSettings();
+  settings.loadCurrentSettings();
   ($("chk-webhook-creds") as HTMLInputElement).checked = webhooks.includeCreds;
   ($("chk-webhook-creds") as HTMLInputElement).addEventListener("change", (e) => {
     webhooks.includeCreds = (e.target as HTMLInputElement).checked;
