@@ -38,3 +38,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 webpki-roots = "0.26"
 rustls-pki-types = "1"
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
