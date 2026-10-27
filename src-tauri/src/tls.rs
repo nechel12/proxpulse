@@ -1,4 +1,5 @@
-use crate::{connect_via, parse_upstream_url, short_error, Upstream};
+use crate::http::short_error;
+use crate::transport::{connect_via, parse_upstream_url, Upstream};
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 use std::time::Duration;

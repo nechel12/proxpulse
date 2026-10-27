@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::State;
+use tokio::net::TcpStream;
 
 #[derive(Debug, Default)]
 pub(crate) struct CheckState {

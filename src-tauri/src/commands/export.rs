@@ -61,19 +61,19 @@ pub(crate) async fn export_text_file(
             .blocking_save_file()
     })
     .await
-    .map_err(|e| crate::short_error(&e.to_string()))?;
+    .map_err(|e| crate::http::short_error(&e.to_string()))?;
     let Some(path) = choice else {
         return Ok(None);
     };
     let path = path
         .into_path()
-        .map_err(|e| crate::short_error(&e.to_string()))?;
+        .map_err(|e| crate::http::short_error(&e.to_string()))?;
     let path = with_export_extension(path, &ext);
     validate_export_path(&path.to_string_lossy())?;
     let write_path = path.clone();
     tauri::async_runtime::spawn_blocking(move || std::fs::write(&write_path, contents))
         .await
-        .map_err(|e| crate::short_error(&e.to_string()))?
+        .map_err(|e| crate::http::short_error(&e.to_string()))?
         .map_err(|e| e.to_string())?;
     Ok(Some(path.to_string_lossy().to_string()))
 }

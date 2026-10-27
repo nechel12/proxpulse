@@ -1,7 +1,8 @@
-use crate::{
-    connect_to_http_proxy, connect_via, find_header_end, normalize_proxy, parse_upstream_url,
-    prepare_forward_request, read_exact_t, strip_credentials, strip_header, write_all_t, Upstream,
+use crate::transport::{
+    connect_to_http_proxy, connect_via, find_header_end, parse_upstream_url,
+    prepare_forward_request, read_exact_t, strip_header, write_all_t, Upstream,
 };
+use crate::{normalize_proxy, strip_credentials};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;

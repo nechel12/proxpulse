@@ -1,8 +1,6 @@
 use crate::commands::dispatch::DispatchItem;
-use crate::{
-    is_http_url, read_body_capped, short_error, strip_credentials, WebhookResult,
-    BODY_LIMIT_WEBHOOK,
-};
+use crate::http::{read_body_capped, short_error, BODY_LIMIT_WEBHOOK};
+use crate::{is_http_url, strip_credentials, WebhookResult};
 use std::sync::Arc;
 use std::time::Duration;
 

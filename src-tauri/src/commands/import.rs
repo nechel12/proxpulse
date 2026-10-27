@@ -1,4 +1,4 @@
-use crate::{read_body_capped, short_error, BODY_LIMIT_IMPORT};
+use crate::http::{read_body_capped, short_error, BODY_LIMIT_IMPORT};
 use std::net::{IpAddr, SocketAddr};
 
 fn is_disallowed_ip(ip: IpAddr) -> bool {
