@@ -948,8 +948,13 @@ function renderPingGraph(): void {
     `<polyline points="${d}" />`;
 }
 
+function clip(s: string, n: number): string {
+  const chars = Array.from(s);
+  return chars.length <= n ? s : chars.slice(0, n).join("");
+}
+
 function deadStub(proxy: string, msg: string): ProxyResult {
-  return { proxy, url: proxy, proto: "ERR", alive: false, latency_ms: null, jitter_ms: null, success_rate: 0, attempts: 0, ip: null, country: null, country_code: null, city: null, isp: null, org: null, asn: null, ip_type: null, anonymity: null, tamper: null, tls: null, tls_info: null, error: msg.slice(0, 120) };
+  return { proxy, url: proxy, proto: "ERR", alive: false, latency_ms: null, jitter_ms: null, success_rate: 0, attempts: 0, ip: null, country: null, country_code: null, city: null, isp: null, org: null, asn: null, ip_type: null, anonymity: null, tamper: null, tls: null, tls_info: null, error: clip(msg, 120) };
 }
 
 async function syncPool(notify: boolean): Promise<number> {
@@ -1546,7 +1551,7 @@ function renderErrList(): void {
 }
 
 function logErr(msg: string): void {
-  errRing.push({ t: new Date().toISOString(), msg: msg.slice(0, 300) });
+  errRing.push({ t: new Date().toISOString(), msg: clip(msg, 300) });
   if (errRing.length > 50) errRing.shift();
   try {
     localStorage.setItem("pp-errors", JSON.stringify(errRing.slice(-50)));
@@ -1567,7 +1572,7 @@ function loadErrRing(): void {
 
 window.addEventListener("error", (e) => logErr("window: " + String(e.message || "error")));
 window.addEventListener("unhandledrejection", (e) =>
-  logErr("promise: " + String((e as PromiseRejectionEvent).reason ?? "rejection").slice(0, 300))
+  logErr("promise: " + clip(String((e as PromiseRejectionEvent).reason ?? "rejection"), 300))
 );
 
 window.addEventListener("DOMContentLoaded", () => {
