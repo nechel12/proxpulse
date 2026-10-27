@@ -1,5 +1,6 @@
 pub(crate) mod app;
 pub(crate) mod auto;
+pub(crate) mod check;
 pub(crate) mod dispatch;
 pub(crate) mod export;
 pub(crate) mod import;

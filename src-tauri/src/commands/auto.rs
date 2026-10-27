@@ -1,10 +1,9 @@
+use crate::commands::check::{run_checks, BusyGuard, CheckFlags, CheckState};
 use crate::commands::dispatch::{
     pool_items, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
 };
 use crate::commands::webhook::send_webhooks_inner;
-use crate::{
-    epoch_secs, run_checks, BusyGuard, CheckFlags, CheckState, ProxyResult, WebhookResult,
-};
+use crate::{epoch_secs, ProxyResult, WebhookResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -450,7 +449,7 @@ pub(crate) async fn run_auto_now(app: tauri::AppHandle, schedule: String) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dead_result;
+    use crate::commands::check::dead_result;
     use std::collections::{HashMap, HashSet};
 
     fn alive_result(url: &str, latency: u64, country: &str) -> ProxyResult {
