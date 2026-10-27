@@ -1697,11 +1697,14 @@ async fn run_checks(
 
     let sem = Arc::new(Semaphore::new(conc));
     let mut set = tokio::task::JoinSet::new();
+    let mut task_raw: HashMap<tokio::task::Id, String> = HashMap::new();
 
     for (raw, cands) in jobs {
         if cands.is_empty() {
+            let raw_key = raw.clone();
             let r = dead_result(raw, "BAD".to_string(), 0, "bad format".to_string());
-            set.spawn(async move { r });
+            let handle = set.spawn(async move { r });
+            task_raw.insert(handle.id(), raw_key);
             continue;
         }
         let sem_c = sem.clone();
@@ -1710,7 +1713,8 @@ async fn run_checks(
         let gc = geo_map.clone();
         let cl = cancel.clone();
         let fl = flags.clone();
-        set.spawn(async move {
+        let raw_key = raw.clone();
+        let handle = set.spawn(async move {
             let _p = sem_c.acquire_owned().await.unwrap();
             if cands.len() == 1 {
                 let (url, proto) = &cands[0];
@@ -1772,6 +1776,7 @@ async fn run_checks(
                 dead_result(raw, "HTTP/SOCKS5".to_string(), r1.attempts, combined)
             }
         });
+        task_raw.insert(handle.id(), raw_key);
     }
 
     let mut out = Vec::new();
@@ -1779,19 +1784,27 @@ async fn run_checks(
         // Stop must abort in-flight requests immediately instead of waiting
         // for the first task to finish its own timeout.
         tokio::select! {
-            maybe = set.join_next() => match maybe {
-                Some(Ok(v)) => {
+            maybe = set.join_next_with_id() => match maybe {
+                Some(Ok((id, v))) => {
+                    task_raw.remove(&id);
                     if let Some(ch) = on_result {
                         let _ = ch.send(v.clone());
                     }
                     out.push(v);
                 }
-                Some(Err(e)) => out.push(dead_result(
-                    "?".to_string(),
-                    "?".to_string(),
-                    0,
-                    short_error(&e.to_string()),
-                )),
+                Some(Err(e)) => {
+                    let id = e.id();
+                    let raw = task_raw.remove(&id).unwrap_or_else(|| "?".to_string());
+                    if e.is_cancelled() {
+                        continue;
+                    }
+                    out.push(dead_result(
+                        raw,
+                        "?".to_string(),
+                        0,
+                        short_error(&e.to_string()),
+                    ));
+                }
                 None => break,
             },
             _ = tokio::time::sleep(Duration::from_millis(50)) => {
