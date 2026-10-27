@@ -1,18 +1,19 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { clip } from "./clip.ts";
+import { RENDER_STEP, ResultsView } from "./results.ts";
 import { buildCsv, buildJson, buildTxt } from "./export.ts";
 import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } from "./pinggraph.ts";
 import { refreshStatusTexts, setStatusText } from "./status.ts";
 import {
-  anonShort,
+
   escapeHtml,
-  geoShort,
+
   pingClass,
   poolCountry,
-  rowTitle,
-  stabilityShort,
-  tlsShort,
+
+
+
 } from "./format.ts";
 import {
   type GeoEntry,
@@ -48,10 +49,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 
 let results: ProxyResult[] = [];
+const resultsView = new ResultsView();
 let filter: "all" | "alive" | "dead" = "all";
-let renderLimit = 250;
-const RENDER_STEP = 250;
-const RENDER_MAX = 1000;
 const POOL_RENDER_MAX = 1000;
 const poolLimits = new Map<string, number>();
 let stopFlag = false;
@@ -389,75 +388,7 @@ function screenVisible(id: string): boolean {
 }
 
 function render() {
-  // The results table lives on the check tab only; skip expensive rebuilds
-  // while another tab is visible (they are re-rendered on tab switch).
-  if (!screenVisible("screen-check")) return;
-  const searchEl = document.getElementById("search") as HTMLInputElement | null;
-  const q = (searchEl?.value || "").toLowerCase().trim();
-  const tb = $("tbody") as HTMLTableSectionElement;
-  tb.innerHTML = "";
-  const rows = results.filter((r) => {
-    if (filter === "alive" && !r.alive) return false;
-    if (filter === "dead" && r.alive) return false;
-    if (q) {
-      const hay = [r.proxy, r.proto, r.error ?? "", r.ip ?? "", r.country ?? "", r.country_code ?? "", r.city ?? "", r.isp ?? "", r.org ?? "", r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tls ?? ""].join(" ").toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-  if (rows.length === 0) {
-    const tr = document.createElement("tr");
-    tr.className = "empty";
-    const td = document.createElement("td");
-    td.colSpan = 11;
-    td.textContent = t(results.length === 0 ? "empty_idle" : "empty_filter");
-    tr.appendChild(td);
-    tb.appendChild(tr);
-    return;
-  }
-  rows.slice(0, renderLimit).forEach((r, i) => {
-    const tr = document.createElement("tr");
-    const pill = r.alive ? `<span class="pill alive">${t("pill_alive")}</span>` : `<span class="pill dead">${t("pill_dead")}</span>`;
-    const ping = r.latency_ms == null ? "—" : `${r.latency_ms} ms`;
-    const an = anonShort(r.anonymity);
-    const tls = tlsShort(r.tls);
-    const marks = [
-      r.tamper === "modified" ? `<span class="anon-trans" title="tamper">⚠mod</span>` : "",
-      r.tls === "modified" ? `<span class="anon-trans" title="tls">⚠tls</span>` : "",
-    ].join(" ");
-    const info = r.alive ? `${escapeHtml(r.ip ?? "ok")} ${marks}` : escapeHtml(r.error ?? "fail");
-    const infoTitle = escapeHtml(rowTitle(r));
-    tr.innerHTML =
-      `<td>${i + 1}</td><td>${escapeHtml(r.proxy)}</td><td>${escapeHtml(r.proto)}</td>` +
-      `<td>${pill}</td><td class="${pingClass(r.latency_ms)}">${ping}</td>` +
-      `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.cls}">${escapeHtml(an.txt)}</td>` +
-      `<td class="cell-geo" title="${infoTitle}">${escapeHtml(geoShort(r))}</td>` +
-      `<td>${escapeHtml(r.ip_type ?? "—")}</td>` +
-      `<td class="${tls.cls}" title="${infoTitle}">${escapeHtml(tls.txt)}</td>` +
-      `<td class="cell-err" title="${infoTitle}">${info}</td>`;
-    tb.appendChild(tr);
-  });
-  if (rows.length > renderLimit) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 11;
-    td.style.textAlign = "center";
-    if (renderLimit < RENDER_MAX) {
-      const b = document.createElement("button");
-      b.className = "btn ghost";
-      b.textContent = t("show_more", { n: rows.length - renderLimit });
-      b.addEventListener("click", () => {
-        renderLimit = Math.min(RENDER_MAX, renderLimit + RENDER_STEP);
-        render();
-      });
-      td.appendChild(b);
-    } else {
-      td.className = "empty";
-      td.textContent = t("render_limit", { n: renderLimit, total: rows.length });
-    }
-    tr.appendChild(td);
-    tb.appendChild(tr);
-  }
+  resultsView.render(results, filter, t, () => screenVisible("screen-check"));
 }
 
 function getPoolView(tbodyId: string) {
@@ -1281,7 +1212,7 @@ async function startInner() {
   running = true;
   stopFlag = false;
   results = [];
-  renderLimit = RENDER_STEP;
+  resultsView.reset();
   render();
   updateCounts();
   ($("btn-start") as HTMLButtonElement).disabled = true;
@@ -1588,13 +1519,13 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     void invoke("cancel_check").catch(() => { /* backend may already be idle */ });
   });
-  $("search").addEventListener("input", () => { renderLimit = RENDER_STEP; render(); });
+  $("search").addEventListener("input", () => { resultsView.reset(); render(); });
   document.querySelectorAll(".chip").forEach((c) => {
     c.addEventListener("click", () => {
       document.querySelectorAll(".chip").forEach((x) => x.classList.remove("active"));
       c.classList.add("active");
       filter = (c as HTMLElement).dataset.f as typeof filter;
-      renderLimit = RENDER_STEP;
+      resultsView.reset();
       render();
     });
   });
