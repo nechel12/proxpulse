@@ -337,7 +337,9 @@ function updateCounts() {
   ($("f-alive") as HTMLElement).textContent = String(alive);
   ($("f-dead") as HTMLElement).textContent = String(dead);
   ($("foot-info") as HTMLElement).textContent =
-    results.length === 0 ? "" : `alive ${alive}/${results.length}`;
+    results.length === 0
+      ? ""
+      : t("foot_alive", { a: alive, b: results.length });
   ($("pool-count") as HTMLElement).textContent = String(dispatchPool.length);
   const apc = document.getElementById("auto-pool-count");
   if (apc) apc.textContent = String(dispatchPool.length);
@@ -512,17 +514,19 @@ function renderPool() {
  *  Entries over maxPingMs never enter the pool; re-checked entries
  *  that went over the limit are dropped. */
 function mergePool(items: { raw: string; url?: string | null; latency: number | null; country?: string | null }[]) {
-  const idx = new Map(dispatchPool.map((p, i) => [p.raw, i]));
+  const keyOf = (it: { raw: string; url?: string | null }) => it.url || it.raw;
+  const idx = new Map(dispatchPool.map((p, i) => [keyOf(p), i]));
   const drop = new Set<number>();
   for (const it of items) {
-    const at = idx.get(it.raw);
+    const key = keyOf(it);
+    const at = idx.get(key);
     if (!passPing(it.latency)) {
       if (at != null) drop.add(at);
       continue;
     }
     if (at == null) {
       if (dispatchPool.length >= MAX_PROXIES) continue;
-      idx.set(it.raw, dispatchPool.length);
+      idx.set(key, dispatchPool.length);
       dispatchPool.push({
         raw: it.raw,
         url: it.url || it.raw,
@@ -1388,7 +1392,9 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".lang button").forEach((b) => {
     b.addEventListener("click", () => {
       lang = (b as HTMLElement).dataset.lang as Lang;
-      localStorage.setItem("pp-lang", lang);
+      try {
+        localStorage.setItem("pp-lang", lang);
+      } catch { /* ignore */ }
       applyI18n();
     });
   });

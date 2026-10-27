@@ -1640,12 +1640,19 @@ async fn run_checks(
 
     let mut jobs: Vec<(String, Vec<(String, String)>)> = Vec::new();
     let mut seen = HashSet::new();
+    let mut seen_urls = HashSet::new();
     for raw in proxies {
         let t = raw.trim().to_string();
         if t.is_empty() || !seen.insert(t.clone()) {
             continue;
         }
-        let cands = normalize_candidates(&t, default_proto);
+        let mut cands = normalize_candidates(&t, default_proto);
+        let was_valid = !cands.is_empty();
+        // `1.2.3.4:8080` and `http://1.2.3.4:8080` are the same proxy.
+        cands.retain(|(url, _)| seen_urls.insert(url.clone()));
+        if was_valid && cands.is_empty() {
+            continue;
+        }
         jobs.push((t, cands));
         if jobs.len() >= 20_000 {
             break;
@@ -2379,8 +2386,11 @@ fn parse_target(method: &str, target: &str) -> Option<(String, u16)> {
             .unwrap_or(h);
         return Some((host.to_string(), p.trim().parse().ok()?));
     }
-    let rest = target.strip_prefix("http://")?;
-    let auth = rest.split('/').next()?;
+    let rest = target
+        .get(..7)
+        .filter(|p| p.eq_ignore_ascii_case("http://"))
+        .map(|_| &target[7..])?;
+    let auth = rest.split(['/', '?', '#']).next()?;
     if let Some(stripped) = auth.strip_prefix('[') {
         let end = stripped.find(']')?;
         let host = stripped[..end].to_string();
@@ -2633,6 +2643,10 @@ async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>) {
     }
     let mut methods = vec![0u8; n];
     if read_exact_t(&mut client, &mut methods, d).await.is_err() {
+        return;
+    }
+    if !methods.contains(&0x00) {
+        let _ = write_all_t(&mut client, &[0x05, 0xFF], d).await;
         return;
     }
     if write_all_t(&mut client, &[0x05, 0x00], d).await.is_err() {
@@ -3357,12 +3371,7 @@ async fn auto_scheduler_loop(app: tauri::AppHandle) {
     }
 }
 
-#[tauri::command]
-async fn set_auto_config(
-    settings: AutoSettings,
-    state: State<'_, AutoState>,
-) -> Result<(), String> {
-    let mut s = settings;
+fn sanitize_auto_settings(mut s: AutoSettings) -> AutoSettings {
     s.disp_interval_min = s.disp_interval_min.clamp(1, 1440);
     s.auto_interval_min = s.auto_interval_min.clamp(1, 1440);
     s.timeout_ms = s.timeout_ms.clamp(500, 60_000);
@@ -3389,6 +3398,15 @@ async fn set_auto_config(
         .ipapi_key
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty());
+    s
+}
+
+#[tauri::command]
+async fn set_auto_config(
+    settings: AutoSettings,
+    state: State<'_, AutoState>,
+) -> Result<(), String> {
+    let s = sanitize_auto_settings(settings);
 
     let old = {
         let mut cur = state.inner.settings.lock().await;
@@ -3805,6 +3823,18 @@ mod tests {
         );
         assert_eq!(
             parse_target("GET", "http://example.com/path"),
+            Some(("example.com".into(), 80))
+        );
+        assert_eq!(
+            parse_target("GET", "HTTP://example.com:8080/path"),
+            Some(("example.com".into(), 8080))
+        );
+        assert_eq!(
+            parse_target("GET", "http://example.com?x=1"),
+            Some(("example.com".into(), 80))
+        );
+        assert_eq!(
+            parse_target("GET", "http://example.com#frag"),
             Some(("example.com".into(), 80))
         );
         assert_eq!(parse_target("GET", "/relative"), None);
@@ -4246,6 +4276,34 @@ mod tests {
         let (_, explicit) = upstream_from_item("socks5://1.2.3.4:1080", None, None, None).unwrap();
         assert_eq!(explicit.scheme, "socks5");
         assert_eq!(explicit.url, "socks5://1.2.3.4:1080");
+    }
+
+    #[test]
+    fn auto_settings_are_sanitized() {
+        let s = AutoSettings {
+            disp_interval_min: 0,
+            auto_interval_min: 9999,
+            timeout_ms: 1,
+            concurrency: 0,
+            repeats: 99,
+            precheck_timeout_ms: 1,
+            test_url: "   ".into(),
+            webhook_format: "xml".into(),
+            webhook_urls: vec![" ".into(), " https://hook ".into()],
+            ipapi_key: Some("   ".into()),
+            ..AutoSettings::default()
+        };
+        let s = sanitize_auto_settings(s);
+        assert_eq!(s.disp_interval_min, 1);
+        assert_eq!(s.auto_interval_min, 1440);
+        assert_eq!(s.timeout_ms, 500);
+        assert_eq!(s.concurrency, 1);
+        assert_eq!(s.repeats, 5);
+        assert_eq!(s.precheck_timeout_ms, 300);
+        assert_eq!(s.test_url, AutoSettings::default().test_url);
+        assert_eq!(s.webhook_format, "txt");
+        assert_eq!(s.webhook_urls, vec!["https://hook"]);
+        assert!(s.ipapi_key.is_none());
     }
 
     #[tokio::test]
