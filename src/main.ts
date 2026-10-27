@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { clip } from "./clip.ts";
 import { buildCsv, buildJson, buildTxt } from "./export.ts";
 import {
   anonShort,
@@ -946,11 +947,6 @@ function renderPingGraph(): void {
   svg.innerHTML =
     `<title>${last.avg} ms · alive ${last.alive} · ${new Date(last.t).toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US")}</title>` +
     `<polyline points="${d}" />`;
-}
-
-function clip(s: string, n: number): string {
-  const chars = Array.from(s);
-  return chars.length <= n ? s : chars.slice(0, n).join("");
 }
 
 function deadStub(proxy: string, msg: string): ProxyResult {
