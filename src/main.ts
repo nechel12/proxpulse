@@ -17,7 +17,7 @@ import {
 
 } from "./format.ts";
 import { GeoCacheStore } from "./geo-store.ts";
-import { WebhookPanel, formatWebhookResults, type WebhookResult } from "./webhooks.ts";
+import { WebhookPanel } from "./webhooks.ts";
 import { type Lang, translate } from "./i18n.ts";
 import { resolveTestUrl } from "./ipapi.ts";
 import { resolveJudgeUrl } from "./judge.ts";
@@ -31,6 +31,7 @@ import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
 import { AutoSettingsStore } from "./auto-settings.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { initSourcePanel } from "./source-panel.ts";
+import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
 import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
@@ -518,25 +519,6 @@ async function updateTray(): Promise<void> {
 }
 
 // ---------- scheduled checks (Rust scheduler events) ----------
-
-type AutoPoolEvent = { items: PoolItem[] };
-type AutoWebhookEvent = { results: WebhookResult[] };
-
-
-function onAutoPool(ev: AutoPoolEvent): void {
-  pool.set(ev.items.map((p) => ({
-    raw: p.raw,
-    url: p.url,
-    latency: p.latency,
-    country: p.country ?? null,
-  })));
-  renderPool();
-  updateCounts();
-}
-
-function onAutoWebhook(ev: AutoWebhookEvent): void {
-  setStatusText("webhook-status", () => formatWebhookResults(ev.results, t));
-}
 
 const webhooks = new WebhookPanel(() => scheduleAutoConfig());
 const autoSettings = new AutoSettingsStore({
@@ -1052,8 +1034,8 @@ window.addEventListener("DOMContentLoaded", () => {
     scheduleAutoConfig();
   });
   void listen<AutoStatusEvent>("auto://status", (e) => autoStatus.handle(e.payload)).catch(() => {});
-  void listen<AutoPoolEvent>("auto://pool", (e) => onAutoPool(e.payload)).catch(() => {});
-  void listen<AutoWebhookEvent>("auto://webhook", (e) => onAutoWebhook(e.payload)).catch(() => {});
+  void listen<AutoPoolEvent>("auto://pool", (e) => applyAutoPool(e.payload, (items) => pool.set(items), () => { renderPool(); updateCounts(); })).catch(() => {});
+  void listen<AutoWebhookEvent>("auto://webhook", (e) => showAutoWebhook(e.payload, t, setStatusText)).catch(() => {});
   void invoke<boolean>("check_busy")
     .then((busy) => {
       if (!busy) return;
