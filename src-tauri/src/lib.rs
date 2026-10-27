@@ -958,7 +958,9 @@ async fn http_connect<S: AsyncRead + AsyncWrite + Unpin>(
     write_all_t(&mut s, req.as_bytes(), d).await?;
     let deadline = Instant::now() + d;
     let mut buf = Vec::new();
-    let mut tmp = [0u8; 1024];
+    // Read exactly up to the end of the header. Reading a larger chunk can
+    // consume bytes that the proxy already sent for the tunnel and lose them.
+    let mut one = [0u8; 1];
     loop {
         if buf.len() > 32768 {
             return Err(Error::new(ErrorKind::InvalidData, "proxy header too big"));
@@ -967,14 +969,14 @@ async fn http_connect<S: AsyncRead + AsyncWrite + Unpin>(
         if remaining.is_zero() {
             return Err(Error::new(ErrorKind::TimedOut, "proxy read timeout"));
         }
-        let n = match tokio::time::timeout(remaining, s.read(&mut tmp)).await {
+        let n = match tokio::time::timeout(remaining, s.read(&mut one)).await {
             Ok(Ok(0)) => return Err(Error::new(ErrorKind::UnexpectedEof, "proxy closed")),
             Ok(Ok(n)) => n,
             Ok(Err(e)) => return Err(e),
             Err(_) => return Err(Error::new(ErrorKind::TimedOut, "proxy read timeout")),
         };
-        buf.extend_from_slice(&tmp[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        buf.extend_from_slice(&one[..n]);
+        if buf.ends_with(b"\r\n\r\n") {
             break;
         }
     }
@@ -1991,7 +1993,12 @@ struct DispatchInner {
     connections: Mutex<tokio::task::JoinSet<()>>,
     /// Cached loopback checks for upstream hostnames (`host:port` -> result).
     dns_cache: Mutex<HashMap<String, (bool, Instant)>>,
+    /// Caps local client connections; without it a local process could
+    /// exhaust file descriptors.
+    conn_sem: Arc<Semaphore>,
 }
+
+const MAX_CONNECTIONS: usize = 1024;
 
 struct DispatchState {
     inner: Arc<DispatchInner>,
@@ -2015,6 +2022,7 @@ impl Default for DispatchState {
                 lifecycle: Mutex::new(()),
                 connections: Mutex::new(tokio::task::JoinSet::new()),
                 dns_cache: Mutex::new(HashMap::new()),
+                conn_sem: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             }),
         }
     }
@@ -2776,10 +2784,14 @@ async fn run_server(listener: TcpListener, st: Arc<DispatchInner>) {
                 continue;
             }
         };
+        let Ok(permit) = st.conn_sem.clone().try_acquire_owned() else {
+            continue;
+        };
         let stc = st.clone();
         let mut conns = st.connections.lock().await;
         while conns.try_join_next().is_some() {}
         conns.spawn(async move {
+            let _permit = permit;
             handle_conn(stream, stc).await;
         });
     }
@@ -3778,6 +3790,10 @@ mod tests {
             norm("[2001:db8::1],8080", "http"),
             Some(("http://[2001:db8::1]:8080".into(), "HTTP".into()))
         );
+        assert_eq!(
+            norm("[::1]:1080:socks5", "http"),
+            Some(("socks5://[::1]:1080".into(), "SOCKS5".into()))
+        );
     }
 
     #[test]
@@ -4390,6 +4406,47 @@ mod tests {
         assert_eq!(csv_cell("-1"), "'-1");
         assert_eq!(csv_cell("@SUM(A1)"), "'@SUM(A1)");
         assert_eq!(csv_cell("=a,b"), "\"'=a,b\"");
+    }
+
+    #[tokio::test]
+    async fn http_connect_preserves_tunnel_bytes() {
+        let mock = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = mock.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut s, _) = mock.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut tmp = [0u8; 256];
+            loop {
+                let n = s.read(&mut tmp).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = s
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\nEXTRA")
+                .await;
+        });
+        let client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut stream = http_connect(
+            ProxyStream::Plain(client),
+            "example.com",
+            80,
+            None,
+            None,
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap();
+        let mut extra = [0u8; 5];
+        tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut extra))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&extra, b"EXTRA");
     }
 
     #[tokio::test]

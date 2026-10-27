@@ -297,6 +297,10 @@ pub(crate) fn normalize_proxy(raw: &str, default_proto: &str) -> Option<(String,
                 if tail.len() == 2 {
                     return build_url(&scheme, userinfo.as_deref(), &host, tail[1]);
                 }
+                if tail.len() == 3 && is_proto_name(tail[2]) {
+                    let scheme = canonical_scheme(tail[2]);
+                    return build_url(&scheme, userinfo.as_deref(), &host, tail[1]);
+                }
                 if tail.len() == 4 && userinfo.is_none() {
                     let u = format!("{}:{}", tail[2], tail[3]);
                     return build_url(&scheme, Some(&u), &host, tail[1]);
