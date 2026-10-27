@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { buildCsv, buildJson, buildTxt, withExtension } from "./export.ts";
+import { buildCsv, buildJson, buildTxt } from "./export.ts";
 import {
   anonShort,
   geoShort,
@@ -1410,24 +1410,26 @@ function browserDownload(name: string, text: string, mime = "text/plain;charset=
 }
 
 async function saveViaDialog(suggested: string, text: string, filters: { name: string; extensions: string[] }[]) {
-  try {
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    const path = await save({ defaultPath: suggested, filters });
-    if (!path) return;
-    const outPath = withExtension(String(path), filters[0]?.extensions[0] ?? "");
-    await invoke("write_text_file", { path: outPath, contents: text });
-    lastStatus = { key: "st_saved", params: { path: outPath } };
-    $("status-line").textContent = t("st_saved", { path: outPath });
-  } catch (e) {
-    if (isTauriRuntime()) {
-      const msg = String(e).slice(0, 120);
-      lastStatus = { key: "st_savefail", params: { e: msg } };
-      $("status-line").textContent = t("st_savefail", { e: msg });
-      return;
-    }
+  if (!isTauriRuntime()) {
     browserDownload(suggested, text);
     lastStatus = { key: "st_downloaded", params: { name: suggested } };
     $("status-line").textContent = t("st_downloaded", { name: suggested });
+    return;
+  }
+  try {
+    const path = await invoke<string | null>("export_text_file", {
+      contents: text,
+      defaultName: suggested,
+      filterName: filters[0]?.name ?? "Text",
+      extensions: filters[0]?.extensions ?? [],
+    });
+    if (!path) return;
+    lastStatus = { key: "st_saved", params: { path } };
+    $("status-line").textContent = t("st_saved", { path });
+  } catch (e) {
+    const msg = String(e).slice(0, 120);
+    lastStatus = { key: "st_savefail", params: { e: msg } };
+    $("status-line").textContent = t("st_savefail", { e: msg });
   }
 }
 
