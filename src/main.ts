@@ -6,16 +6,7 @@ import { PoolView, type PoolItem } from "./pool.ts";
 import { exportList, type ExportKind } from "./export-panel.ts";
 import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } from "./pinggraph.ts";
 import { refreshStatusTexts, setStatusText } from "./status.ts";
-import {
-
-
-
-
-  poolCountry,
-
-
-
-} from "./format.ts";
+import { poolCountry } from "./format.ts";
 import { GeoCacheStore } from "./geo-store.ts";
 import { WebhookPanel } from "./webhooks.ts";
 import { type Lang, translate } from "./i18n.ts";
