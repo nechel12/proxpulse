@@ -111,6 +111,9 @@ Duplicates are removed automatically. A list can be imported from any text
 file (TXT, CSV, JSON, LOG) or from a URL: the built-in client downloads up to
 2 MB and parses it with the same parser.
 
+> Put IPv6 addresses in square brackets: `[2001:db8::1]:8080`. The unbracketed
+> form is ambiguous and is not supported.
+
 > `socks4` does not support IPv6 literals. Use `socks5` or `socks4a` for IPv6;
 > with `socks4a`, the IPv6 address is passed as a domain name (best effort;
 > support depends on the proxy).
