@@ -812,16 +812,26 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
     onProgress?.(done, total);
   };
   const channel = new Channel<ProxyResult>();
-  // Messages may still arrive after `invoke` resolves. Ignore them so a late
-  // message cannot repaint progress or overwrite results of a newer run.
+  let finishDone: () => void = () => {};
+  const done = new Promise<void>((resolve) => {
+    finishDone = resolve;
+  });
+  // The channel is the only result payload; a sentinel marks the end, and the
+  // count check covers a dropped sentinel. Late messages are ignored so a
+  // previous run cannot repaint a newer one.
   let finished = false;
   channel.onmessage = (r) => {
     if (finished) return;
+    if (r.proto === "__done__") {
+      finishDone?.();
+      return;
+    }
     pushLive(r);
     paint(out.length, list.length);
+    if (out.length >= list.length) finishDone?.();
   };
   try {
-    const part = await invoke<ProxyResult[]>("check_proxies", {
+    await invoke<void>("check_proxies", {
       proxies: list,
       testUrl: s.testUrl,
       timeoutMs: s.timeoutMs,
@@ -839,13 +849,14 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
       geoCache: relevantGeoCache(list),
       onResult: channel,
     });
-    for (const r of part) pushLive(r);
+    await done;
   } catch (e) {
     const msg = String(e);
     if (msg.includes("another check is running")) throw e;
     for (const p of list) pushLive(deadStub(p, msg));
   } finally {
     finished = true;
+    finishDone?.();
   }
   paint(out.length, list.length);
   out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
