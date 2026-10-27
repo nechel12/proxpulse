@@ -26,6 +26,7 @@ import { parseFallback, parseTextAsync, type ParseResult } from "./parse-runner.
 import { sanitizeProfile, type ProfileData } from "./profiles.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
 import { initUpdater } from "./updater.ts";
+import { errorLog, logErr } from "./diagnostics.ts";
 import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
@@ -957,37 +958,6 @@ function setPolling(on: boolean) {
 
 // ---------- diagnostics + updates ----------
 
-type ErrItem = { t: string; msg: string };
-let errRing: ErrItem[] = [];
-
-function renderErrList(): void {
-  const el = document.getElementById("err-list");
-  if (!el) return;
-  el.textContent = errRing.length === 0
-    ? "—"
-    : errRing.slice(-10).reverse().map((e) => `${e.t} ${e.msg}`).join("\n");
-}
-
-function logErr(msg: string): void {
-  errRing.push({ t: new Date().toISOString(), msg: clip(msg, 300) });
-  if (errRing.length > 50) errRing.shift();
-  try {
-    localStorage.setItem("pp-errors", JSON.stringify(errRing.slice(-50)));
-  } catch { /* ignore */ }
-  renderErrList();
-}
-
-function loadErrRing(): void {
-  try {
-    const raw = localStorage.getItem("pp-errors");
-    if (!raw) return;
-    const arr = JSON.parse(raw) as ErrItem[];
-    if (Array.isArray(arr)) {
-      errRing = arr.filter((e) => e && typeof e.msg === "string").slice(-50);
-    }
-  } catch { /* ignore */ }
-}
-
 window.addEventListener("error", (e) => logErr("window: " + String(e.message || "error")));
 window.addEventListener("unhandledrejection", (e) =>
   logErr("promise: " + clip(String((e as PromiseRejectionEvent).reason ?? "rejection"), 300))
@@ -1344,8 +1314,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // diagnostics + updates
   geoCache.load();
-  loadErrRing();
-  renderErrList();
+  errorLog.load();
+  errorLog.render();
   void invoke<string>("app_version")
     .then((v) => {
       ($("app-ver") as HTMLElement).textContent = v;
@@ -1361,7 +1331,7 @@ window.addEventListener("DOMContentLoaded", () => {
       alive: results.filter((r) => r.alive).length,
       pool: pool.count,
       judge: isJudgeMode() ? effectiveTestUrl() : null,
-      errors: errRing.slice(-20),
+      errors: errorLog.recent(20),
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
