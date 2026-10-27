@@ -3182,6 +3182,58 @@ async fn send_webhook(
     send_webhook_one(&url, &format, include_credentials.unwrap_or(false), &items).await
 }
 
+/// Merge checked results with the pool as it is *after* the check. A proxy
+/// deleted (or a pool cleared) by the user while the check was running must
+/// stay deleted; entries added meanwhile stay too.
+fn merge_auto_items(
+    results: &[ProxyResult],
+    current: &HashMap<String, (String, Option<u64>, Option<String>)>,
+    checked: &HashSet<String>,
+    max_ping_ms: u64,
+) -> (Vec<DispatchItem>, Option<u64>) {
+    let mut items = Vec::new();
+    let mut avg_sum = 0u64;
+    let mut avg_n = 0u64;
+    for r in results {
+        if !r.alive {
+            continue;
+        }
+        if let Some(ms) = r.latency_ms {
+            avg_sum += ms;
+            avg_n += 1;
+        }
+        let Some((raw, _, old_country)) = current.get(&r.url) else {
+            continue;
+        };
+        if max_ping_ms > 0 && r.latency_ms.is_some_and(|ms| ms > max_ping_ms) {
+            continue;
+        }
+        let country = r
+            .country_code
+            .clone()
+            .or_else(|| r.country.clone())
+            .or_else(|| old_country.clone());
+        items.push(DispatchItem {
+            raw: raw.clone(),
+            url: Some(r.url.clone()),
+            latency: r.latency_ms,
+            country,
+        });
+    }
+    for (url, (raw, latency, country)) in current {
+        if checked.contains(url) {
+            continue;
+        }
+        items.push(DispatchItem {
+            raw: raw.clone(),
+            url: Some(url.clone()),
+            latency: *latency,
+            country: country.clone(),
+        });
+    }
+    (items, avg_sum.checked_div(avg_n))
+}
+
 async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) {
     let auto: State<'_, AutoState> = app.state();
     if auto.inner.running.swap(true, Ordering::SeqCst) {
@@ -3253,57 +3305,13 @@ async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) {
                 return;
             }
             let total = results.len();
-            let mut avg_sum = 0u64;
-            let mut avg_n = 0u64;
-            let mut items = Vec::new();
-            // Merge against the pool as it is *after* the check. A proxy
-            // deleted or a pool cleared by the user while the check was
-            // running must stay deleted; entries added meanwhile stay too.
             let current: HashMap<String, (String, Option<u64>, Option<String>)> = {
                 let pool = disp.inner.pool.lock().await;
                 pool.iter()
                     .map(|u| (u.url.clone(), (u.raw.clone(), u.latency, u.country.clone())))
                     .collect()
             };
-            for r in &results {
-                if !r.alive {
-                    continue;
-                }
-                if let Some(ms) = r.latency_ms {
-                    avg_sum += ms;
-                    avg_n += 1;
-                }
-                let Some((raw, _, old_country)) = current.get(&r.url) else {
-                    continue;
-                };
-                if settings.max_ping_ms > 0
-                    && r.latency_ms.is_some_and(|ms| ms > settings.max_ping_ms)
-                {
-                    continue;
-                }
-                let country = r
-                    .country_code
-                    .clone()
-                    .or_else(|| r.country.clone())
-                    .or_else(|| old_country.clone());
-                items.push(DispatchItem {
-                    raw: raw.clone(),
-                    url: Some(r.url.clone()),
-                    latency: r.latency_ms,
-                    country,
-                });
-            }
-            for (url, (raw, latency, country)) in current {
-                if checked.contains(&url) {
-                    continue;
-                }
-                items.push(DispatchItem {
-                    raw,
-                    url: Some(url),
-                    latency,
-                    country,
-                });
-            }
+            let (items, avg) = merge_auto_items(&results, &current, &checked, settings.max_ping_ms);
             let kept = store_pool(&disp.inner, items).await;
             let pool = pool_items(&disp.inner).await;
             let _ = app.emit(
@@ -3315,7 +3323,6 @@ async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) {
             // The check and pool update are done; only webhook delivery
             // remains, and it must not keep a manual check blocked.
             drop(_busy_guard);
-            let avg = avg_sum.checked_div(avg_n);
             emit_auto_status(app, kind, "done", kept, total, avg, None);
 
             if matches!(kind, AutoKind::Auto) && !settings.webhook_urls.is_empty() {
@@ -4295,6 +4302,56 @@ mod tests {
         let (_, explicit) = upstream_from_item("socks5://1.2.3.4:1080", None, None, None).unwrap();
         assert_eq!(explicit.scheme, "socks5");
         assert_eq!(explicit.url, "socks5://1.2.3.4:1080");
+    }
+
+    fn alive_result(url: &str, latency: u64, country: &str) -> ProxyResult {
+        let mut r = dead_result(url.into(), "HTTP".into(), 1, String::new());
+        r.alive = true;
+        r.url = url.into();
+        r.latency_ms = Some(latency);
+        r.country = Some(country.into());
+        r.country_code = Some(country.into());
+        r
+    }
+
+    #[test]
+    fn auto_pool_merge_respects_deletions_and_additions() {
+        let current = HashMap::from([
+            (
+                "http://a:80".to_string(),
+                ("raw-a".to_string(), Some(100), Some("DE".to_string())),
+            ),
+            (
+                "http://b:80".to_string(),
+                ("raw-b".to_string(), Some(200), Some("NL".to_string())),
+            ),
+            (
+                "http://c:80".to_string(),
+                ("raw-c".to_string(), Some(300), Some("US".to_string())),
+            ),
+        ]);
+        let checked = HashSet::from(["http://a:80".to_string(), "http://b:80".to_string()]);
+        let results = vec![
+            alive_result("http://a:80", 10, "FR"),
+            alive_result("http://b:80", 999, "FR"),
+        ];
+        let (items, avg) = merge_auto_items(&results, &current, &checked, 100);
+        let urls: Vec<&str> = items.iter().map(|i| i.url.as_deref().unwrap()).collect();
+        assert_eq!(urls, vec!["http://a:80", "http://c:80"]);
+        assert_eq!(items[0].raw, "raw-a");
+        assert_eq!(items[0].latency, Some(10));
+        assert_eq!(items[0].country.as_deref(), Some("FR"));
+        assert_eq!(items[1].raw, "raw-c");
+        assert_eq!(avg, Some((10 + 999) / 2));
+
+        // A proxy deleted while the check was running is not resurrected.
+        let current = HashMap::from([(
+            "http://b:80".to_string(),
+            ("raw-b".to_string(), Some(200), None),
+        )]);
+        let results = vec![alive_result("http://a:80", 10, "FR")];
+        let (items, _) = merge_auto_items(&results, &current, &checked, 0);
+        assert!(items.is_empty());
     }
 
     #[test]
