@@ -29,6 +29,7 @@ import { initUpdater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
 import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
 import { AutoSettingsStore } from "./auto-settings.ts";
+import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
@@ -56,7 +57,6 @@ let starting = false;
 let includeDead = false;
 const pool = new PoolView();
 const dispatchMonitor = new DispatchMonitor();
-let autoRunning = false;
 const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
 let judgeFull = true;
 
@@ -518,66 +518,9 @@ async function updateTray(): Promise<void> {
 
 // ---------- scheduled checks (Rust scheduler events) ----------
 
-type AutoStatusEvent = {
-  schedule: "disp" | "auto";
-  state: "running" | "done" | "stopped" | "skipped" | "empty" | "error";
-  alive: number;
-  total: number;
-  avgMs: number | null;
-  error: string | null;
-  at: number;
-};
 type AutoPoolEvent = { items: PoolItem[] };
 type AutoWebhookEvent = { results: WebhookResult[] };
 
-
-function onAutoStatus(ev: AutoStatusEvent): void {
-  const id = ev.schedule === "disp" ? "disp-auto-status" : "auto-status";
-  const time = () =>
-    new Date(ev.at * 1000).toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US");
-  if (ev.state === "running") {
-    setStatusText(id, () => t("auto_running", { n: ev.total }));
-    autoRunning = true;
-    ($("btn-start") as HTMLButtonElement).disabled = true;
-    ($("btn-stop") as HTMLButtonElement).disabled = false;
-    ($("btn-auto-now") as HTMLButtonElement).disabled = true;
-    return;
-  }
-  if (ev.state === "skipped") {
-    setStatusText(id, () => t("auto_skip"));
-    return;
-  }
-  autoRunning = false;
-  switch (ev.state) {
-    case "done":
-      setStatusText(id, () => `${t("auto_pruned", {
-        alive: ev.alive,
-        total: ev.total,
-      })} ${time()}`);
-      break;
-    case "stopped":
-      setStatusText(id, () => t("st_stopped", {
-        alive: ev.alive,
-        total: ev.total,
-      }));
-      break;
-    case "empty":
-      setStatusText(id, () => t("pool_empty"));
-      break;
-    case "error":
-      setStatusText(id, () => t("auto_err", { e: ev.error ?? "" }));
-      break;
-  }
-  if (ev.state === "done") {
-    pingHist = pushPingPointStats(pingHist, ev.avgMs, ev.alive);
-    renderPingGraph(pingHist, lang);
-  }
-  if (!running) {
-    ($("btn-start") as HTMLButtonElement).disabled = false;
-    ($("btn-stop") as HTMLButtonElement).disabled = true;
-  }
-  ($("btn-auto-now") as HTMLButtonElement).disabled = false;
-}
 
 function onAutoPool(ev: AutoPoolEvent): void {
   pool.set(ev.items.map((p) => ({
@@ -603,6 +546,17 @@ const autoSettings = new AutoSettingsStore({
   updateTray,
 });
 
+const autoStatus = new AutoStatusController({
+  t,
+  setStatusText,
+  isManualRunning: () => running,
+  onDone: (avg, alive) => {
+    pingHist = pushPingPointStats(pingHist, avg, alive);
+    renderPingGraph(pingHist, lang);
+  },
+  locale: () => lang,
+});
+
 function scheduleAutoConfig(): void { autoSettings.schedule(); }
 function saveAutoSettings(): void { autoSettings.save(); }
 function loadAutoSettings(): void { autoSettings.load(); }
@@ -626,7 +580,7 @@ async function start() {
 
 async function startInner() {
   if (running) return;
-  if (autoRunning) {
+  if (autoStatus.running) {
     setStatusT("auto_skip");
     return;
   }
@@ -691,7 +645,7 @@ async function startInner() {
   } finally {
     running = false;
     ($("btn-start") as HTMLButtonElement).disabled = false;
-    ($("btn-stop") as HTMLButtonElement).disabled = !autoRunning;
+    ($("btn-stop") as HTMLButtonElement).disabled = !autoStatus.running;
   }
   if (busy) {
     setStatusT("auto_skip");
@@ -1184,13 +1138,13 @@ window.addEventListener("DOMContentLoaded", () => {
     saveAutoSettings();
     scheduleAutoConfig();
   });
-  void listen<AutoStatusEvent>("auto://status", (e) => onAutoStatus(e.payload)).catch(() => {});
+  void listen<AutoStatusEvent>("auto://status", (e) => autoStatus.handle(e.payload)).catch(() => {});
   void listen<AutoPoolEvent>("auto://pool", (e) => onAutoPool(e.payload)).catch(() => {});
   void listen<AutoWebhookEvent>("auto://webhook", (e) => onAutoWebhook(e.payload)).catch(() => {});
   void invoke<boolean>("check_busy")
     .then((busy) => {
       if (!busy) return;
-      autoRunning = true;
+      autoStatus.restore();
       ($("btn-start") as HTMLButtonElement).disabled = true;
       ($("btn-stop") as HTMLButtonElement).disabled = false;
       ($("btn-auto-now") as HTMLButtonElement).disabled = true;
