@@ -31,6 +31,7 @@ import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
 import { AutoSettingsStore } from "./auto-settings.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { initSourcePanel } from "./source-panel.ts";
+import { initInfoPanel } from "./info-panel.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
 import type { ProxyResult } from "./types.ts";
 
@@ -806,18 +807,6 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // github cards
-  const openGh = (url: string) => async () => {
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(url);
-    } catch {
-      window.open(url, "_blank");
-    }
-  };
-  $("gh-card").addEventListener("click", openGh("https://github.com/nechel12/proxpulse"));
-  $("gh-card-judge").addEventListener("click", openGh("https://github.com/nechel12/proxpulse-judge"));
-
   // settings profiles
   profiles.load();
   profiles.render(t);
@@ -939,28 +928,18 @@ window.addEventListener("DOMContentLoaded", () => {
   geoCache.load();
   errorLog.load();
   errorLog.render();
-  void invoke<string>("app_version")
-    .then((v) => {
-      ($("app-ver") as HTMLElement).textContent = v;
-      ($("brand-ver") as HTMLElement).textContent = `proxy checker // v${v}`;
-      ($("brand-ver-info") as HTMLElement).textContent = `proxy checker // v${v}`;
-    })
-    .catch(() => { /* ignore */ });
-  ($("btn-copy-diag") as HTMLButtonElement).addEventListener("click", async () => {
-    const data = {
-      app: ($("app-ver") as HTMLElement).textContent,
+  initInfoPanel({
+    getData: () => ({
+      app: document.getElementById("app-ver")?.textContent,
       lang,
       results: results.length,
       alive: results.filter((r) => r.alive).length,
       pool: pool.count,
       judge: isJudgeMode() ? effectiveTestUrl() : null,
       errors: errorLog.recent(20),
-    };
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-    } catch { /* ignore */ }
+    }),
   });
-    initUpdater({ t, setStatusText, logErr, isTauriRuntime });
+  initUpdater({ t, setStatusText, logErr, isTauriRuntime });
 
   // auto timers + webhook
   for (const id of ["disp-auto-min", "auto-min"]) {
