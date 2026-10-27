@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { clip } from "./clip.ts";
 import { ResultsView } from "./results.ts";
 import { PoolView, type PoolItem } from "./pool.ts";
-import { buildCsv, buildJson, buildTxt } from "./export.ts";
+import { exportList, type ExportKind } from "./export-panel.ts";
 import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } from "./pinggraph.ts";
 import { refreshStatusTexts, setStatusText } from "./status.ts";
 import {
@@ -823,68 +823,8 @@ function exportScope(): ProxyResult[] {
   return includeDead ? results : results.filter((r) => r.alive);
 }
 
-function browserDownload(name: string, text: string, mime = "text/plain;charset=utf-8") {
-  const blob = new Blob([text], { type: mime });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-}
-
-async function saveViaDialog(suggested: string, text: string, filters: { name: string; extensions: string[] }[]) {
-  if (!isTauriRuntime()) {
-    browserDownload(suggested, text);
-    lastStatus = { key: "st_downloaded", params: { name: suggested } };
-    $("status-line").textContent = t("st_downloaded", { name: suggested });
-    return;
-  }
-  try {
-    const path = await invoke<string | null>("export_text_file", {
-      contents: text,
-      defaultName: suggested,
-      filterName: filters[0]?.name ?? "Text",
-      extensions: filters[0]?.extensions ?? [],
-    });
-    if (!path) return;
-    lastStatus = { key: "st_saved", params: { path } };
-    $("status-line").textContent = t("st_saved", { path });
-  } catch (e) {
-    const msg = String(e).slice(0, 120);
-    lastStatus = { key: "st_savefail", params: { e: msg } };
-    $("status-line").textContent = t("st_savefail", { e: msg });
-  }
-}
-
-async function doExport(kind: "txt" | "json" | "csv" | "copy") {
-  const list = exportScope();
-  if (kind === "copy") {
-    const txt = buildTxt(list);
-    if (!txt) { lastStatus = { key: "st_nocopy" }; $("status-line").textContent = t("st_nocopy"); return; }
-    try {
-      await navigator.clipboard.writeText(txt);
-      lastStatus = { key: "st_copied", params: { n: txt.split("\n").length } };
-      $("status-line").textContent = t("st_copied", { n: txt.split("\n").length });
-    } catch {
-      lastStatus = { key: "st_nocopy" };
-      $("status-line").textContent = t("st_nocopy");
-    }
-    return;
-  }
-  if (list.length === 0) {
-    lastStatus = { key: "st_nothing" };
-    $("status-line").textContent = t("st_nothing");
-    return;
-  }
-  if (kind === "txt") {
-    await saveViaDialog("proxpulse-alive.txt", buildTxt(list), [{ name: "Text", extensions: ["txt"] }]);
-  } else if (kind === "json") {
-    await saveViaDialog("proxpulse.json", buildJson(list), [{ name: "JSON", extensions: ["json"] }]);
-  } else {
-    await saveViaDialog("proxpulse.csv", buildCsv(list), [{ name: "CSV", extensions: ["csv"] }]);
-  }
+async function doExport(kind: ExportKind): Promise<void> {
+  await exportList(kind, exportScope(), { isTauriRuntime, notify: setStatusT });
 }
 
 // ---------- dispatcher ----------
