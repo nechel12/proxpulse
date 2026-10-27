@@ -40,6 +40,19 @@ function t(key: string, params?: Record<string, string | number>): string {
 }
 
 let lastStatus: { key: string; params?: Record<string, string | number> } = { key: "st_ready" };
+type StatusRenderer = () => string;
+const statusRenderers = new Map<string, StatusRenderer>();
+function setStatusText(id: string, render: StatusRenderer): void {
+  const el = document.getElementById(id);
+  if (el) el.textContent = render();
+  statusRenderers.set(id, render);
+}
+function refreshStatusTexts(): void {
+  statusRenderers.forEach((render, id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = render();
+  });
+}
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -344,6 +357,9 @@ function applyI18n() {
   updateJudgeUI();
   updateIpapiUI();
   renderNet();
+  refreshStatusTexts();
+  renderSrvPill();
+  void updateTray();
 }
 
 function updateCounts() {
@@ -999,14 +1015,11 @@ function formatWebhookResults(results: WebhookResult[]): string {
 }
 
 function onAutoStatus(ev: AutoStatusEvent): void {
-  const el = document.getElementById(
-    ev.schedule === "disp" ? "disp-auto-status" : "auto-status",
-  );
-  const time = new Date(ev.at * 1000).toLocaleTimeString(
-    lang === "ru" ? "ru-RU" : "en-US",
-  );
+  const id = ev.schedule === "disp" ? "disp-auto-status" : "auto-status";
+  const time = () =>
+    new Date(ev.at * 1000).toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US");
   if (ev.state === "running") {
-    if (el) el.textContent = t("auto_running", { n: ev.total });
+    setStatusText(id, () => t("auto_running", { n: ev.total }));
     autoRunning = true;
     ($("btn-start") as HTMLButtonElement).disabled = true;
     ($("btn-stop") as HTMLButtonElement).disabled = false;
@@ -1014,31 +1027,29 @@ function onAutoStatus(ev: AutoStatusEvent): void {
     return;
   }
   if (ev.state === "skipped") {
-    if (el) el.textContent = t("auto_skip");
+    setStatusText(id, () => t("auto_skip"));
     return;
   }
   autoRunning = false;
-  if (el) {
-    switch (ev.state) {
-      case "done":
-        el.textContent = `${t("auto_pruned", {
-          alive: ev.alive,
-          total: ev.total,
-        })} ${time}`;
-        break;
-      case "stopped":
-        el.textContent = t("st_stopped", {
-          alive: ev.alive,
-          total: ev.total,
-        });
-        break;
-      case "empty":
-        el.textContent = t("pool_empty");
-        break;
-      case "error":
-        el.textContent = t("auto_err", { e: ev.error ?? "" });
-        break;
-    }
+  switch (ev.state) {
+    case "done":
+      setStatusText(id, () => `${t("auto_pruned", {
+        alive: ev.alive,
+        total: ev.total,
+      })} ${time()}`);
+      break;
+    case "stopped":
+      setStatusText(id, () => t("st_stopped", {
+        alive: ev.alive,
+        total: ev.total,
+      }));
+      break;
+    case "empty":
+      setStatusText(id, () => t("pool_empty"));
+      break;
+    case "error":
+      setStatusText(id, () => t("auto_err", { e: ev.error ?? "" }));
+      break;
   }
   if (ev.state === "done") {
     pushPingPointStats(ev.avgMs ?? null, ev.alive);
@@ -1062,8 +1073,7 @@ function onAutoPool(ev: AutoPoolEvent): void {
 }
 
 function onAutoWebhook(ev: AutoWebhookEvent): void {
-  const el = document.getElementById("webhook-status");
-  if (el) el.textContent = formatWebhookResults(ev.results);
+  setStatusText("webhook-status", () => formatWebhookResults(ev.results));
 }
 
 function buildAutoSettings() {
@@ -1242,13 +1252,12 @@ let webhookSending = false;
 
 async function sendWebhook(manual: boolean): Promise<void> {
   const urls = getWebhookUrls();
-  const statusEl = $("webhook-status") as HTMLElement;
   if (urls.length === 0) {
-    if (manual) statusEl.textContent = t("webhook_hint");
+    if (manual) setStatusText("webhook-status", () => t("webhook_hint"));
     return;
   }
   if (dispatchPool.length === 0) {
-    statusEl.textContent = t("webhook_empty");
+    setStatusText("webhook-status", () => t("webhook_empty"));
     return;
   }
   if (webhookSending) return;
@@ -1260,7 +1269,7 @@ async function sendWebhook(manual: boolean): Promise<void> {
     latency: p.latency,
     country: p.country,
   }));
-  statusEl.textContent = "...";
+  setStatusText("webhook-status", () => "...");
   try {
     const results = await invoke<WebhookResult[]>("send_webhooks", {
       urls,
@@ -1268,9 +1277,10 @@ async function sendWebhook(manual: boolean): Promise<void> {
       items,
       includeCredentials: webhookIncludeCreds,
     });
-    statusEl.textContent = formatWebhookResults(results);
+    setStatusText("webhook-status", () => formatWebhookResults(results));
   } catch (e) {
-    statusEl.textContent = t("webhook_fail", { e: String(e).slice(0, 120) });
+    const msg = String(e).slice(0, 120);
+    setStatusText("webhook-status", () => t("webhook_fail", { e: msg }));
   } finally {
     webhookSending = false;
   }
@@ -1475,9 +1485,6 @@ async function pollDispatch() {
     ($("srv-req") as HTMLElement).textContent = String(s.requests);
     ($("srv-err") as HTMLElement).textContent = String(s.errors);
     ($("srv-cur") as HTMLElement).textContent = s.current ?? "—";
-    const pill = $("srv-pill");
-    pill.textContent = s.running ? "ON" : "OFF";
-    pill.className = s.running ? "pill alive on" : "pill dead";
     ($("btn-srv-start") as HTMLButtonElement).disabled = s.running;
     ($("btn-srv-stop") as HTMLButtonElement).disabled = !s.running;
 
@@ -1485,6 +1492,7 @@ async function pollDispatch() {
     const previousError = srvLastError;
     srvRunning = s.running;
     srvLastError = s.last_error;
+    renderSrvPill();
 
     if (s.running) {
       ($("srv-port") as HTMLInputElement).value = String(s.port);
@@ -1494,13 +1502,23 @@ async function pollDispatch() {
     }
     const st = $("srv-status");
     if (st && (s.running !== wasRunning || (s.running && s.last_error !== previousError))) {
-      st.textContent = s.running
-        ? (s.last_error ?? t("srv_on", { addr: `127.0.0.1:${s.port}` }))
-        : t("srv_off");
+      if (s.running) {
+        const error = s.last_error;
+        const addr = `127.0.0.1:${s.port}`;
+        setStatusText("srv-status", () => error ?? t("srv_on", { addr }));
+      } else {
+        setStatusText("srv-status", () => t("srv_off"));
+      }
     } else if (st && st.textContent === "—" && !s.running) {
-      st.textContent = t("srv_off");
+      setStatusText("srv-status", () => t("srv_off"));
     }
   } catch { /* ignore */ }
+}
+
+function renderSrvPill(): void {
+  const pill = $("srv-pill");
+  pill.textContent = srvRunning ? t("pill_on") : t("pill_off");
+  pill.className = srvRunning ? "pill alive on" : "pill dead";
 }
 
 function setPolling(on: boolean) {
@@ -1668,13 +1686,12 @@ window.addEventListener("DOMContentLoaded", () => {
     renderPool();
     updateCounts();
     const n = await syncPool(false);
-    const el = document.getElementById(statusElId);
     if (n < 0) {
-      if (el) el.textContent = t("pool_sync_err");
+      setStatusText(statusElId, () => t("pool_sync_err"));
       lastStatus = { key: "pool_sync_err" };
       return;
     }
-    if (el) el.textContent = t("pool_synced", { n });
+    setStatusText(statusElId, () => t("pool_synced", { n }));
     lastStatus = { key: "pool_synced", params: { n } };
   }
 
@@ -1683,8 +1700,7 @@ window.addEventListener("DOMContentLoaded", () => {
     // The backend stops a running dispatcher when the pool becomes empty;
     // refresh the status once the sync completes.
     void syncPool(false).then(() => {
-      const st = document.getElementById("srv-status");
-      if (st) st.textContent = t("srv_off");
+      setStatusText("srv-status", () => t("srv_off"));
       void pollDispatch();
     });
     renderPool();
@@ -1762,12 +1778,13 @@ window.addEventListener("DOMContentLoaded", () => {
 
   $("btn-direct").addEventListener("click", async () => {
     const url = effectiveTestUrl();
-    ($("direct-res") as HTMLElement).textContent = "...";
+    setStatusText("direct-res", () => "...");
     try {
       const ms = await invoke<number>("check_direct", { testUrl: url, timeoutMs: 10000 });
-      ($("direct-res") as HTMLElement).textContent = t("direct_ok", { ms });
+      setStatusText("direct-res", () => t("direct_ok", { ms }));
     } catch (e) {
-      ($("direct-res") as HTMLElement).textContent = t("direct_fail", { e: String(e).slice(0, 80) });
+      const msg = String(e).slice(0, 80);
+      setStatusText("direct-res", () => t("direct_fail", { e: msg }));
     }
   });
 
@@ -1861,7 +1878,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const port = Math.max(1, Math.min(65535, Number(($("srv-port") as HTMLInputElement).value) || 1080));
     const mode = ($("srv-mode") as HTMLSelectElement).value;
     const listener = ($("srv-listener") as HTMLSelectElement).value;
-    ($("srv-status") as HTMLElement).textContent = "...";
+    setStatusText("srv-status", () => "...");
     try {
       if (dispatchPool.length === 0) {
         mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
@@ -1871,7 +1888,7 @@ window.addEventListener("DOMContentLoaded", () => {
       const synced = await syncPool(false);
       if (synced < 0) throw new Error(t("pool_sync_err"));
       const addr = await invoke<string>("start_local_proxy", { port, mode, listener });
-      ($("srv-status") as HTMLElement).textContent = t("srv_on", { addr });
+      setStatusText("srv-status", () => t("srv_on", { addr }));
       try {
         const st = await invoke<DispatchStatus>("local_proxy_status");
         ($("srv-port") as HTMLInputElement).value = String(st.port);
@@ -1881,16 +1898,19 @@ window.addEventListener("DOMContentLoaded", () => {
       void updateTray();
     } catch (e) {
       const msg = String(e);
-      ($("srv-status") as HTMLElement).textContent = msg.includes("pool is empty")
-        ? t("srv_err_empty")
-        : t("srv_err", { e: msg.slice(0, 120) });
+      if (msg.includes("pool is empty")) {
+        setStatusText("srv-status", () => t("srv_err_empty"));
+      } else {
+        const short = msg.slice(0, 120);
+        setStatusText("srv-status", () => t("srv_err", { e: short }));
+      }
     }
   });
   ($("btn-srv-stop") as HTMLButtonElement).addEventListener("click", async () => {
     try {
       await invoke("stop_local_proxy");
     } catch { /* ignore */ }
-    ($("srv-status") as HTMLElement).textContent = t("srv_off");
+    setStatusText("srv-status", () => t("srv_off"));
     void pollDispatch();
     void updateTray();
   });
@@ -1935,33 +1955,32 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   let pendingVersion = "";
   ($("btn-check-upd") as HTMLButtonElement).addEventListener("click", async () => {
-    const el = $("upd-status") as HTMLElement;
     const openBtn = $("btn-open-rel") as HTMLButtonElement;
     const instBtn = $("btn-install-upd") as HTMLButtonElement;
     openBtn.classList.add("hidden");
     instBtn.classList.add("hidden");
     pendingVersion = "";
-    el.textContent = "...";
+    setStatusText("upd-status", () => "...");
     try {
       const u = await invoke<UpdateInfo>("check_app_update");
       ($("app-ver") as HTMLElement).textContent = u.current;
       if (!u.available || !u.version) {
-        el.textContent = t("upd_latest", { v: u.current });
+        setStatusText("upd-status", () => t("upd_latest", { v: u.current }));
         return;
       }
-      pendingVersion = u.version;
+      const version = u.version;
+      pendingVersion = version;
       releaseUrl = "https://github.com/nechel12/proxpulse/releases";
-      el.textContent = t("upd_found", { v: u.version, cur: u.current });
+      setStatusText("upd-status", () => t("upd_found", { v: version, cur: u.current }));
       openBtn.classList.remove("hidden");
       instBtn.classList.remove("hidden");
     } catch (e) {
       logErr("update-check: " + String(e).slice(0, 200));
-      el.textContent = t("upd_fail");
+      setStatusText("upd-status", () => t("upd_fail"));
     }
   });
   ($("btn-install-upd") as HTMLButtonElement).addEventListener("click", async () => {
     if (!pendingVersion) return;
-    const el = $("upd-status") as HTMLElement;
     const btn = $("btn-install-upd") as HTMLButtonElement;
     if (btn.disabled) return;
     try {
@@ -1969,12 +1988,12 @@ window.addEventListener("DOMContentLoaded", () => {
       const ok = await confirm(t("upd_confirm", { v: pendingVersion }), { title: "ProxPulse", kind: "info" });
       if (!ok) return;
       btn.disabled = true;
-      el.textContent = t("upd_installing");
+      setStatusText("upd-status", () => t("upd_installing"));
       await invoke("install_app_update");
-      el.textContent = t("upd_restart");
+      setStatusText("upd-status", () => t("upd_restart"));
     } catch (e) {
       logErr("update-install: " + String(e).slice(0, 200));
-      el.textContent = t("upd_fail");
+      setStatusText("upd-status", () => t("upd_fail"));
     } finally {
       btn.disabled = false;
     }
@@ -2045,8 +2064,8 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => {
     void invoke("run_auto_now", { schedule: "auto" }).catch((e) => {
-      const el = document.getElementById("auto-status");
-      if (el) el.textContent = t("auto_err", { e: String(e).slice(0, 120) });
+      const msg = String(e).slice(0, 120);
+      setStatusText("auto-status", () => t("auto_err", { e: msg }));
     });
   });
   ($("btn-webhook-send") as HTMLButtonElement).addEventListener("click", () => void sendWebhook(true));
