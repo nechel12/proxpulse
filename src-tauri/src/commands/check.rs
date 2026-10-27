@@ -1,3 +1,4 @@
+use crate::tls::{tls_direct_fp, tls_via_proxy};
 use crate::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
