@@ -28,6 +28,7 @@ import { ProfilePanel } from "./profiles-panel.ts";
 import { initUpdater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
 import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
+import { AutoSettingsStore } from "./auto-settings.ts";
 import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
@@ -56,11 +57,8 @@ let includeDead = false;
 const pool = new PoolView();
 const dispatchMonitor = new DispatchMonitor();
 let autoRunning = false;
-let autoCfgTimer: number | undefined;
 const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
 let judgeFull = true;
-let dispAutoOn = false;
-let autoOn = false;
 
 // ---------- ui helpers ----------
 
@@ -507,18 +505,11 @@ async function syncPool(notify: boolean): Promise<number> {
   }
 }
 
-function armTimers() {
-  // Timing lives in Rust: persist the UI state and hand it to the scheduler.
-  saveAutoSettings();
-  scheduleAutoConfig();
-  void updateTray();
-}
-
 async function updateTray(): Promise<void> {
   try {
     const urls = webhooks.getUrls();
     await invoke("update_tray_status", {
-      webhookOn: autoOn && urls.length > 0,
+      webhookOn: autoSettings.autoOn && urls.length > 0,
       webhookUrl: urls[0] ?? "",
       lang,
     });
@@ -603,108 +594,19 @@ function onAutoWebhook(ev: AutoWebhookEvent): void {
   setStatusText("webhook-status", () => formatWebhookResults(ev.results, t));
 }
 
-function buildAutoSettings() {
-  const s = readCheckSettings();
-  const minutes = (id: string, fallback: number) =>
-    Math.max(
-      1,
-      Math.min(
-        1440,
-        Math.floor(Number(($(id) as HTMLInputElement).value) || fallback),
-      ),
-    );
-  return {
-    dispEnabled: dispAutoOn,
-    dispIntervalMin: minutes("disp-auto-min", 30),
-    autoEnabled: autoOn,
-    autoIntervalMin: minutes("auto-min", 30),
-    maxPingMs,
-    webhookUrls: webhooks.getUrls(),
-    webhookFormat: ($("webhook-format") as HTMLSelectElement).value,
-    webhookIncludeCredentials: webhooks.includeCreds,
-    testUrl: s.testUrl,
-    timeoutMs: s.timeoutMs,
-    concurrency: s.concurrency,
-    repeats: s.repeats,
-    defaultProto: s.defaultProto,
-    withGeo: s.withGeo,
-    withAnonymity: s.withAnonymity,
-    withTamper: s.withTamper,
-    withTls: s.withTls,
-    precheck: s.precheck,
-    precheckTimeoutMs: s.precheckTimeoutMs,
-    judgeMode: s.judgeMode,
-    ipapiKey: s.ipapiKey,
-  };
-}
-
-function scheduleAutoConfig(): void {
-  if (!document.getElementById("timeout")) return;
-  window.clearTimeout(autoCfgTimer);
-  autoCfgTimer = window.setTimeout(() => {
-    try {
-      saveCurrentSettings();
-      void invoke("set_auto_config", { settings: buildAutoSettings() }).catch(
-        (e) => logErr("auto-config: " + String(e).slice(0, 200)),
-      );
-    } catch (e) {
-      logErr("auto-config: " + String(e).slice(0, 200));
-    }
-  }, 200);
-}
-
-function saveAutoSettings(): void {
-  try {
-    localStorage.setItem("pp-auto-on", autoOn ? "1" : "0");
-    localStorage.setItem("pp-disp-auto-on", dispAutoOn ? "1" : "0");
-    localStorage.setItem(
-      "pp-auto-min",
-      String(Math.max(1, Math.min(1440, Number(($("auto-min") as HTMLInputElement).value) || 30))),
-    );
-    localStorage.setItem(
-      "pp-disp-auto-min",
-      String(Math.max(1, Math.min(1440, Number(($("disp-auto-min") as HTMLInputElement).value) || 30))),
-    );
-    localStorage.setItem(
-      "pp-webhook-format",
-      ($("webhook-format") as HTMLSelectElement).value,
-    );
-  } catch { /* ignore */ }
-}
-
-function loadAutoSettings(): void {
-  try {
-    autoOn = localStorage.getItem("pp-auto-on") === "1";
-    dispAutoOn = localStorage.getItem("pp-disp-auto-on") === "1";
-    const autoMin = Number(localStorage.getItem("pp-auto-min"));
-    if (autoMin) {
-      ($("auto-min") as HTMLInputElement).value = String(
-        Math.max(1, Math.min(1440, Math.floor(autoMin))),
-      );
-    }
-    const dispMin = Number(localStorage.getItem("pp-disp-auto-min"));
-    if (dispMin) {
-      ($("disp-auto-min") as HTMLInputElement).value = String(
-        Math.max(1, Math.min(1440, Math.floor(dispMin))),
-      );
-    }
-    const fmt = localStorage.getItem("pp-webhook-format");
-    if (fmt === "txt" || fmt === "json" || fmt === "csv") {
-      ($("webhook-format") as HTMLSelectElement).value = fmt;
-    }
-  } catch {
-    autoOn = false;
-    dispAutoOn = false;
-  }
-  const setPressed = (id: string, on: boolean) => {
-    const el = document.getElementById(id) as HTMLButtonElement | null;
-    if (el) el.setAttribute("aria-pressed", String(on));
-  };
-  setPressed("auto-on", autoOn);
-  setPressed("disp-auto-on", dispAutoOn);
-}
-
 const webhooks = new WebhookPanel(() => scheduleAutoConfig());
+const autoSettings = new AutoSettingsStore({
+  readCheckSettings,
+  maxPingMs: () => maxPingMs,
+  webhooks,
+  saveCurrentSettings,
+  updateTray,
+});
+
+function scheduleAutoConfig(): void { autoSettings.schedule(); }
+function saveAutoSettings(): void { autoSettings.save(); }
+function loadAutoSettings(): void { autoSettings.load(); }
+function armTimers(): void { autoSettings.arm(); }
 
 async function sendWebhook(manual: boolean): Promise<void> {
   await webhooks.send(manual, pool.items, t, setStatusText);
@@ -1123,8 +1025,8 @@ window.addEventListener("DOMContentLoaded", () => {
       armTimers();
     });
   };
-  bindSqchk("disp-auto-on", () => dispAutoOn, (v) => { dispAutoOn = v; });
-  bindSqchk("auto-on", () => autoOn, (v) => { autoOn = v; });
+  bindSqchk("disp-auto-on", () => autoSettings.dispAutoOn, (v) => { autoSettings.dispAutoOn = v; });
+  bindSqchk("auto-on", () => autoSettings.autoOn, (v) => { autoSettings.autoOn = v; });
 
   // dispatcher
   ($("srv-port") as HTMLInputElement).addEventListener("input", () => dispatchMonitor.refreshAddr());
