@@ -173,4 +173,12 @@ describe("extractProxiesFromText", () => {
       "1.2.3.4:8080",
     ]);
   });
+  it("stops at the requested limit", () => {
+    const text = "1.1.1.1:80\n2.2.2.2:80\n3.3.3.3:80";
+    expect(extractProxiesFromText(text, 2)).toEqual([
+      "1.1.1.1:80",
+      "2.2.2.2:80",
+    ]);
+    expect(extractProxiesFromText(text, 0)).toEqual([]);
+  });
 });

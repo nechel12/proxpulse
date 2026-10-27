@@ -92,35 +92,46 @@ export function buildFromParts(host: string, port: string, user?: string | null,
   return `${prefix}${host}:${port}`;
 }
 
-export function proxiesFromJson(v: unknown, out: string[]): void {
-  if (v == null) return;
+export function proxiesFromJson(
+  v: unknown,
+  out: string[],
+  limit = Number.POSITIVE_INFINITY,
+): void {
+  if (v == null || out.length >= limit) return;
   if (typeof v === "string") {
     const s = v.trim();
-    if (s.length > 2) out.push(s);
+    if (s.length > 2 && out.length < limit) out.push(s);
     return;
   }
   if (Array.isArray(v)) {
-    for (const el of v) proxiesFromJson(el, out);
+    for (const el of v) {
+      if (out.length >= limit) break;
+      proxiesFromJson(el, out, limit);
+    }
     return;
   }
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
     const host = getKey(o, HOST_KEYS);
     const port = getKey(o, PORT_KEYS);
-    if (host && port) {
+    if (host && port && out.length < limit) {
       const built = buildFromParts(host, port, getKey(o, USER_KEYS), getKey(o, PASS_KEYS), getKey(o, PROTO_KEYS));
       if (built) out.push(built);
     }
     for (const k of ["proxies", "proxy", "data", "list", "items", "results", "rows"]) {
       if (Array.isArray(o[k])) {
-        for (const el of o[k] as unknown[]) proxiesFromJson(el, out);
+        for (const el of o[k] as unknown[]) {
+          if (out.length >= limit) break;
+          proxiesFromJson(el, out, limit);
+        }
         return;
       }
     }
     if (!host) {
       for (const val of Object.values(o)) {
+        if (out.length >= limit) break;
         if (typeof val === "string" || Array.isArray(val) || (val && typeof val === "object")) {
-          proxiesFromJson(val, out);
+          proxiesFromJson(val, out, limit);
         }
       }
     }
@@ -187,10 +198,14 @@ export function cleanTail(s: string): string {
   return s.replace(/[.,;!?)\]}>]+$/, "").replace(/^[(<{]+/, "").trim();
 }
 
-export function extractProxiesFromText(text: string): string[] {
+export function extractProxiesFromText(
+  text: string,
+  limit = Number.POSITIVE_INFINITY,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const push = (s: string) => {
+    if (out.length >= limit) return;
     s = cleanTail(s.trim().replace(/^["'`]+|["'`]+$/g, ""));
     if (s.length < 3 || s.length > 512 || s.startsWith("#") || s.startsWith("//")) return;
     // Soft validation: proxies need a host:port-shaped authority, and a
@@ -204,15 +219,19 @@ export function extractProxiesFromText(text: string): string[] {
   try {
     const j = JSON.parse(text);
     const tmp: string[] = [];
-    proxiesFromJson(j, tmp);
+    proxiesFromJson(j, tmp, limit);
     if (tmp.length > 0) {
-      tmp.forEach(push);
+      for (const p of tmp) {
+        push(p);
+        if (out.length >= limit) break;
+      }
       return out;
     }
   } catch { /* not json */ }
 
   const lines = text.split(/\r?\n/);
   for (const raw of lines) {
+    if (out.length >= limit) break;
     let line = raw.trim();
     if (!line || line.startsWith("#") || line.startsWith("//")) continue;
     line = line.replace(/^(\d{1,6}[).\-:]\s+|[-*•>]\s+|\[\s*[xX✓]?\s*\]\s*)/, "").trim();
@@ -223,7 +242,10 @@ export function extractProxiesFromText(text: string): string[] {
 
     const urls = line.match(SCHEME_URL_RE);
     if (urls && urls.length > 0) {
-      urls.forEach(push);
+      for (const u of urls) {
+        push(u);
+        if (out.length >= limit) break;
+      }
       continue;
     }
     const hashIdx = line.indexOf(" #");
@@ -233,13 +255,14 @@ export function extractProxiesFromText(text: string): string[] {
     push(line);
   }
 
-  if (out.length < 5) {
+  if (out.length < 5 && out.length < limit) {
     const found = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\b/g);
     if (found) {
       for (const f of found) {
         if (seen.has(f)) continue;
         if (out.some((s) => s.includes(f))) continue;
         push(f);
+        if (out.length >= limit) break;
       }
     }
   }

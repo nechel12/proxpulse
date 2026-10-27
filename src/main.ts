@@ -19,7 +19,7 @@ import {
 import { type Lang, translate } from "./i18n.ts";
 import { resolveTestUrl } from "./ipapi.ts";
 import { resolveJudgeUrl } from "./judge.ts";
-import { extractProxiesFromText, parseInput, stripProxyCredentials } from "./parse.ts";
+import { extractProxiesFromText, stripProxyCredentials } from "./parse.ts";
 import {
   BUILTIN_PROFILES,
   type ProfileData,
@@ -53,6 +53,7 @@ const POOL_RENDER_MAX = 1000;
 const poolLimits = new Map<string, number>();
 let stopFlag = false;
 let running = false;
+let starting = false;
 let includeDead = false;
 type PoolItem = { raw: string; url: string; latency: number | null; country: string | null };
 let dispatchPool: PoolItem[] = [];
@@ -658,6 +659,90 @@ const MAX_INPUT_CHARS = 10 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILE_MB = 10;
 
+type ParseResult = { list?: string[]; count: number; truncated: boolean };
+type ParsePending = {
+  resolve: (r: ParseResult) => void;
+  reject: (e: unknown) => void;
+};
+
+let parseWorker: Worker | null = null;
+let parseSeq = 0;
+const parsePending = new Map<number, ParsePending>();
+
+function getParseWorker(): Worker | null {
+  if (typeof Worker === "undefined") return null;
+  if (parseWorker) return parseWorker;
+  try {
+    const w = new Worker(new URL("./parseWorker.ts", import.meta.url), {
+      type: "module",
+    });
+    w.onmessage = (
+      e: MessageEvent<{
+        id: number;
+        count: number;
+        truncated: boolean;
+        list?: string[];
+      }>,
+    ) => {
+      const pending = parsePending.get(e.data.id);
+      if (!pending) return;
+      parsePending.delete(e.data.id);
+      pending.resolve({
+        list: e.data.list,
+        count: e.data.count,
+        truncated: e.data.truncated,
+      });
+    };
+    w.onerror = (e) => {
+      for (const pending of parsePending.values()) pending.reject(e);
+      parsePending.clear();
+      w.terminate();
+      if (parseWorker === w) parseWorker = null;
+    };
+    parseWorker = w;
+  } catch {
+    parseWorker = null;
+  }
+  return parseWorker;
+}
+
+function parseFallback(
+  text: string,
+  limit: number,
+  wantList: boolean,
+): ParseResult {
+  const list = extractProxiesFromText(text, limit);
+  return {
+    list: wantList ? list : undefined,
+    count: list.length,
+    truncated: list.length >= limit,
+  };
+}
+
+function parseTextAsync(
+  text: string,
+  limit: number,
+  wantList: boolean,
+): Promise<ParseResult> {
+  const w = getParseWorker();
+  if (!w) return Promise.resolve(parseFallback(text, limit, wantList));
+  return new Promise((resolve, reject) => {
+    const id = ++parseSeq;
+    parsePending.set(id, { resolve, reject });
+    try {
+      w.postMessage({
+        id,
+        text,
+        limit,
+        mode: wantList ? "list" : "count",
+      });
+    } catch (e) {
+      parsePending.delete(id);
+      reject(e);
+    }
+  });
+}
+
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -1136,6 +1221,18 @@ async function sendWebhook(manual: boolean): Promise<void> {
 }
 
 async function start() {
+  if (running || starting) return;
+  starting = true;
+  ($("btn-start") as HTMLButtonElement).disabled = true;
+  try {
+    await startInner();
+  } finally {
+    starting = false;
+    if (!running) ($("btn-start") as HTMLButtonElement).disabled = false;
+  }
+}
+
+async function startInner() {
   if (running) return;
   if (autoRunning) {
     setStatusT("auto_skip");
@@ -1152,20 +1249,24 @@ async function start() {
     setStatusT("st_input_too_big", { mb: MAX_FILE_MB });
     return;
   }
-  let list = parseInput(source);
-  if (list.length === 0) {
-    setStatusT("st_empty");
-    return;
-  }
-  let truncated = false;
-  if (list.length > MAX_PROXIES) {
-    list = list.slice(0, MAX_PROXIES);
-    truncated = true;
-  }
   if (!/^https?:\/\//i.test(effectiveTestUrl())) {
     setStatusT("st_badurl");
     return;
   }
+  setStatusT("st_parsing");
+  let parsed: ParseResult;
+  try {
+    parsed = await parseTextAsync(source, MAX_PROXIES + 1, true);
+  } catch {
+    parsed = parseFallback(source, MAX_PROXIES + 1, true);
+  }
+  let list = parsed.list ?? [];
+  if (list.length === 0) {
+    setStatusT("st_empty");
+    return;
+  }
+  const truncated = list.length > MAX_PROXIES;
+  if (truncated) list = list.slice(0, MAX_PROXIES);
 
   running = true;
   stopFlag = false;
@@ -1427,12 +1528,32 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   const input = $("proxy-input") as HTMLTextAreaElement;
+  let updGen = 0;
   const upd = () => {
-    if (input.value.length > MAX_INPUT_CHARS) {
+    const text = input.value;
+    if (text.length > MAX_INPUT_CHARS) {
       ($("src-count") as HTMLElement).textContent = "!";
       return;
     }
-    ($("src-count") as HTMLElement).textContent = String(parseInput(input.value).length);
+    const gen = ++updGen;
+    void parseTextAsync(text, MAX_PROXIES + 1, false)
+      .then((r) => {
+        if (gen !== updGen) return;
+        ($("src-count") as HTMLElement).textContent =
+          String(Math.min(r.count, MAX_PROXIES)) +
+          (r.count > MAX_PROXIES ? "+" : "");
+      })
+      .catch(() => {
+        if (gen !== updGen) return;
+        try {
+          const list = extractProxiesFromText(text, MAX_PROXIES + 1);
+          ($("src-count") as HTMLElement).textContent =
+            String(Math.min(list.length, MAX_PROXIES)) +
+            (list.length > MAX_PROXIES ? "+" : "");
+        } catch {
+          ($("src-count") as HTMLElement).textContent = "!";
+        }
+      });
   };
   let updT: number | undefined;
   input.addEventListener("input", () => { window.clearTimeout(updT); updT = window.setTimeout(upd, 250); });
@@ -1465,7 +1586,13 @@ window.addEventListener("DOMContentLoaded", () => {
     $("status-line").textContent = "…";
     try {
       const txt = await invoke<string>("fetch_url_text", { url: u });
-      const found = extractProxiesFromText(txt);
+      let found: string[] = [];
+      try {
+        const parsed = await parseTextAsync(txt, MAX_PROXIES, true);
+        found = parsed.list ?? [];
+      } catch {
+        found = extractProxiesFromText(txt, MAX_PROXIES);
+      }
       if (found.length === 0) {
         lastStatus = { key: "file_none", params: { name: u.slice(0, 60) } };
         $("status-line").textContent = t("file_none", { name: u.slice(0, 60) });
@@ -1522,7 +1649,13 @@ window.addEventListener("DOMContentLoaded", () => {
       }
       try {
         const txt = await f.text();
-        const found = extractProxiesFromText(txt);
+        let found: string[] = [];
+        try {
+          const parsed = await parseTextAsync(txt, MAX_PROXIES, true);
+          found = parsed.list ?? [];
+        } catch {
+          found = extractProxiesFromText(txt, MAX_PROXIES);
+        }
         if (found.length > 0) parts.push(...found);
         else {
           lastStatus = { key: "file_none", params: { name: f.name } };
