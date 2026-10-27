@@ -25,6 +25,7 @@ import { extractProxiesFromText } from "./parse.ts";
 import { parseFallback, parseTextAsync, type ParseResult } from "./parse-runner.ts";
 import { sanitizeProfile, type ProfileData } from "./profiles.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
+import { initUpdater } from "./updater.ts";
 import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
@@ -958,7 +959,6 @@ function setPolling(on: boolean) {
 
 type ErrItem = { t: string; msg: string };
 let errRing: ErrItem[] = [];
-let releaseUrl = "";
 
 function renderErrList(): void {
   const el = document.getElementById("err-list");
@@ -1367,80 +1367,7 @@ window.addEventListener("DOMContentLoaded", () => {
       await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     } catch { /* ignore */ }
   });
-  type UpdateInfo = {
-    available: boolean;
-    version: string | null;
-    current: string;
-    notes: string | null;
-  };
-  let pendingVersion = "";
-  let installKindPromise: Promise<string> | null = null;
-  const getInstallKind = (): Promise<string> => {
-    if (!installKindPromise) {
-      installKindPromise = isTauriRuntime()
-        ? invoke<string>("install_kind").catch(() => "auto")
-        : Promise.resolve("auto");
-    }
-    return installKindPromise;
-  };
-  ($("btn-check-upd") as HTMLButtonElement).addEventListener("click", async () => {
-    const openBtn = $("btn-open-rel") as HTMLButtonElement;
-    const instBtn = $("btn-install-upd") as HTMLButtonElement;
-    openBtn.classList.add("hidden");
-    instBtn.classList.add("hidden");
-    pendingVersion = "";
-    setStatusText("upd-status", () => "...");
-    try {
-      const u = await invoke<UpdateInfo>("check_app_update");
-      ($("app-ver") as HTMLElement).textContent = u.current;
-      if (!u.available || !u.version) {
-        setStatusText("upd-status", () => t("upd_latest", { v: u.current }));
-        return;
-      }
-      const version = u.version;
-      pendingVersion = version;
-      releaseUrl = "https://github.com/nechel12/proxpulse/releases";
-      const kind = await getInstallKind();
-      if (kind === "nsis" || kind === "auto") {
-        setStatusText("upd-status", () => t("upd_found", { v: version, cur: u.current }));
-        instBtn.classList.remove("hidden");
-      } else {
-        setStatusText("upd-status", () => t("upd_manual", { v: version }));
-      }
-      openBtn.classList.remove("hidden");
-    } catch (e) {
-      logErr("update-check: " + String(e).slice(0, 200));
-      setStatusText("upd-status", () => t("upd_fail"));
-    }
-  });
-  ($("btn-install-upd") as HTMLButtonElement).addEventListener("click", async () => {
-    if (!pendingVersion) return;
-    const btn = $("btn-install-upd") as HTMLButtonElement;
-    if (btn.disabled) return;
-    try {
-      const { confirm } = await import("@tauri-apps/plugin-dialog");
-      const ok = await confirm(t("upd_confirm", { v: pendingVersion }), { title: "ProxPulse", kind: "info" });
-      if (!ok) return;
-      btn.disabled = true;
-      setStatusText("upd-status", () => t("upd_installing"));
-      await invoke("install_app_update");
-      setStatusText("upd-status", () => t("upd_restart"));
-    } catch (e) {
-      logErr("update-install: " + String(e).slice(0, 200));
-      setStatusText("upd-status", () => t("upd_fail"));
-    } finally {
-      btn.disabled = false;
-    }
-  });
-  ($("btn-open-rel") as HTMLButtonElement).addEventListener("click", async () => {
-    if (!releaseUrl) return;
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(releaseUrl);
-    } catch {
-      window.open(releaseUrl, "_blank");
-    }
-  });
+    initUpdater({ t, setStatusText, logErr, isTauriRuntime });
 
   // auto timers + webhook
   for (const id of ["disp-auto-min", "auto-min"]) {
