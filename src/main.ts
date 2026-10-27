@@ -1,4 +1,4 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { clip } from "./clip.ts";
 import { ResultsView } from "./results.ts";
@@ -32,6 +32,7 @@ import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
 import { askText, screenVisible, setProgress } from "./ui.ts";
 import { NetStatus } from "./net-status.ts";
+import { runCheckList } from "./check-client.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
 import type { ProxyResult } from "./types.ts";
 
@@ -212,79 +213,6 @@ function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function runCheckList(list: string[], onProgress?: (done: number, total: number) => void, onLive?: (live: ProxyResult[]) => void): Promise<ProxyResult[]> {
-  const s = readCheckSettings();
-  if (!/^https?:\/\//i.test(s.testUrl)) throw new Error("badurl");
-  const out: ProxyResult[] = [];
-  const seen = new Set<string>();
-  const pushLive = (r: ProxyResult) => {
-    if (r.error === "cancelled" || seen.has(r.proxy)) return;
-    seen.add(r.proxy);
-    out.push(r);
-  };
-  let lastPaint = 0;
-  const paint = (done: number, total: number) => {
-    const now = performance.now();
-    if (now - lastPaint < 300 && done < total) return;
-    lastPaint = now;
-    if (done >= total) {
-      out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
-    }
-    onLive?.([...out]);
-    onProgress?.(done, total);
-  };
-  const channel = new Channel<ProxyResult>();
-  let finishDone: () => void = () => {};
-  const done = new Promise<void>((resolve) => {
-    finishDone = resolve;
-  });
-  // The channel is the only result payload; a sentinel marks the end, and the
-  // count check covers a dropped sentinel. Late messages are ignored so a
-  // previous run cannot repaint a newer one.
-  let finished = false;
-  channel.onmessage = (r) => {
-    if (finished) return;
-    if (r.proto === "__done__") {
-      finishDone?.();
-      return;
-    }
-    pushLive(r);
-    paint(out.length, list.length);
-    if (out.length >= list.length) finishDone?.();
-  };
-  try {
-    await invoke<void>("check_proxies", {
-      proxies: list,
-      testUrl: s.testUrl,
-      timeoutMs: s.timeoutMs,
-      concurrency: s.concurrency,
-      defaultProto: s.defaultProto,
-      repeats: s.repeats,
-      withGeo: s.withGeo,
-      withAnonymity: s.withAnonymity,
-      withTamper: s.withTamper,
-      withTls: s.withTls,
-      precheck: s.precheck,
-      precheckTimeoutMs: s.precheckTimeoutMs,
-      judgeMode: s.judgeMode,
-      ipapiKey: s.ipapiKey,
-      geoCache: geoCache.relevant(list),
-      onResult: channel,
-    });
-    await done;
-  } catch (e) {
-    const msg = String(e);
-    if (msg.includes("another check is running")) throw e;
-    for (const p of list) pushLive(deadStub(p, msg));
-  } finally {
-    finished = true;
-    finishDone?.();
-  }
-  paint(out.length, list.length);
-  out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
-  return out;
-}
-
 // ---------- alive ping history (sparkline) ----------
 
 let pingHist: PingPoint[] = [];
@@ -300,10 +228,6 @@ function pushPingPoint(list: ProxyResult[] = results): void {
     alive.length,
   );
   renderPingGraph(pingHist, lang);
-}
-
-function deadStub(proxy: string, msg: string): ProxyResult {
-  return { proxy, url: proxy, proto: "ERR", alive: false, latency_ms: null, jitter_ms: null, success_rate: 0, attempts: 0, ip: null, country: null, country_code: null, city: null, isp: null, org: null, asn: null, ip_type: null, anonymity: null, tamper: null, tls: null, tls_info: null, error: clip(msg, 120) };
 }
 
 async function syncPool(notify: boolean): Promise<number> {
@@ -428,7 +352,7 @@ async function startInner() {
 
   let busy = false;
   try {
-    results = await runCheckList(list, (done, total) => {
+    results = await runCheckList(list, readCheckSettings(), geoCache.relevant(list), (done, total) => {
       lastStatus = { key: "st_checking", params: { done, total } };
       $("status-line").textContent = t("st_checking", lastStatus.params);
       const secs = Math.floor((performance.now() - t0) / 1000);
