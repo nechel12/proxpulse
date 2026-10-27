@@ -3706,7 +3706,16 @@ fn detect_install_kind() -> String {
     "portable".to_string()
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn detect_install_kind() -> String {
+    if std::env::var_os("APPIMAGE").is_some() {
+        "auto".to_string()
+    } else {
+        "package".to_string()
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
 fn detect_install_kind() -> String {
     "auto".to_string()
 }
