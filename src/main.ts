@@ -128,6 +128,15 @@ function updateJudgeUI(): void {
     document.getElementById(id)?.classList.toggle("hidden", j);
   }
   document.getElementById("judge-mode-row")?.classList.toggle("hidden", !j);
+  let insecure = false;
+  if (j) {
+    try {
+      const u = new URL(judgeBase());
+      const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(u.hostname);
+      insecure = u.protocol === "http:" && !local;
+    } catch { /* invalid URL is reported by the backend */ }
+  }
+  document.getElementById("judge-http-hint")?.classList.toggle("hidden", !insecure);
   ($("test-url-custom") as HTMLInputElement).placeholder = t(j ? "custom_judge_ph" : "custom_ph");
 }
 
@@ -685,6 +694,7 @@ type ParseResult = { list?: string[]; count: number; truncated: boolean };
 type ParsePending = {
   resolve: (r: ParseResult) => void;
   reject: (e: unknown) => void;
+  timer: number;
 };
 
 let parseWorker: Worker | null = null;
@@ -708,6 +718,7 @@ function getParseWorker(): Worker | null {
     ) => {
       const pending = parsePending.get(e.data.id);
       if (!pending) return;
+      window.clearTimeout(pending.timer);
       parsePending.delete(e.data.id);
       pending.resolve({
         list: e.data.list,
@@ -716,7 +727,10 @@ function getParseWorker(): Worker | null {
       });
     };
     w.onerror = (e) => {
-      for (const pending of parsePending.values()) pending.reject(e);
+      for (const pending of parsePending.values()) {
+        window.clearTimeout(pending.timer);
+        pending.reject(e);
+      }
       parsePending.clear();
       w.terminate();
       if (parseWorker === w) parseWorker = null;
@@ -750,7 +764,13 @@ function parseTextAsync(
   if (!w) return Promise.resolve(parseFallback(text, limit, wantList));
   return new Promise((resolve, reject) => {
     const id = ++parseSeq;
-    parsePending.set(id, { resolve, reject });
+    const timer = window.setTimeout(() => {
+      const pending = parsePending.get(id);
+      if (!pending) return;
+      parsePending.delete(id);
+      pending.reject(new Error("parse timeout"));
+    }, 20_000);
+    parsePending.set(id, { resolve, reject, timer });
     try {
       w.postMessage({
         id,
@@ -759,6 +779,7 @@ function parseTextAsync(
         mode: wantList ? "list" : "count",
       });
     } catch (e) {
+      window.clearTimeout(timer);
       parsePending.delete(id);
       reject(e);
     }
@@ -1786,6 +1807,7 @@ window.addEventListener("DOMContentLoaded", () => {
     renderProfileList();
   });
   ($("test-url") as HTMLSelectElement).addEventListener("change", updateJudgeUI);
+  ($("test-url-custom") as HTMLInputElement).addEventListener("input", updateJudgeUI);
   ($("judge-fast") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(false));
   ($("judge-full") as HTMLButtonElement).addEventListener("click", () => setJudgeFull(true));
 
