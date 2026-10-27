@@ -30,6 +30,8 @@ import { AutoSettingsStore } from "./auto-settings.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
+import { askText, screenVisible, setProgress } from "./ui.ts";
+import { NetStatus } from "./net-status.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
 import type { ProxyResult } from "./types.ts";
 
@@ -66,13 +68,10 @@ function setStatusT(key: string, params?: Record<string, string | number>) {
   $("status-line").textContent = t(key, params);
 }
 
-let netKey = "net_idle";
-let netParams: Record<string, string | number> | undefined;
-let netDot = "idle";
+const netStatus = new NetStatus();
 
 function renderNet(): void {
-  ($("net-dot") as HTMLElement).className = "dot " + netDot;
-  ($("net-text") as HTMLElement).textContent = t(netKey, netParams);
+  netStatus.render(t);
 }
 
 function setNet(
@@ -80,46 +79,8 @@ function setNet(
   key: string,
   params?: Record<string, string | number>,
 ) {
-  netDot = state;
-  netKey = key;
-  netParams = params;
+  netStatus.set(state, key, params);
   renderNet();
-}
-
-function askText(title: string, value = ""): Promise<string | null> {
-  const overlay = $("text-modal");
-  const input = $("text-modal-input") as HTMLInputElement;
-  const ok = $("text-modal-ok") as HTMLButtonElement;
-  const cancel = $("text-modal-cancel") as HTMLButtonElement;
-  $("text-modal-title").textContent = title;
-  input.value = value;
-  overlay.classList.remove("hidden");
-  input.focus();
-  input.select();
-  return new Promise((resolve) => {
-    const done = (v: string | null) => {
-      overlay.classList.add("hidden");
-      ok.onclick = null;
-      cancel.onclick = null;
-      overlay.onclick = null;
-      input.onkeydown = null;
-      resolve(v);
-    };
-    ok.onclick = () => done(input.value);
-    cancel.onclick = () => done(null);
-    overlay.onclick = (e) => {
-      if (e.target === overlay) done(null);
-    };
-    input.onkeydown = (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        done(input.value);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        done(null);
-      }
-    };
-  });
 }
 
 function applyI18n() {
@@ -181,11 +142,6 @@ function updateCounts() {
   ($("pool-count") as HTMLElement).textContent = String(pool.count);
   const apc = document.getElementById("auto-pool-count");
   if (apc) apc.textContent = String(pool.count);
-}
-
-function screenVisible(id: string): boolean {
-  const el = document.getElementById(id);
-  return !!el && !el.classList.contains("hidden");
 }
 
 function render() {
@@ -327,11 +283,6 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
   paint(out.length, list.length);
   out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
   return out;
-}
-
-function setProgress(done: number, total: number) {
-  const p = total === 0 ? 0 : Math.round((done / total) * 100);
-  ($("progress") as HTMLElement).style.width = `${p}%`;
 }
 
 // ---------- alive ping history (sparkline) ----------
