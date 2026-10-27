@@ -1888,7 +1888,7 @@ async fn check_proxies(
     geo_cache: Option<Vec<GeoCacheEntry>>,
     state: State<'_, CheckState>,
     on_result: Channel<ProxyResult>,
-) -> Result<Vec<ProxyResult>, String> {
+) -> Result<(), String> {
     let busy = state.busy.clone();
     if busy.swap(true, Ordering::SeqCst) {
         return Err(CHECK_BUSY.to_string());
@@ -1927,7 +1927,17 @@ async fn check_proxies(
         state.cancel.clone(),
         Some(&on_result),
     )
-    .await
+    .await?;
+    // The channel carries the authoritative result list; this marker tells
+    // the UI that the channel is drained. Returning the Vec as well duplicated
+    // the whole payload over IPC.
+    let _ = on_result.send(dead_result(
+        String::new(),
+        "__done__".to_string(),
+        0,
+        String::new(),
+    ));
+    Ok(())
 }
 
 #[tauri::command]
