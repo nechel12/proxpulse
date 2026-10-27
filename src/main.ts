@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { clip } from "./clip.ts";
 import { buildCsv, buildJson, buildTxt } from "./export.ts";
+import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } from "./pinggraph.ts";
 import { refreshStatusTexts, setStatusText } from "./status.ts";
 import {
   anonShort,
@@ -878,62 +879,19 @@ function setProgress(done: number, total: number) {
 
 // ---------- alive ping history (sparkline) ----------
 
-type PingPoint = { t: number; avg: number | null; alive: number };
 let pingHist: PingPoint[] = [];
-const PING_HIST_MAX = 120;
-
-function loadPingHist(): void {
-  try {
-    const raw = localStorage.getItem("pp-pinghist");
-    const arr = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(arr)) {
-      pingHist = arr
-        .filter((p) => p && typeof p.t === "number")
-        .map((p) => ({ t: p.t, avg: typeof p.avg === "number" ? p.avg : null, alive: Number(p.alive) || 0 }))
-        .slice(-PING_HIST_MAX);
-    }
-  } catch { /* ignore */ }
-}
-
-function pushPingPointStats(avg: number | null, alive: number): void {
-  pingHist.push({ t: Date.now(), avg, alive });
-  if (pingHist.length > PING_HIST_MAX) pingHist.splice(0, pingHist.length - PING_HIST_MAX);
-  try {
-    localStorage.setItem("pp-pinghist", JSON.stringify(pingHist));
-  } catch { /* ignore */ }
-  renderPingGraph();
-}
 
 function pushPingPoint(list: ProxyResult[] = results): void {
   const alive = list.filter((r) => r.alive);
   const lat = alive
     .map((r) => r.latency_ms)
     .filter((x): x is number => x != null);
-  pushPingPointStats(
+  pingHist = pushPingPointStats(
+    pingHist,
     lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null,
     alive.length,
   );
-}
-
-function renderPingGraph(): void {
-  const svg = document.getElementById("ping-graph") as unknown as SVGSVGElement | null;
-  if (!svg) return;
-  const pts = pingHist.filter((p) => p.avg != null);
-  if (pts.length < 2) {
-    svg.innerHTML = "";
-    return;
-  }
-  const vals = pts.map((p) => p.avg as number);
-  const min = Math.min(...vals);
-  const span = Math.max(1, Math.max(...vals) - min);
-  const n = pts.length;
-  const d = pts
-    .map((p, i) => `${((i / (n - 1)) * 100).toFixed(1)},${(30 - (((p.avg as number) - min) / span) * 26).toFixed(1)}`)
-    .join(" ");
-  const last = pts[pts.length - 1];
-  svg.innerHTML =
-    `<title>${last.avg} ms · alive ${last.alive} · ${new Date(last.t).toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US")}</title>` +
-    `<polyline points="${d}" />`;
+  renderPingGraph(pingHist, lang);
 }
 
 function deadStub(proxy: string, msg: string): ProxyResult {
@@ -1040,7 +998,8 @@ function onAutoStatus(ev: AutoStatusEvent): void {
       break;
   }
   if (ev.state === "done") {
-    pushPingPointStats(ev.avgMs ?? null, ev.alive);
+    pingHist = pushPingPointStats(pingHist, ev.avgMs, ev.alive);
+    renderPingGraph(pingHist, lang);
   }
   if (!running) {
     ($("btn-start") as HTMLButtonElement).disabled = false;
@@ -2032,8 +1991,8 @@ window.addEventListener("DOMContentLoaded", () => {
       renderPool();
     });
   });
-  loadPingHist();
-  renderPingGraph();
+  pingHist = loadPingHist();
+  renderPingGraph(pingHist, lang);
   for (const id of ["disp-max-ping", "auto-max-ping"]) {
     document.getElementById(id)?.addEventListener("change", (e) => {
       const v = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0));
