@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { clip } from "./clip.ts";
 import { buildCsv, buildJson, buildTxt } from "./export.ts";
+import { refreshStatusTexts, setStatusText } from "./status.ts";
 import {
   anonShort,
   geoShort,
@@ -41,20 +42,6 @@ function t(key: string, params?: Record<string, string | number>): string {
 }
 
 let lastStatus: { key: string; params?: Record<string, string | number> } = { key: "st_ready" };
-type StatusRenderer = () => string;
-const statusRenderers = new Map<string, StatusRenderer>();
-function setStatusText(id: string, render: StatusRenderer): void {
-  const el = document.getElementById(id);
-  if (el) el.textContent = render();
-  statusRenderers.set(id, render);
-}
-function refreshStatusTexts(): void {
-  statusRenderers.forEach((render, id) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = render();
-  });
-}
-
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 
