@@ -22,6 +22,6 @@ describe("auto events", () => {
       (key, params) => `${key}:${params?.r}`,
       (id, render) => { text = `${id}:${render()}`; },
     );
-    expect(text).toBe("webhook-status:webhook_sent:200");
+    expect(text).toBe("webhook-status:#1 webhook_sent:200");
   });
 });
