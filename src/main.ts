@@ -6,6 +6,7 @@ import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } fro
 import { refreshStatusTexts, setStatusText } from "./status.ts";
 import {
   anonShort,
+  escapeHtml,
   geoShort,
   pingClass,
   poolCountry,
@@ -866,10 +867,6 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
   paint(out.length, list.length);
   out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
   return out;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 }
 
 function setProgress(done: number, total: number) {

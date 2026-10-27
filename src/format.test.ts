@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   anonShort,
+  escapeHtml,
   geoShort,
   pingClass,
   poolCountry,
@@ -65,5 +66,11 @@ describe("format helpers", () => {
     const title = rowTitle({ ...base, tls: "unverified", tls_info: "handshake failed" });
     expect(title).toContain("tls unverified (handshake failed)");
     expect(title).toContain("IP 1.2.3.4");
+  });
+});
+
+describe("escapeHtml", () => {
+  it("escapes markup characters", () => {
+    expect(escapeHtml(`<a href="x">&'"</a>`)).toBe("&lt;a href=&quot;x&quot;&gt;&amp;&#39;&quot;&lt;/a&gt;");
   });
 });

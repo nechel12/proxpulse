@@ -57,3 +57,7 @@ export function rowTitle(r: ProxyResult): string {
 export function poolCountry(r: ProxyResult): string | null {
   return r.country_code ?? r.country ?? null;
 }
+
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
