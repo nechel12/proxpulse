@@ -1,15 +1,16 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { clip } from "./clip.ts";
-import { RENDER_STEP, ResultsView } from "./results.ts";
+import { ResultsView } from "./results.ts";
+import { PoolView, type PoolItem } from "./pool.ts";
 import { buildCsv, buildJson, buildTxt } from "./export.ts";
 import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } from "./pinggraph.ts";
 import { refreshStatusTexts, setStatusText } from "./status.ts";
 import {
 
-  escapeHtml,
 
-  pingClass,
+
+
   poolCountry,
 
 
@@ -51,14 +52,11 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
 let results: ProxyResult[] = [];
 const resultsView = new ResultsView();
 let filter: "all" | "alive" | "dead" = "all";
-const POOL_RENDER_MAX = 1000;
-const poolLimits = new Map<string, number>();
 let stopFlag = false;
 let running = false;
 let starting = false;
 let includeDead = false;
-type PoolItem = { raw: string; url: string; latency: number | null; country: string | null };
-let dispatchPool: PoolItem[] = [];
+const pool = new PoolView();
 let pollTimer: number | undefined;
 let autoRunning = false;
 let autoCfgTimer: number | undefined;
@@ -377,9 +375,9 @@ function updateCounts() {
     results.length === 0
       ? ""
       : t("foot_alive", { a: alive, b: results.length });
-  ($("pool-count") as HTMLElement).textContent = String(dispatchPool.length);
+  ($("pool-count") as HTMLElement).textContent = String(pool.count);
   const apc = document.getElementById("auto-pool-count");
-  if (apc) apc.textContent = String(dispatchPool.length);
+  if (apc) apc.textContent = String(pool.count);
 }
 
 function screenVisible(id: string): boolean {
@@ -391,133 +389,21 @@ function render() {
   resultsView.render(results, filter, t, () => screenVisible("screen-check"));
 }
 
-function getPoolView(tbodyId: string) {
-  const f = (document.querySelector(`[data-pool-filter="${tbodyId}"]`) as HTMLInputElement | null)?.value.toLowerCase().trim() ?? "";
-  const s = (document.querySelector(`[data-pool-sort="${tbodyId}"]`) as HTMLSelectElement | null)?.value ?? "added";
-  let rows = dispatchPool.map((p, i) => ({ ...p, i }));
-  if (f) {
-    rows = rows.filter((r) =>
-      r.raw.toLowerCase().includes(f) || (r.country ?? "").toLowerCase().includes(f)
-    );
-  }
-  if (s === "ping") rows.sort((a, b) => (a.latency ?? 1e12) - (b.latency ?? 1e12));
-  else if (s === "country") rows.sort((a, b) => (a.country ?? "~~~").localeCompare(b.country ?? "~~~"));
-  return rows;
-}
-
-function poolLimit(tbodyId: string): number {
-  return Math.min(poolLimits.get(tbodyId) ?? RENDER_STEP, POOL_RENDER_MAX);
-}
-
-function renderPoolInto(tbodyId: string) {
-  const pb = document.getElementById(tbodyId) as HTMLTableSectionElement | null;
-  if (!pb) return;
-  pb.innerHTML = "";
-  const cols = tbodyId === "pool-body" ? 4 : 3;
-  const all = getPoolView(tbodyId);
-  if (all.length === 0) {
-    const tr = document.createElement("tr");
-    tr.className = "empty";
-    const td = document.createElement("td");
-    td.colSpan = cols;
-    td.textContent = t(dispatchPool.length === 0 ? "pool_empty" : "empty_filter");
-    tr.appendChild(td);
-    pb.appendChild(tr);
-    return;
-  }
-  const limit = poolLimit(tbodyId);
-  all.slice(0, limit).forEach((p, n) => {
-    const tr = document.createElement("tr");
-    const ping = p.latency == null ? "—" : `${p.latency} ms`;
-    const geo = p.country ? ` <span class="geo-tag">${escapeHtml(p.country)}</span>` : "";
-    tr.innerHTML = `<td>${n + 1}</td><td>${escapeHtml(p.raw)}${geo}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
-    if (tbodyId === "pool-body") {
-      const td = document.createElement("td");
-      const b = document.createElement("button");
-      b.className = "btn ghost";
-      b.textContent = "✕";
-      b.addEventListener("click", () => {
-        const at = dispatchPool.findIndex((x) => x.raw === p.raw);
-        if (at >= 0) dispatchPool.splice(at, 1);
-        void syncPool(false);
-        renderPool();
-        updateCounts();
-      });
-      td.appendChild(b);
-      tr.appendChild(td);
-    }
-    pb.appendChild(tr);
-  });
-  if (all.length > limit) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = cols;
-    td.style.textAlign = "center";
-    if (limit < POOL_RENDER_MAX) {
-      const b = document.createElement("button");
-      b.className = "btn ghost";
-      b.textContent = t("show_more", { n: all.length - limit });
-      b.addEventListener("click", () => {
-        poolLimits.set(tbodyId, Math.min(POOL_RENDER_MAX, limit + RENDER_STEP));
-        renderPoolInto(tbodyId);
-      });
-      td.appendChild(b);
-    } else {
-      td.className = "empty";
-      td.textContent = t("render_limit", { n: limit, total: all.length });
-    }
-    tr.appendChild(td);
-    pb.appendChild(tr);
-  }
-}
-
 function renderPool() {
-  // The pool exists on two tabs; only the visible table is rebuilt.
-  if (screenVisible("screen-dispatch")) renderPoolInto("pool-body");
-  if (screenVisible("screen-auto")) renderPoolInto("auto-pool-body");
+  pool.render(t, (raw) => {
+    pool.remove(raw);
+    void syncPool(false);
+    renderPool();
+    updateCounts();
+  }, screenVisible);
 }
 
-
-
-/** merge: keep existing entries, add new ones, refresh latency.
- *  Entries over maxPingMs never enter the pool; re-checked entries
- *  that went over the limit are dropped. */
 function mergePool(items: { raw: string; url?: string | null; latency: number | null; country?: string | null }[]) {
-  const keyOf = (it: { raw: string; url?: string | null }) => it.url || it.raw;
-  const idx = new Map(dispatchPool.map((p, i) => [keyOf(p), i]));
-  const drop = new Set<number>();
-  for (const it of items) {
-    const key = keyOf(it);
-    const at = idx.get(key);
-    if (!passPing(it.latency)) {
-      if (at != null) drop.add(at);
-      continue;
-    }
-    if (at == null) {
-      if (dispatchPool.length >= MAX_PROXIES) continue;
-      idx.set(key, dispatchPool.length);
-      dispatchPool.push({
-        raw: it.raw,
-        url: it.url || it.raw,
-        latency: it.latency,
-        country: it.country ?? null,
-      });
-    } else {
-      if (it.url) dispatchPool[at].url = it.url;
-      if (it.latency != null) dispatchPool[at].latency = it.latency;
-      if (it.country != null) dispatchPool[at].country = it.country;
-    }
-  }
-  if (drop.size > 0) {
-    dispatchPool = dispatchPool.filter((_, i) => !drop.has(i));
-  }
+  pool.merge(items, maxPingMs, MAX_PROXIES);
 }
 
 let maxPingMs = 0;
 
-function passPing(latency: number | null): boolean {
-  return !(maxPingMs > 0 && latency != null && latency > maxPingMs);
-}
 
 function loadMaxPing(): void {
   try {
@@ -829,7 +715,7 @@ function deadStub(proxy: string, msg: string): ProxyResult {
 async function syncPool(notify: boolean): Promise<number> {
   try {
     const n = await invoke<number>("set_dispatch_pool", {
-      items: dispatchPool.map((p) => ({
+      items: pool.items.map((p) => ({
         raw: p.raw,
         url: p.url,
         latency: p.latency,
@@ -937,12 +823,12 @@ function onAutoStatus(ev: AutoStatusEvent): void {
 }
 
 function onAutoPool(ev: AutoPoolEvent): void {
-  dispatchPool = ev.items.map((p) => ({
+  pool.set(ev.items.map((p) => ({
     raw: p.raw,
     url: p.url,
     latency: p.latency,
     country: p.country ?? null,
-  }));
+  })));
   renderPool();
   updateCounts();
 }
@@ -1131,14 +1017,14 @@ async function sendWebhook(manual: boolean): Promise<void> {
     if (manual) setStatusText("webhook-status", () => t("webhook_hint"));
     return;
   }
-  if (dispatchPool.length === 0) {
+  if (pool.count === 0) {
     setStatusText("webhook-status", () => t("webhook_empty"));
     return;
   }
   if (webhookSending) return;
   webhookSending = true;
   const format = ($("webhook-format") as HTMLSelectElement).value;
-  const items = dispatchPool.map((p) => ({
+  const items = pool.items.map((p) => ({
     raw: p.raw,
     url: p.url,
     latency: p.latency,
@@ -1573,7 +1459,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   function doPoolClear(): void {
-    dispatchPool = [];
+    pool.clear();
     // The backend stops a running dispatcher when the pool becomes empty;
     // refresh the status once the sync completes.
     void syncPool(false).then(() => {
@@ -1757,7 +1643,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const listener = ($("srv-listener") as HTMLSelectElement).value;
     setStatusText("srv-status", () => "...");
     try {
-      if (dispatchPool.length === 0) {
+      if (pool.count === 0) {
         mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
         renderPool();
         updateCounts();
@@ -1816,7 +1702,7 @@ window.addEventListener("DOMContentLoaded", () => {
       lang,
       results: results.length,
       alive: results.filter((r) => r.alive).length,
-      pool: dispatchPool.length,
+      pool: pool.count,
       judge: isJudgeMode() ? effectiveTestUrl() : null,
       errors: errRing.slice(-20),
     };
@@ -1908,14 +1794,14 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll<HTMLInputElement>("[data-pool-filter]").forEach((el) => {
     el.addEventListener("input", () => {
       const id = el.dataset.poolFilter;
-      if (id) poolLimits.set(id, RENDER_STEP);
+      if (id) pool.resetLimit(id);
       renderPool();
     });
   });
   document.querySelectorAll<HTMLSelectElement>("[data-pool-sort]").forEach((el) => {
     el.addEventListener("change", () => {
       const id = el.dataset.poolSort;
-      if (id) poolLimits.set(id, RENDER_STEP);
+      if (id) pool.resetLimit(id);
       renderPool();
     });
   });
@@ -1989,12 +1875,12 @@ window.addEventListener("DOMContentLoaded", () => {
   // the authoritative pool and dispatcher state instead of showing empty.
   void invoke<PoolItem[]>("get_dispatch_pool")
     .then((items) => {
-      dispatchPool = items.map((p) => ({
+      pool.set(items.map((p) => ({
         raw: p.raw,
         url: p.url,
         latency: p.latency,
         country: p.country ?? null,
-      }));
+      })));
       renderPool();
       updateCounts();
     })
