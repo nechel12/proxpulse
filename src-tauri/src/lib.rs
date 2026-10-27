@@ -2591,9 +2591,11 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                     let forward = prepare_forward_request(&buf, hdr_end, up);
                     ups.write_all(&forward).await
                 } else {
-                    // SOCKS tunnel: strip the client's proxy credentials
-                    // before handing the request to the origin.
+                    // SOCKS tunnel: strip local-proxy headers before handing
+                    // the request to the origin.
                     let stripped = strip_header(&buf, hdr_end, "proxy-authorization");
+                    let end = find_header_end(&stripped).unwrap_or(stripped.len());
+                    let stripped = strip_header(&stripped, end, "proxy-connection");
                     ups.write_all(&stripped).await
                 };
                 if let Err(e) = write_res {

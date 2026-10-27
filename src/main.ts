@@ -1097,6 +1097,8 @@ function getWebhookUrls(): string[] {
   return webhookUrls.map((s) => s.trim()).filter(Boolean).slice(0, 10);
 }
 
+let webhookSending = false;
+
 async function sendWebhook(manual: boolean): Promise<void> {
   const urls = getWebhookUrls();
   const statusEl = $("webhook-status") as HTMLElement;
@@ -1108,6 +1110,8 @@ async function sendWebhook(manual: boolean): Promise<void> {
     statusEl.textContent = t("webhook_empty");
     return;
   }
+  if (webhookSending) return;
+  webhookSending = true;
   const format = ($("webhook-format") as HTMLSelectElement).value;
   const items = dispatchPool.map((p) => ({
     raw: p.raw,
@@ -1126,6 +1130,8 @@ async function sendWebhook(manual: boolean): Promise<void> {
     statusEl.textContent = formatWebhookResults(results);
   } catch (e) {
     statusEl.textContent = t("webhook_fail", { e: String(e).slice(0, 120) });
+  } finally {
+    webhookSending = false;
   }
 }
 
@@ -1766,16 +1772,21 @@ window.addEventListener("DOMContentLoaded", () => {
   ($("btn-install-upd") as HTMLButtonElement).addEventListener("click", async () => {
     if (!pendingVersion) return;
     const el = $("upd-status") as HTMLElement;
+    const btn = $("btn-install-upd") as HTMLButtonElement;
+    if (btn.disabled) return;
     try {
       const { confirm } = await import("@tauri-apps/plugin-dialog");
       const ok = await confirm(t("upd_confirm", { v: pendingVersion }), { title: "ProxPulse", kind: "info" });
       if (!ok) return;
+      btn.disabled = true;
       el.textContent = t("upd_installing");
       await invoke("install_app_update");
       el.textContent = t("upd_restart");
     } catch (e) {
       logErr("update-install: " + String(e).slice(0, 200));
       el.textContent = t("upd_fail");
+    } finally {
+      btn.disabled = false;
     }
   });
   ($("btn-open-rel") as HTMLButtonElement).addEventListener("click", async () => {
