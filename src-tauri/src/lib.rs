@@ -4355,6 +4355,13 @@ mod tests {
         assert_eq!(st.inner.connections.lock().await.len(), 0);
     }
 
+    #[tokio::test]
+    async fn url_import_rejects_loopback_before_connecting() {
+        let err = fetch_url_text("http://127.0.0.1:9/list".to_string())
+            .await
+            .unwrap_err();
+        assert_eq!(err, "private address");
+    }
     #[test]
     fn import_urls_reject_private_targets() {
         for ip in [
