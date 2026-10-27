@@ -30,6 +30,7 @@ import { errorLog, logErr } from "./diagnostics.ts";
 import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
 import { AutoSettingsStore } from "./auto-settings.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
+import { initSourcePanel } from "./source-panel.ts";
 import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
@@ -724,37 +725,16 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  const input = $("proxy-input") as HTMLTextAreaElement;
-  let updGen = 0;
-  const upd = () => {
-    const text = input.value;
-    if (text.length > MAX_INPUT_CHARS) {
-      ($("src-count") as HTMLElement).textContent = "!";
-      return;
-    }
-    const gen = ++updGen;
-    void parseTextAsync(text, MAX_PROXIES + 1, false)
-      .then((r) => {
-        if (gen !== updGen) return;
-        ($("src-count") as HTMLElement).textContent =
-          String(Math.min(r.count, MAX_PROXIES)) +
-          (r.count > MAX_PROXIES ? "+" : "");
-      })
-      .catch(() => {
-        if (gen !== updGen) return;
-        try {
-          const list = extractProxiesFromText(text, MAX_PROXIES + 1);
-          ($("src-count") as HTMLElement).textContent =
-            String(Math.min(list.length, MAX_PROXIES)) +
-            (list.length > MAX_PROXIES ? "+" : "");
-        } catch {
-          ($("src-count") as HTMLElement).textContent = "!";
-        }
-      });
-  };
-  let updT: number | undefined;
-  input.addEventListener("input", () => { window.clearTimeout(updT); updT = window.setTimeout(upd, 250); });
-  upd();
+  initSourcePanel({
+    parseTextAsync,
+    extractProxies: extractProxiesFromText,
+    fetchUrl: (url) => invoke<string>("fetch_url_text", { url }),
+    setStatus: setStatusT,
+    maxProxies: MAX_PROXIES,
+    maxInputChars: MAX_INPUT_CHARS,
+    maxFileBytes: MAX_FILE_BYTES,
+    maxFileMb: MAX_FILE_MB,
+  });
 
   $("btn-start").addEventListener("click", () => void start());
   $("btn-stop").addEventListener("click", () => {
@@ -776,34 +756,6 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  $("btn-clear-in").addEventListener("click", () => { input.value = ""; upd(); });
-  ($("btn-import-url") as HTMLButtonElement).addEventListener("click", async () => {
-    const u = (($("import-url") as HTMLInputElement).value || "").trim();
-    if (!u) return;
-    $("status-line").textContent = "…";
-    try {
-      const txt = await invoke<string>("fetch_url_text", { url: u });
-      let found: string[] = [];
-      try {
-        const parsed = await parseTextAsync(txt, MAX_PROXIES, true);
-        found = parsed.list ?? [];
-      } catch {
-        found = extractProxiesFromText(txt, MAX_PROXIES);
-      }
-      if (found.length === 0) {
-        lastStatus = { key: "file_none", params: { name: u.slice(0, 60) } };
-        $("status-line").textContent = t("file_none", { name: u.slice(0, 60) });
-        return;
-      }
-      input.value = (input.value ? input.value.replace(/\s+$/, "") + "\n" : "") + found.join("\n");
-      upd();
-      lastStatus = { key: "url_loaded", params: { n: found.length } };
-      $("status-line").textContent = t("url_loaded", { n: found.length });
-    } catch {
-      lastStatus = { key: "url_fail" };
-      $("status-line").textContent = t("url_fail");
-    }
-  });
   async function doPoolSync(statusElId: string): Promise<void> {
     mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
     renderPool();
@@ -820,8 +772,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   function doPoolClear(): void {
     pool.clear();
-    // The backend stops a running dispatcher when the pool becomes empty;
-    // refresh the status once the sync completes.
     void syncPool(false).then(() => {
       setStatusText("srv-status", () => t("srv_off"));
       void dispatchMonitor.poll(t, setStatusText);
@@ -832,43 +782,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   ($("btn-pool-clear") as HTMLButtonElement).addEventListener("click", doPoolClear);
   ($("btn-auto-pool-clear") as HTMLButtonElement).addEventListener("click", doPoolClear);
-  $("file-input").addEventListener("change", async (e) => {
-    const files = (e.target as HTMLInputElement).files;
-    if (!files || files.length === 0) return;
-    const parts: string[] = [];
-    for (const f of Array.from(files)) {
-      if (f.size > MAX_FILE_BYTES) {
-        lastStatus = { key: "file_too_big", params: { name: f.name, mb: MAX_FILE_MB } };
-        $("status-line").textContent = t("file_too_big", { name: f.name, mb: MAX_FILE_MB });
-        continue;
-      }
-      try {
-        const txt = await f.text();
-        let found: string[] = [];
-        try {
-          const parsed = await parseTextAsync(txt, MAX_PROXIES, true);
-          found = parsed.list ?? [];
-        } catch {
-          found = extractProxiesFromText(txt, MAX_PROXIES);
-        }
-        if (found.length > 0) parts.push(...found);
-        else {
-          lastStatus = { key: "file_none", params: { name: f.name } };
-          $("status-line").textContent = t("file_none", { name: f.name });
-        }
-      } catch {
-        lastStatus = { key: "file_fail", params: { name: f.name } };
-        $("status-line").textContent = t("file_fail", { name: f.name });
-      }
-    }
-    if (parts.length > 0) {
-      input.value = (input.value ? input.value.replace(/\s+$/, "") + "\n" : "") + parts.join("\n");
-      upd();
-      lastStatus = { key: "file_loaded", params: { n: parts.length, f: files.length } };
-      $("status-line").textContent = t("file_loaded", { n: parts.length, f: files.length });
-    }
-    (e.target as HTMLInputElement).value = "";
-  });
 
   // export dropdown + dead toggle
   const menu = $("export-menu");
