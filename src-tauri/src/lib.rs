@@ -2557,6 +2557,58 @@ async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
     out
 }
 
+struct CountingIo<T> {
+    inner: T,
+    written: Arc<AtomicU64>,
+}
+
+impl<T> CountingIo<T> {
+    fn new(inner: T, written: Arc<AtomicU64>) -> Self {
+        Self { inner, written }
+    }
+
+    fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+impl<T: AsyncRead + Unpin> AsyncRead for CountingIo<T> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+    }
+}
+
+impl<T: AsyncWrite + Unpin> AsyncWrite for CountingIo<T> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let this = self.get_mut();
+        match Pin::new(&mut this.inner).poll_write(cx, buf) {
+            Poll::Ready(Ok(n)) => {
+                if n > 0 {
+                    this.written.fetch_add(n as u64, Ordering::Relaxed);
+                }
+                Poll::Ready(Ok(n))
+            }
+            other => other,
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
 async fn abort_connections(inner: &Arc<DispatchInner>) {
     let mut conns = inner.connections.lock().await;
     conns.abort_all();
@@ -2668,11 +2720,16 @@ async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                     }
                     return;
                 }
-                if tokio::io::copy_bidirectional(&mut client, &mut ups)
-                    .await
-                    .is_err()
-                {
+                let written = Arc::new(AtomicU64::new(0));
+                let mut counted = CountingIo::new(client, written.clone());
+                let copy_res = tokio::io::copy_bidirectional(&mut counted, &mut ups).await;
+                client = counted.into_inner();
+                if let Err(e) = copy_res {
                     st.errors.fetch_add(1, Ordering::Relaxed);
+                    last_err = e.to_string();
+                    if can_retry && written.load(Ordering::Relaxed) == 0 {
+                        continue;
+                    }
                 }
                 return;
             }
@@ -4073,6 +4130,18 @@ mod tests {
         }
         abort_connections(&st.inner).await;
         assert_eq!(st.inner.connections.lock().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn counting_io_tracks_written_bytes() {
+        let (client, mut peer) = tokio::io::duplex(64);
+        let written = Arc::new(AtomicU64::new(0));
+        let mut counted = CountingIo::new(client, written.clone());
+        counted.write_all(b"hello").await.unwrap();
+        assert_eq!(written.load(Ordering::Relaxed), 5);
+        let mut got = [0u8; 5];
+        peer.read_exact(&mut got).await.unwrap();
+        assert_eq!(&got, b"hello");
     }
 
     #[test]
