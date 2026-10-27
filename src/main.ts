@@ -16,16 +16,11 @@ import {
 
 
 } from "./format.ts";
-import {
-  type GeoEntry,
-  type GeoFields,
-  isFreshGeo,
-  mergeGeoEntry,
-} from "./geocache.ts";
+import { GeoCacheStore } from "./geo-store.ts";
 import { type Lang, translate } from "./i18n.ts";
 import { resolveTestUrl } from "./ipapi.ts";
 import { resolveJudgeUrl } from "./judge.ts";
-import { extractProxiesFromText, stripProxyCredentials } from "./parse.ts";
+import { extractProxiesFromText } from "./parse.ts";
 import { parseFallback, parseTextAsync, type ParseResult } from "./parse-runner.ts";
 import {
   BUILTIN_PROFILES,
@@ -424,71 +419,7 @@ function syncMaxPingInputs(): void {
 
 // ---------- geo cache (skip repeated geo lookups for unchanged exit IPs) ----------
 
-const geoCache = new Map<string, GeoEntry>();
-const GEO_CACHE_MAX = 2000;
-
-function loadGeoCache(): void {
-  try {
-    const raw = localStorage.getItem("pp-geocache");
-    if (!raw) return;
-    const arr = JSON.parse(raw) as [string, Partial<GeoEntry>][];
-    const str = (v: unknown) => (typeof v === "string" ? v : null);
-    for (const [k, v] of arr.slice(-GEO_CACHE_MAX)) {
-      if (typeof k !== "string" || !v || typeof v !== "object") continue;
-      const g = v;
-      geoCache.set(stripProxyCredentials(k), {
-        ip: str(g.ip),
-        country: str(g.country),
-        country_code: str(g.country_code),
-        city: str(g.city),
-        isp: str(g.isp),
-        org: str(g.org),
-        asn: str(g.asn),
-        ip_type: str(g.ip_type),
-        // Entries written before timestamps existed are treated as stale.
-        ts: typeof g.ts === "number" ? g.ts : 0,
-      });
-    }
-  } catch { /* ignore */ }
-}
-
-function persistGeoCache(): void {
-  try {
-    localStorage.setItem("pp-geocache", JSON.stringify([...geoCache.entries()].slice(-GEO_CACHE_MAX)));
-  } catch { /* ignore (quota) */ }
-}
-
-function learnGeo(list: ProxyResult[]): void {
-  let changed = false;
-  for (const r of list) {
-    if (!r.alive || r.ip == null) continue;
-    const key = stripProxyCredentials(r.proxy);
-    const next: GeoFields = {
-      ip: r.ip, country: r.country, country_code: r.country_code, city: r.city,
-      isp: r.isp, org: r.org, asn: r.asn, ip_type: r.ip_type,
-    };
-    geoCache.set(key, mergeGeoEntry(geoCache.get(key), next));
-    changed = true;
-  }
-  if (changed) {
-    while (geoCache.size > GEO_CACHE_MAX) {
-      const first = geoCache.keys().next();
-      if (first.done) break;
-      geoCache.delete(first.value);
-    }
-    persistGeoCache();
-  }
-}
-
-function relevantGeoCache(list: string[]): (GeoEntry & { proxy: string })[] {
-  const out: (GeoEntry & { proxy: string })[] = [];
-  for (const p of list) {
-    const key = stripProxyCredentials(p);
-    const f = geoCache.get(key);
-    if (f && isFreshGeo(f)) out.push({ proxy: key, ...f });
-  }
-  return out;
-}
+const geoCache = new GeoCacheStore();
 
 function readCheckSettings() {
   const judge = isJudgeMode();
@@ -574,7 +505,7 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
       precheckTimeoutMs: s.precheckTimeoutMs,
       judgeMode: s.judgeMode,
       ipapiKey: s.ipapiKey,
-      geoCache: relevantGeoCache(list),
+      geoCache: geoCache.relevant(list),
       onResult: channel,
     });
     await done;
@@ -1038,7 +969,7 @@ async function startInner() {
     setNet("idle", "net_idle");
     return;
   }
-  learnGeo(results);
+  geoCache.learn(results);
   render();
   updateCounts();
   setProgress(stopFlag ? results.length : list.length, list.length);
@@ -1591,7 +1522,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   // diagnostics + updates
-  loadGeoCache();
+  geoCache.load();
   loadErrRing();
   renderErrList();
   void invoke<string>("app_version")
