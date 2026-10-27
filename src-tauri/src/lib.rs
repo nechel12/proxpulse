@@ -2218,13 +2218,12 @@ fn fmt_countdown(s: Option<u64>, ru: bool) -> String {
     }
 }
 
-fn trunc_url(u: &str) -> String {
-    let chars: Vec<char> = u.chars().collect();
-    if chars.len() > 42 {
-        chars[..39].iter().collect::<String>() + "…"
-    } else {
-        u.to_string()
-    }
+/// Only the host is shown in the tray: webhook URLs may contain secrets.
+fn url_host(u: &str) -> String {
+    reqwest::Url::parse(u)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_default()
 }
 
 async fn refresh_tray_menu(app: &tauri::AppHandle) {
@@ -2304,15 +2303,17 @@ async fn refresh_tray_menu(app: &tauri::AppHandle) {
         let next_disp = MenuItem::with_id(app, "next_disp", &next_disp_txt, false, None::<&str>)?;
         let next_auto = MenuItem::with_id(app, "next_auto", &next_auto_txt, false, None::<&str>)?;
         let webhook_txt = if info.webhook_on && !info.webhook_url.trim().is_empty() {
-            format!(
-                "{} {}",
-                if ru {
-                    "Вебхук: вкл"
-                } else {
-                    "Webhook: on"
-                },
-                trunc_url(info.webhook_url.trim())
-            )
+            let label = if ru {
+                "Вебхук: вкл"
+            } else {
+                "Webhook: on"
+            };
+            let host = url_host(info.webhook_url.trim());
+            if host.is_empty() {
+                label.to_string()
+            } else {
+                format!("{label} {host}")
+            }
         } else if ru {
             "Вебхук: выкл".to_string()
         } else {

@@ -254,10 +254,24 @@ function setStatusT(key: string, params?: Record<string, string | number>) {
   $("status-line").textContent = t(key, params);
 }
 
-function setNet(state: "idle" | "work" | "done", text: string) {
-  const dot = $("net-dot");
-  dot.className = "dot " + state;
-  $("net-text").textContent = text;
+let netKey = "net_idle";
+let netParams: Record<string, string | number> | undefined;
+let netDot = "idle";
+
+function renderNet(): void {
+  ($("net-dot") as HTMLElement).className = "dot " + netDot;
+  ($("net-text") as HTMLElement).textContent = t(netKey, netParams);
+}
+
+function setNet(
+  state: "idle" | "work" | "done",
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  netDot = state;
+  netKey = key;
+  netParams = params;
+  renderNet();
 }
 
 function askText(title: string, value = ""): Promise<string | null> {
@@ -320,15 +334,23 @@ function applyI18n() {
   updateCounts();
   updateJudgeUI();
   updateIpapiUI();
+  renderNet();
 }
 
 function updateCounts() {
-  const alive = results.filter((r) => r.alive).length;
+  let alive = 0;
+  let latSum = 0;
+  let latN = 0;
+  for (const r of results) {
+    if (!r.alive) continue;
+    alive += 1;
+    if (r.latency_ms != null) {
+      latSum += r.latency_ms;
+      latN += 1;
+    }
+  }
   const dead = results.length - alive;
-  const lat = results
-    .filter((r) => r.alive && r.latency_ms != null)
-    .map((r) => r.latency_ms as number);
-  const avg = lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null;
+  const avg = latN > 0 ? Math.round(latSum / latN) : null;
 
   ($("st-total") as HTMLElement).textContent = String(results.length);
   ($("st-alive") as HTMLElement).textContent = String(alive);
@@ -762,7 +784,9 @@ async function runCheckList(list: string[], onProgress?: (done: number, total: n
     const now = performance.now();
     if (now - lastPaint < 300 && done < total) return;
     lastPaint = now;
-    out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
+    if (done >= total) {
+      out.sort((a, b) => Number(b.alive) - Number(a.alive) || (a.latency_ms ?? 1e12) - (b.latency_ms ?? 1e12));
+    }
     onLive?.([...out]);
     onProgress?.(done, total);
   };
@@ -1276,7 +1300,7 @@ async function startInner() {
   updateCounts();
   ($("btn-start") as HTMLButtonElement).disabled = true;
   ($("btn-stop") as HTMLButtonElement).disabled = false;
-  setNet("work", t("net_work", { s: 0 }));
+  setNet("work", "net_work", { s: 0 });
   setProgress(0, list.length);
   const t0 = performance.now();
 
@@ -1286,7 +1310,7 @@ async function startInner() {
       lastStatus = { key: "st_checking", params: { done, total } };
       $("status-line").textContent = t("st_checking", lastStatus.params);
       const secs = Math.floor((performance.now() - t0) / 1000);
-      setNet("work", t("net_work", { s: secs }));
+      setNet("work", "net_work", { s: secs });
       render();
       updateCounts();
       setProgress(done, total);
@@ -1303,7 +1327,7 @@ async function startInner() {
   }
   if (busy) {
     setStatusT("auto_skip");
-    setNet("idle", t("net_idle"));
+    setNet("idle", "net_idle");
     return;
   }
   learnGeo(results);
@@ -1316,7 +1340,7 @@ async function startInner() {
   if (stopFlag) setStatusT("st_stopped", { alive, total: results.length });
   else if (truncated) setStatusT("st_done_trunc", { secs, alive, total: results.length, n: MAX_PROXIES });
   else setStatusT("st_done", { secs, alive, total: results.length });
-  setNet("done", stopFlag ? t("net_stopped") : t("net_done"));
+  setNet("done", stopFlag ? "net_stopped" : "net_done");
 
   // merge alive into dispatcher pool (existing entries kept)
   mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
