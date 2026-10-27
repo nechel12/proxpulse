@@ -1,5 +1,6 @@
-﻿use crate::{
-    is_http_url, read_body_capped, short_error, strip_credentials, DispatchItem, WebhookResult,
+use crate::commands::dispatch::DispatchItem;
+use crate::{
+    is_http_url, read_body_capped, short_error, strip_credentials, WebhookResult,
     BODY_LIMIT_WEBHOOK,
 };
 use std::sync::Arc;

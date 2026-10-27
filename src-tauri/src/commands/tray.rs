@@ -1,4 +1,5 @@
-use crate::{epoch_secs, AutoState, DispatchState};
+use crate::commands::dispatch::DispatchState;
+use crate::{epoch_secs, AutoState};
 use std::sync::atomic::Ordering;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::{Manager, State};
