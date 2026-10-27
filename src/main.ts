@@ -17,6 +17,7 @@ import {
 
 } from "./format.ts";
 import { GeoCacheStore } from "./geo-store.ts";
+import { WebhookPanel, formatWebhookResults, type WebhookResult } from "./webhooks.ts";
 import { type Lang, translate } from "./i18n.ts";
 import { resolveTestUrl } from "./ipapi.ts";
 import { resolveJudgeUrl } from "./judge.ts";
@@ -575,7 +576,7 @@ function armTimers() {
 
 async function updateTray(): Promise<void> {
   try {
-    const urls = getWebhookUrls();
+    const urls = webhooks.getUrls();
     await invoke("update_tray_status", {
       webhookOn: autoOn && urls.length > 0,
       webhookUrl: urls[0] ?? "",
@@ -586,7 +587,6 @@ async function updateTray(): Promise<void> {
 
 // ---------- scheduled checks (Rust scheduler events) ----------
 
-type WebhookResult = { index: number; ok: boolean; message: string };
 type AutoStatusEvent = {
   schedule: "disp" | "auto";
   state: "running" | "done" | "stopped" | "skipped" | "empty" | "error";
@@ -599,16 +599,6 @@ type AutoStatusEvent = {
 type AutoPoolEvent = { items: PoolItem[] };
 type AutoWebhookEvent = { results: WebhookResult[] };
 
-function formatWebhookResults(results: WebhookResult[]): string {
-  return results
-    .map((r) => {
-      const n = r.index < 100 ? r.index + 1 : "?";
-      return `#${n} ${r.ok
-        ? t("webhook_sent", { r: r.message })
-        : t("webhook_fail", { e: r.message })}`;
-    })
-    .join(" | ");
-}
 
 function onAutoStatus(ev: AutoStatusEvent): void {
   const id = ev.schedule === "disp" ? "disp-auto-status" : "auto-status";
@@ -670,7 +660,7 @@ function onAutoPool(ev: AutoPoolEvent): void {
 }
 
 function onAutoWebhook(ev: AutoWebhookEvent): void {
-  setStatusText("webhook-status", () => formatWebhookResults(ev.results));
+  setStatusText("webhook-status", () => formatWebhookResults(ev.results, t));
 }
 
 function buildAutoSettings() {
@@ -689,9 +679,9 @@ function buildAutoSettings() {
     autoEnabled: autoOn,
     autoIntervalMin: minutes("auto-min", 30),
     maxPingMs,
-    webhookUrls: getWebhookUrls(),
+    webhookUrls: webhooks.getUrls(),
     webhookFormat: ($("webhook-format") as HTMLSelectElement).value,
-    webhookIncludeCredentials: webhookIncludeCreds,
+    webhookIncludeCredentials: webhooks.includeCreds,
     testUrl: s.testUrl,
     timeoutMs: s.timeoutMs,
     concurrency: s.concurrency,
@@ -774,113 +764,10 @@ function loadAutoSettings(): void {
   setPressed("disp-auto-on", dispAutoOn);
 }
 
-let webhookUrls: string[] = [""];
-let webhookIncludeCreds = false;
-
-function loadWebhookCreds(): void {
-  try {
-    webhookIncludeCreds = localStorage.getItem("pp-webhook-creds") === "1";
-  } catch {
-    webhookIncludeCreds = false;
-  }
-}
-
-function saveWebhookCreds(): void {
-  try {
-    localStorage.setItem("pp-webhook-creds", webhookIncludeCreds ? "1" : "0");
-  } catch { /* ignore */ }
-}
-
-function loadWebhooks(): void {
-  try {
-    const raw = localStorage.getItem("pp-webhooks");
-    const arr = raw ? JSON.parse(raw) : null;
-    webhookUrls = Array.isArray(arr)
-      ? arr.filter((s): s is string => typeof s === "string").slice(0, 10)
-      : [""];
-  } catch {
-    webhookUrls = [""];
-  }
-  if (webhookUrls.length === 0) webhookUrls = [""];
-}
-
-function saveWebhooks(): void {
-  try {
-    localStorage.setItem("pp-webhooks", JSON.stringify(webhookUrls.slice(0, 10)));
-  } catch { /* ignore */ }
-  scheduleAutoConfig();
-}
-
-function renderWebhookList(): void {
-  const box = $("webhook-list");
-  box.innerHTML = "";
-  webhookUrls.forEach((u, i) => {
-    const row = document.createElement("div");
-    row.className = "hrow";
-    const inp = document.createElement("input");
-    inp.value = u;
-    inp.placeholder = "https://...";
-    inp.spellcheck = false;
-    inp.addEventListener("input", () => {
-      webhookUrls[i] = inp.value;
-      saveWebhooks();
-    });
-    const del = document.createElement("button");
-    del.className = "btn ghost";
-    del.textContent = "✕";
-    del.addEventListener("click", () => {
-      webhookUrls.splice(i, 1);
-      if (webhookUrls.length === 0) webhookUrls.push("");
-      saveWebhooks();
-      scheduleAutoConfig();
-      renderWebhookList();
-    });
-    row.appendChild(inp);
-    row.appendChild(del);
-    box.appendChild(row);
-  });
-}
-
-function getWebhookUrls(): string[] {
-  return webhookUrls.map((s) => s.trim()).filter(Boolean).slice(0, 10);
-}
-
-let webhookSending = false;
+const webhooks = new WebhookPanel(() => scheduleAutoConfig());
 
 async function sendWebhook(manual: boolean): Promise<void> {
-  const urls = getWebhookUrls();
-  if (urls.length === 0) {
-    if (manual) setStatusText("webhook-status", () => t("webhook_hint"));
-    return;
-  }
-  if (pool.count === 0) {
-    setStatusText("webhook-status", () => t("webhook_empty"));
-    return;
-  }
-  if (webhookSending) return;
-  webhookSending = true;
-  const format = ($("webhook-format") as HTMLSelectElement).value;
-  const items = pool.items.map((p) => ({
-    raw: p.raw,
-    url: p.url,
-    latency: p.latency,
-    country: p.country,
-  }));
-  setStatusText("webhook-status", () => "...");
-  try {
-    const results = await invoke<WebhookResult[]>("send_webhooks", {
-      urls,
-      format,
-      items,
-      includeCredentials: webhookIncludeCreds,
-    });
-    setStatusText("webhook-status", () => formatWebhookResults(results));
-  } catch (e) {
-    const msg = String(e).slice(0, 120);
-    setStatusText("webhook-status", () => t("webhook_fail", { e: msg }));
-  } finally {
-    webhookSending = false;
-  }
+  await webhooks.send(manual, pool.items, t, setStatusText);
 }
 
 async function start() {
@@ -1654,24 +1541,22 @@ window.addEventListener("DOMContentLoaded", () => {
       scheduleAutoConfig();
     });
   }
-  loadWebhooks();
-  loadWebhookCreds();
+  webhooks.load();
   loadIpapiSettings();
   loadAutoSettings();
   loadCurrentSettings();
-  ($("chk-webhook-creds") as HTMLInputElement).checked = webhookIncludeCreds;
+  ($("chk-webhook-creds") as HTMLInputElement).checked = webhooks.includeCreds;
   ($("chk-webhook-creds") as HTMLInputElement).addEventListener("change", (e) => {
-    webhookIncludeCreds = (e.target as HTMLInputElement).checked;
-    saveWebhookCreds();
+    webhooks.includeCreds = (e.target as HTMLInputElement).checked;
+    webhooks.saveCreds();
     scheduleAutoConfig();
   });
-  renderWebhookList();
+  webhooks.render();
   ($("btn-webhook-add") as HTMLButtonElement).addEventListener("click", () => {
-    if (webhookUrls.length >= 10) return;
-    webhookUrls.push("");
-    saveWebhooks();
-    renderWebhookList();
-    scheduleAutoConfig();
+    if (webhooks.urls.length >= 10) return;
+    webhooks.urls.push("");
+    webhooks.saveUrls();
+    webhooks.render();
     const inputs = document.querySelectorAll<HTMLInputElement>("#webhook-list input");
     inputs[inputs.length - 1]?.focus();
   });
