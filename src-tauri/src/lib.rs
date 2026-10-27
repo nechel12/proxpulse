@@ -1,13 +1,13 @@
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-    Arc,
+    Arc, Mutex as StdMutex, OnceLock,
 };
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -337,11 +337,39 @@ fn short_error(e: &str) -> String {
     s.trim().to_string()
 }
 
+const CLIENT_CACHE_MAX: usize = 256;
+
+struct ClientCache {
+    map: HashMap<(String, u64, bool), reqwest::Client>,
+    order: VecDeque<(String, u64, bool)>,
+}
+
+fn client_cache() -> &'static StdMutex<ClientCache> {
+    static CACHE: OnceLock<StdMutex<ClientCache>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        StdMutex::new(ClientCache {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+        })
+    })
+}
+
 fn build_client(
     proxy_url: Option<&str>,
     timeout: Duration,
     no_proxy: bool,
 ) -> Result<reqwest::Client, String> {
+    let key = (
+        proxy_url.unwrap_or_default().to_string(),
+        timeout.as_millis() as u64,
+        no_proxy,
+    );
+    {
+        let cache = client_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(client) = cache.map.get(&key) {
+            return Ok(client.clone());
+        }
+    }
     let mut b = reqwest::Client::builder()
         .timeout(timeout)
         // Reuse the process-wide rustls config instead of rebuilding the
@@ -358,7 +386,19 @@ fn build_client(
         let p = reqwest::Proxy::all(u).map_err(|e| short_error(&e.to_string()))?;
         b = b.proxy(p);
     }
-    b.build().map_err(|e| short_error(&e.to_string()))
+    let client = b.build().map_err(|e| short_error(&e.to_string()))?;
+    let mut cache = client_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(existing) = cache.map.get(&key) {
+        return Ok(existing.clone());
+    }
+    if cache.order.len() >= CLIENT_CACHE_MAX {
+        if let Some(old) = cache.order.pop_front() {
+            cache.map.remove(&old);
+        }
+    }
+    cache.order.push_back(key.clone());
+    cache.map.insert(key, client.clone());
+    Ok(client)
 }
 
 const BODY_LIMIT_SMALL: usize = 256 * 1024;
