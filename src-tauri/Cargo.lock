@@ -2837,7 +2837,7 @@ dependencies = [
 name = "proxpulse"
 version = "0.4.4"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "reqwest",
  "rustls",
  "rustls-pki-types",
