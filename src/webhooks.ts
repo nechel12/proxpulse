@@ -54,7 +54,7 @@ export class WebhookPanel {
     this.onChange();
   }
 
-  render(): void {
+  render(t: Translate): void {
     const box = document.getElementById("webhook-list");
     if (!box) return;
     box.innerHTML = "";
@@ -71,12 +71,14 @@ export class WebhookPanel {
       });
       const del = document.createElement("button");
       del.className = "btn ghost";
-      del.textContent = "?";
+      del.textContent = "×";
+      del.title = t("webhook_remove");
+      del.setAttribute("aria-label", t("webhook_remove"));
       del.addEventListener("click", () => {
         this.urls.splice(i, 1);
         if (this.urls.length === 0) this.urls.push("");
         this.saveUrls();
-        this.render();
+        this.render(t);
       });
       row.appendChild(inp);
       row.appendChild(del);

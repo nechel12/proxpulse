@@ -74,74 +74,110 @@
           <span class="ph-title" data-i18n="set_title">▸ Настройки</span>
         </div>
 
-        <div class="settings">
-          <label class="fld">
-            <span data-i18n="f_testurl">Тестовый URL</span>
-            <select id="test-url">
-              <option value="https://www.google.com/generate_204" data-i18n="opt_google" selected>google generate_204 (быстро)</option>
-              <option value="https://cp.cloudflare.com/generate_204" data-i18n="opt_cf">cloudflare generate_204 (быстро)</option>
-              <option value="https://api.ipify.org" data-i18n="opt_ipify">api.ipify.org (покажет IP)</option>
-              <option value="https://httpbin.org/ip" data-i18n="opt_httpbin">httpbin.org/ip (покажет IP)</option>
-              <option value="http://ip-api.com/json" data-i18n="opt_ipapi">ip-api.com/json (IP + гео, HTTP)</option>
-              <option value="https://example.com" data-i18n="opt_example">example.com</option>
-              <option value="judge" data-i18n="opt_judge">ProxPulse Judge</option>
-            </select>
-          </label>
-          <input id="test-url-custom" data-i18n-ph="custom_ph" placeholder="или свой URL https://..." />
-          <div class="row2">
-            <label class="chk"><input id="chk-ipapi-pro" type="checkbox" /><span data-i18n="ipapi_pro">ip-api Pro (HTTPS)</span></label>
-            <button id="btn-ipapi-pro" class="btn ghost" data-i18n="ipapi_go_pro">Go Pro</button>
+        <div class="preset-row">
+          <div class="preset-head">
+            <span class="preset-label" data-i18n="preset_label">Пресет</span>
+            <button id="btn-preset-save" class="btn ghost" data-i18n="preset_save">+ Сохранить</button>
           </div>
-          <label class="fld"><span data-i18n="ipapi_key">Ключ ip-api Pro</span><input id="ipapi-key" type="password" autocomplete="off" spellcheck="false" data-i18n-ph="ipapi_key_ph" placeholder="ключ (необязательно)" /></label>
-          <div class="hint" id="ipapi-hint" data-i18n="ipapi_hint">Free ip-api — только HTTP: прокси и сеть видят запросы и IP. Ключ Pro передаётся через проверяемые прокси и виден им — используйте отдельный ключ. Подробности — в README.</div>
-          <label class="fld" style="margin-top:8px"><span data-i18n="profile">Профиль</span></label>
-          <div class="row2" style="margin-top:0">
-            <select id="profile-sel" style="flex:1"></select>
-            <button id="btn-profile-save" class="btn ghost" data-i18n="profile_save">Сохранить</button>
-            <button id="btn-profile-del" class="btn ghost" data-i18n="profile_del" disabled>Удалить</button>
+          <div id="preset-chips" class="preset-chips"></div>
+        </div>
+
+        <div class="settings" id="check-settings">
+          <div class="seg" id="target-mode">
+            <button type="button" class="seg-btn active" data-target="public" data-i18n="target_public">Публичный сервер</button>
+            <button type="button" class="seg-btn" data-target="judge" data-i18n="target_judge">ProxPulse Judge</button>
           </div>
 
-          <div class="grid2">
-            <label class="fld"><span data-i18n="f_timeout">Таймаут, мс</span><input id="timeout" type="number" value="5000" min="1000" max="30000" step="500" /></label>
-            <label class="fld"><span data-i18n="f_threads">Потоки</span><input id="concurrency" type="number" value="50" min="1" max="500" /></label>
-          </div>
-
-          <div class="grid2">
-            <label class="fld"><span data-i18n="f_repeats">Замеры</span><input id="repeats" type="number" value="1" min="1" max="5" step="1" /></label>
+          <div id="target-public" class="target-block">
             <label class="fld">
-              <span data-i18n="f_protonoscheme">Тип без схемы</span>
-              <select id="default-proto">
-                <option value="http" data-i18n="opt_http" selected>HTTP</option>
-                <option value="socks5">SOCKS5</option>
-                <option value="socks4">SOCKS4</option>
-                <option value="http+socks5">HTTP + SOCKS5</option>
+              <span data-i18n="f_testurl">Сервер проверки</span>
+              <select id="test-url">
+                <option value="https://www.google.com/generate_204" data-i18n="opt_google" selected>google generate_204 (быстро)</option>
+                <option value="https://cp.cloudflare.com/generate_204" data-i18n="opt_cf">cloudflare generate_204 (быстро)</option>
+                <option value="https://api.ipify.org" data-i18n="opt_ipify">api.ipify.org (покажет IP)</option>
+                <option value="https://httpbin.org/ip" data-i18n="opt_httpbin">httpbin.org/ip (покажет IP)</option>
+                <option value="http://ip-api.com/json" data-i18n="opt_ipapi">ip-api.com/json (IP + гео, HTTP)</option>
+                <option value="https://example.com" data-i18n="opt_example">example.com</option>
+                <option value="custom" data-i18n="opt_custom">Свой URL…</option>
               </select>
             </label>
+            <label class="fld hidden" id="test-url-custom-wrap">
+              <span data-i18n="custom_url_label">Свой URL</span>
+              <input id="test-url-custom" spellcheck="false" data-i18n-ph="custom_ph" placeholder="https://..." />
+            </label>
+            <div id="ipapi-block" class="subblock hidden">
+              <div class="checks">
+                <label class="chk"><input id="chk-ipapi-pro" type="checkbox" /><span data-i18n="ipapi_pro">ip-api Pro (HTTPS)</span></label>
+                <button id="btn-ipapi-pro" class="btn ghost" data-i18n="ipapi_go_pro">Go Pro</button>
+              </div>
+              <label class="fld"><span data-i18n="ipapi_key">Ключ ip-api Pro</span><input id="ipapi-key" type="password" autocomplete="off" spellcheck="false" data-i18n-ph="ipapi_key_ph" placeholder="ключ (необязательно)" /></label>
+              <div class="hint" id="ipapi-hint" data-i18n="ipapi_hint">Free ip-api — только HTTP: прокси и сеть видят запросы и IP. Ключ Pro передаётся через проверяемые прокси и виден им — используйте отдельный ключ. Подробности — в README.</div>
+            </div>
           </div>
 
-          <div class="checks" id="deep-checks">
-            <label class="chk"><input id="chk-geo" type="checkbox" checked /><span data-i18n="chk_geo">Гео и тип IP</span></label>
-            <label class="chk"><input id="chk-anon" type="checkbox" checked /><span data-i18n="chk_anon">Анонимность</span></label>
-            <label class="chk"><input id="chk-tamper" type="checkbox" checked /><span data-i18n="chk_tamper">Целостность</span></label>
-            <label class="chk"><input id="chk-tls" type="checkbox" checked /><span data-i18n="chk_tls">TLS-интегрити</span></label>
+          <div id="target-judge" class="target-block hidden">
+            <label class="fld">
+              <span data-i18n="judge_server">Сервер Judge</span>
+              <select id="judge-server">
+                <option id="opt-judge-builtin" value="builtin" selected>Встроенный · proxycheck.lmtunnel.com</option>
+                <option value="custom" data-i18n="judge_custom">Свой сервер…</option>
+              </select>
+            </label>
+            <label class="fld hidden" id="judge-url-wrap">
+              <span data-i18n="judge_url_label">Адрес Judge</span>
+              <input id="judge-url" spellcheck="false" data-i18n-ph="judge_url_ph" placeholder="https://judge.example.com" />
+            </label>
+            <div class="seg" id="judge-mode-row">
+              <button type="button" id="judge-fast" class="seg-btn" data-i18n="judge_fast">Быстрая</button>
+              <button type="button" id="judge-full" class="seg-btn active" data-i18n="judge_full">Полная</button>
+            </div>
+            <div class="hint" data-i18n="judge_hint">Полный режим возвращает гео, анонимность и целостность одним ответом; быстрый — только доступность.</div>
+            <div id="judge-http-hint" class="hint hidden" data-i18n="judge_http_hint">Judge по HTTP: IP и трафик не шифруются. Используйте HTTPS или localhost.</div>
           </div>
-          <div class="hint" id="deep-hint" data-i18n="deep_hint">Глубокие проверки медленнее: гео — через ip-api, анонимность — через httpbin, целостность — сверка с example.com, TLS — сверка сертификата.</div>
-          <div id="judge-mode-row" class="seg hidden">
-            <button id="judge-fast" class="seg-btn" data-i18n="judge_fast">Быстрая</button>
-            <button id="judge-full" class="seg-btn active" data-i18n="judge_full">Полная</button>
-          </div>
-          <div id="judge-http-hint" class="hint hidden" data-i18n="judge_http_hint">Judge по HTTP: IP и трафик не шифруются. Используйте HTTPS или localhost.</div>
 
-          <div class="checks" id="precheck-row" style="margin-top:8px">
-            <label class="chk"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Пречек порта</span></label>
-            <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" /></label>
-          </div>
-          <div class="hint" id="precheck-hint" data-i18n="precheck_hint">Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.</div>
-
-          <div class="row2">
+          <div class="target-foot">
+            <code id="effective-url" class="effective-url" data-i18n-title="effective_url_t">—</code>
             <button id="btn-direct" class="btn ghost" data-i18n="btn_direct">Проверить связь</button>
             <span id="direct-res" class="hint"></span>
           </div>
+
+          <div id="deep-block" class="deep-block">
+            <div class="deep-title" data-i18n="deep_title">Глубокие проверки</div>
+            <div class="checks" id="deep-checks">
+              <label class="chk"><input id="chk-geo" type="checkbox" checked /><span data-i18n="chk_geo">Гео и тип IP</span></label>
+              <label class="chk"><input id="chk-anon" type="checkbox" checked /><span data-i18n="chk_anon">Анонимность</span></label>
+              <label class="chk"><input id="chk-tamper" type="checkbox" checked /><span data-i18n="chk_tamper">Целостность</span></label>
+              <label class="chk"><input id="chk-tls" type="checkbox" checked /><span data-i18n="chk_tls">TLS-интегрити</span></label>
+            </div>
+            <div class="hint" id="deep-hint" data-i18n="deep_hint">Глубокие проверки медленнее: гео — через ip-api, анонимность — через httpbin, целостность — сверка с example.com, TLS — сверка сертификата.</div>
+          </div>
+
+          <details class="adv" id="adv-settings">
+            <summary data-i18n="adv_title">Параметры: таймаут, потоки, повторы</summary>
+            <div class="adv-body">
+              <div class="grid2">
+                <label class="fld"><span data-i18n="f_timeout">Таймаут, мс</span><input id="timeout" type="number" value="5000" min="1000" max="30000" step="500" /></label>
+                <label class="fld"><span data-i18n="f_threads">Потоки</span><input id="concurrency" type="number" value="50" min="1" max="500" /></label>
+              </div>
+              <div class="grid2">
+                <label class="fld"><span data-i18n="f_repeats">Замеры</span><input id="repeats" type="number" value="1" min="1" max="5" step="1" /></label>
+                <label class="fld">
+                  <span data-i18n="f_protonoscheme">Тип без схемы</span>
+                  <select id="default-proto">
+                    <option value="http" data-i18n="opt_http" selected>HTTP</option>
+                    <option value="socks5">SOCKS5</option>
+                    <option value="socks4">SOCKS4</option>
+                    <option value="http+socks5">HTTP + SOCKS5</option>
+                  </select>
+                </label>
+              </div>
+              <div class="checks end" id="precheck-row">
+                <label class="chk"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Пречек порта</span></label>
+                <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" data-i18n-title="precheck_timeout" /></label>
+              </div>
+              <div class="hint" id="precheck-hint" data-i18n="precheck_hint">Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.</div>
+            </div>
+          </details>
         </div>
 
         <div class="actions">

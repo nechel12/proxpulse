@@ -17,9 +17,15 @@ Dark theme with red accents; Russian and English UI.
 - Geolocation, IP type, anonymity, content integrity and TLS checks.
 - HTTP, HTTPS (TLS to the proxy), SOCKS5/SOCKS5h and SOCKS4/SOCKS4a.
 - Local HTTP/SOCKS5 dispatcher with rotation, fastest and failover modes.
-- Scheduled re-checks, settings profiles, TXT/JSON/CSV export and webhooks.
+- Scheduled re-checks, settings presets, TXT/JSON/CSV export and webhooks.
 - File and URL import, deduplication, dark theme, RU/EN UI.
 - Update checks and a system tray.
+
+## Screenshots
+
+![ProxPulse main window](docs/screenshots/main-en.png)
+
+Russian UI — in [README.md](README.md).
 
 ## Installation
 
@@ -74,7 +80,7 @@ Checks:
 
 ```sh
 npm run build         # tsc + vite build
-npm test              # vitest: parsing, profiles, CSV, export, i18n, formatting
+npm test              # vitest: parsing, presets, CSV, export, i18n, formatting
 npm run lint          # ESLint
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml --lib
@@ -118,19 +124,25 @@ file (TXT, CSV, JSON, LOG) or from a URL: the built-in client downloads up to
 > with `socks4a`, the IPv6 address is passed as a domain name (best effort;
 > support depends on the proxy).
 
-### Test URLs
+### Check server
+
+The check server is selected in the settings and comes in two flavours.
+
+**Public server** — a ready-made endpoint or a custom URL:
 
 - `google generate_204`, `cloudflare generate_204` — fast, empty body;
 - `api.ipify.org`, `httpbin.org/ip` — show the exit IP;
 - `http://ip-api.com/json` — IP and geolocation in one request (free tier is HTTP-only);
 - `example.com` — a regular page;
-- [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge) — a dedicated
-  check backend. In Judge mode, the public instance is used by default; the
-  field next to it accepts another instance. Modes: **Fast** (`/generate_204`)
-  and **Full** (`/judge` — geolocation, anonymity and IP type in one response,
-  plus a content-hash integrity check).
+- **“Custom URL…”** — a separate list item: the input appears only when it is
+  selected and never silently overrides the presets. The effective URL that
+  will be requested is shown below the list.
 
-A custom URL can also be entered manually.
+**ProxPulse Judge** — a dedicated check backend. The built-in public instance
+is used by default; “Custom server…” opens an input for another instance.
+Modes: **Fast** (`/generate_204`) and **Full** (`/judge` — geolocation,
+anonymity and IP type in one response, plus a content-hash integrity check).
+Judge mode replaces the deep checks with its own response.
 
 > **ip-api: free tier vs Pro.** The free ip-api endpoint is HTTP-only: the
 > proxy and the network see requests and your IP, and a response can be
@@ -157,8 +169,12 @@ A custom URL can also be entered manually.
 | No-scheme type | HTTP | value used when no scheme is given; HTTP + SOCKS5 mode checks both |
 | Port precheck | on, 1500 ms | fast TCP connect: unavailable proxies are dropped before the full check |
 
-Settings are stored in named profiles: “Fast”, “Deep”, “Judge” and custom
-ones. A profile can be selected, saved or deleted.
+Settings are grouped into presets: “Fast” (liveness only), “Standard” (all
+deep checks), “Deep” (ip-api and 3 samples) and “Judge” (built-in Judge, full
+mode). A preset is applied with one click; editing any parameter manually
+clears the selection. Custom presets are saved with “+ Save” and removed with
+the × button. Timeout, threads, samples, no-scheme type and precheck live in
+the collapsible “Parameters” block.
 
 ### Deep checks (not used in Judge mode)
 
@@ -233,6 +249,9 @@ By default proxy credentials are stripped from URLs before posting. The
 **“Send credentials”** option includes them, but requires HTTPS; an
 `http://` webhook with credentials is rejected.
 
+A webhook must point to a public http(s) host: local and private addresses
+are rejected, and redirects are not followed.
+
 ## Info, tray and diagnostics (the “Info” tab)
 
 - GitHub links: ProxPulse and ProxPulse Judge.
@@ -261,7 +280,7 @@ credentials.
 Stored locally in the browser: language, ping limit, webhook URLs (may contain
 tokens), the ip-api Pro key (if set), geo cache (up to 2000 entries, 6-hour TTL,
 credential-free keys), recent errors, ping history, current check settings,
-auto-check state and settings profiles. Clearing `localStorage` removes this
+auto-check state and settings presets. Clearing `localStorage` removes this
 data.
 
 ## Security
@@ -274,26 +293,42 @@ See [SECURITY.md](SECURITY.md) for details.
 ## Project structure
 
 ```text
-index.html                     # screen markup
-src/main.ts                    # screen logic and event wiring
-src/i18n.ts                    # RU/EN dictionaries
-src/parse.ts                   # proxy parsing (pure functions)
-src/profiles.ts                # settings profiles (pure functions)
-src/csv.ts                     # CSV escaping
-src/export.ts                  # TXT/JSON/CSV export
-src/format.ts                  # table formatting helpers
-src/types.ts                   # shared frontend types
-src/*.test.ts                  # pure-module tests (vitest)
-src/styles.css                 # dark theme
-src-tauri/src/lib.rs           # backend: checker, dispatcher, tray
-src-tauri/src/proxy.rs         # proxy parsing/normalization
-src-tauri/src/main.rs          # entry point
-src-tauri/tauri.conf.json      # Tauri configuration
-src-tauri/Cargo.toml           # Rust dependencies
-eslint.config.js               # ESLint
-.github/workflows/ci.yml       # tests, clippy and version check
-.github/workflows/release.yml  # release builds and auto-update files
-scripts/check-versions.mjs     # version synchronization
+index.html                          # screen markup
+src/main.ts                         # UI entry point and event wiring
+src/check-client.ts                 # check runs over a Tauri Channel
+src/source-panel.ts                 # list input and import
+src/settings-panel.ts               # check settings and ip-api Pro
+src/profiles.ts, profiles-panel.ts  # settings presets
+src/pool.ts                         # alive proxy pool
+src/results.ts, format.ts           # results table and formatting
+src/csv.ts, export.ts               # escaping and TXT/JSON/CSV export
+src/export-panel.ts                 # save dialog and copy
+src/auto-settings.ts                # auto-check settings
+src/auto-status.ts, auto-events.ts  # auto-check status and events
+src/webhooks.ts                     # webhook panel
+src/dispatch-monitor.ts             # local dispatcher monitor
+src/updater.ts, info-panel.ts       # updates and app info
+src/parse.ts                        # proxy parsing (pure functions)
+src/parse-runner.ts, parseWorker.ts # worker parsing with fallback
+src/geocache.ts, geo-store.ts       # geo cache
+src/i18n.ts                         # RU/EN dictionaries
+src/*.test.ts                       # pure-module tests (vitest)
+src/styles.css                      # dark theme
+src-tauri/src/lib.rs                # backend entry point
+src-tauri/src/commands/*.rs         # Tauri commands (check, dispatch, auto, tray, ...)
+src-tauri/src/http.rs               # HTTP clients, body limits, geo
+src-tauri/src/proxy.rs              # proxy parsing/normalization
+src-tauri/src/transport.rs          # SOCKS/HTTP CONNECT and TLS to proxies
+src-tauri/src/tls.rs                # TLS config and certificate fingerprints
+src-tauri/src/netguard.rs           # SSRF guard for user-supplied URLs
+src-tauri/src/tests/*.rs            # backend tests
+src-tauri/src/main.rs               # app entry point
+src-tauri/tauri.conf.json           # Tauri configuration
+src-tauri/Cargo.toml                # Rust dependencies
+eslint.config.js                    # ESLint
+.github/workflows/ci.yml            # tests, clippy and version check
+.github/workflows/release.yml       # release builds and auto-update files
+scripts/check-versions.mjs          # version synchronization
 ```
 
 ## Related projects

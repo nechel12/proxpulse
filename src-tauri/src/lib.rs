@@ -4,13 +4,13 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, State,
 };
 use tokio::sync::{Mutex, Semaphore};
 
 mod http;
+mod netguard;
 mod transport;
 use http::*;
 mod proxy;
@@ -286,35 +286,9 @@ pub fn run() {
         ])
         .setup(|app| {
             if let Some(icon) = app.default_window_icon().cloned() {
-                let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
-                let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
-                let dispatch = MenuItem::with_id(
-                    app,
-                    "dispatch_toggle",
-                    "Dispatcher: OFF",
-                    true,
-                    None::<&str>,
-                )?;
-                let next_disp =
-                    MenuItem::with_id(app, "next_disp", "Next dispatch: off", false, None::<&str>)?;
-                let next_auto =
-                    MenuItem::with_id(app, "next_auto", "Next auto: off", false, None::<&str>)?;
-                let webhook =
-                    MenuItem::with_id(app, "webhook_info", "Webhook: off", false, None::<&str>)?;
-                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-                let sep1 = PredefinedMenuItem::separator(app)?;
-                let sep2 = PredefinedMenuItem::separator(app)?;
-                let menu = Menu::with_items(
-                    app,
-                    &[
-                        &show, &hide, &sep1, &dispatch, &next_disp, &next_auto, &webhook, &sep2,
-                        &quit,
-                    ],
-                )?;
                 TrayIconBuilder::with_id("main")
                     .icon(icon)
                     .tooltip("ProxPulse")
-                    .menu(&menu)
                     .show_menu_on_left_click(false)
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "show" => {
@@ -372,6 +346,9 @@ pub fn run() {
                         }
                     })
                     .build(app)?;
+                // The menu is built from the same localized code as later
+                // refreshes instead of hardcoding English labels here.
+                tauri::async_runtime::block_on(refresh_tray_menu(app.handle()));
             }
             // Scheduling and webhooks run in Rust, so hiding the window or
             // a throttled WebView does not stop scheduled checks.

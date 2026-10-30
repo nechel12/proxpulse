@@ -136,6 +136,29 @@ fn strip_header_keeps_other_headers_and_body() {
     assert!(text.ends_with("P"));
 }
 
+#[test]
+fn forward_request_strips_hop_by_hop_headers() {
+    let up = Upstream {
+        raw: "http://proxy:8080".into(),
+        url: "http://proxy:8080".into(),
+        scheme: "http".into(),
+        host: "proxy".into(),
+        port: 8080,
+        user: None,
+        pass: None,
+        latency: None,
+        country: None,
+    };
+    let body = b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\nProxy-Connection: keep-alive\r\nKeep-Alive: timeout=5\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n";
+    let hdr_end = find_header_end(body).unwrap();
+    let text = String::from_utf8(prepare_forward_request(body, hdr_end, &up)).unwrap();
+    let lower = text.to_ascii_lowercase();
+    assert!(!lower.contains("proxy-connection"));
+    assert!(!lower.contains("keep-alive: timeout"));
+    assert!(text.contains("Connection: Upgrade"));
+    assert!(text.contains("Upgrade: websocket"));
+}
+
 #[tokio::test]
 async fn http_connect_preserves_tunnel_bytes() {
     let mock = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
@@ -175,4 +198,47 @@ async fn http_connect_preserves_tunnel_bytes() {
         .unwrap()
         .unwrap();
     assert_eq!(&extra, b"EXTRA");
+}
+
+#[tokio::test]
+async fn http_connect_skips_informational_responses() {
+    let mock = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = mock.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut s, _) = mock.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 256];
+        loop {
+            let n = s.read(&mut tmp).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let _ = s
+            .write_all(
+                b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 Connection Established\r\n\r\nOK",
+            )
+            .await;
+    });
+    let client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut stream = http_connect(
+        ProxyStream::Plain(client),
+        "example.com",
+        80,
+        None,
+        None,
+        Duration::from_secs(2),
+    )
+    .await
+    .unwrap();
+    let mut extra = [0u8; 2];
+    tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut extra))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&extra, b"OK");
 }

@@ -8,6 +8,11 @@ export function ipapiProUrl(key: string): string {
   return `${IPAPI_PRO_BASE}?key=${encodeURIComponent(key.trim())}`;
 }
 
+/** Hide the key when the effective URL is shown in the UI. */
+export function maskKey(url: string): string {
+  return url.replace(/([?&]key=)[^&]*/i, "$1***");
+}
+
 /**
  * Resolve the effective test URL. A custom URL always wins. The ip-api
  * free endpoint is HTTP-only; when Pro is enabled with a key, the same

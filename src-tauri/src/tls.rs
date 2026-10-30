@@ -15,10 +15,10 @@ pub(crate) fn tls_client_config() -> Arc<rustls::ClientConfig> {
         .get_or_init(|| {
             let mut roots = rustls::RootCertStore::empty();
             roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            // NOTE: provider is pinned explicitly. Several rustls providers
-            // (ring + aws-lc-rs) are compiled into the dependency tree, so
-            // the feature-based auto-detect in ClientConfig::builder()
-            // panics — see CryptoProvider docs.
+            // NOTE: the provider is pinned explicitly instead of relying on
+            // rustls feature auto-detection, which panics when more than one
+            // provider is compiled into the dependency tree. This also keeps
+            // the checker and the dispatcher on a single crypto backend.
             let provider = Arc::new(rustls::crypto::ring::default_provider());
             Arc::new(
                 rustls::ClientConfig::builder_with_provider(provider)

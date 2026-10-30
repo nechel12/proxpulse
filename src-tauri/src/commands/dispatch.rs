@@ -409,6 +409,8 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                     let stripped = strip_header(&buf, hdr_end, "proxy-authorization");
                     let end = find_header_end(&stripped).unwrap_or(stripped.len());
                     let stripped = strip_header(&stripped, end, "proxy-connection");
+                    let end = find_header_end(&stripped).unwrap_or(stripped.len());
+                    let stripped = strip_header(&stripped, end, "keep-alive");
                     ups.write_all(&stripped).await
                 };
                 if let Err(e) = write_res {

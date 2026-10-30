@@ -73,7 +73,7 @@ export function initUpdater({ t, setStatusText, logErr, isTauriRuntime }: Update
       if (!ok) return;
       install.disabled = true;
       setStatusText("upd-status", () => t("upd_installing"));
-      await invoke("install_app_update");
+      await invoke("install_app_update", { expectedVersion: pendingVersion });
       setStatusText("upd-status", () => t("upd_restart"));
     } catch (e) {
       logErr("update-install: " + String(e).slice(0, 200));

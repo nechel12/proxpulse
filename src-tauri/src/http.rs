@@ -127,7 +127,7 @@ pub(crate) fn build_client(
         .timeout(timeout)
         // Reuse the process-wide rustls config instead of rebuilding the
         // webpki root store for every proxy client.
-        .use_preconfigured_tls((*tls_client_config()).clone())
+        .tls_backend_preconfigured((*tls_client_config()).clone())
         .user_agent(concat!(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxPulse/",
             env!("CARGO_PKG_VERSION")

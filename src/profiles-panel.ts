@@ -53,34 +53,46 @@ export class ProfilePanel {
     return true;
   }
 
-  deleteCurrent(): void {
-    if (!this.currentId.startsWith("custom:")) return;
-    this.custom = this.custom.filter((c) => "custom:" + c.name !== this.currentId);
-    this.currentId = "";
+  deleteId(id: string): void {
+    if (!id.startsWith("custom:")) return;
+    this.custom = this.custom.filter((c) => "custom:" + c.name !== id);
+    if (this.currentId === id) this.currentId = "";
   }
 
   render(t: Translate): void {
-    const sel = document.getElementById("profile-sel") as HTMLSelectElement | null;
-    if (!sel) return;
-    sel.innerHTML = "";
-    const ph = document.createElement("option");
-    ph.value = "";
-    ph.textContent = t("profile_none");
-    sel.appendChild(ph);
+    const wrap = document.getElementById("preset-chips");
+    if (!wrap) return;
+    wrap.innerHTML = "";
     for (const b of BUILTIN_PROFILES) {
-      const o = document.createElement("option");
-      o.value = b.id;
-      o.textContent = t(b.nameKey);
-      sel.appendChild(o);
+      wrap.appendChild(this.chip(b.id, t(b.nameKey), t(b.hintKey)));
     }
     for (const c of this.custom) {
-      const o = document.createElement("option");
-      o.value = "custom:" + c.name;
-      o.textContent = c.name;
-      sel.appendChild(o);
+      const id = "custom:" + c.name;
+      const group = document.createElement("div");
+      group.className = "preset-group";
+      group.appendChild(this.chip(id, c.name, ""));
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "preset-x";
+      del.textContent = "×";
+      del.title = t("preset_delete");
+      del.setAttribute("aria-label", `${t("preset_delete")}: ${c.name}`);
+      del.dataset.presetDelete = id;
+      group.appendChild(del);
+      wrap.appendChild(group);
     }
-    sel.value = this.currentId;
-    const del = document.getElementById("btn-profile-del") as HTMLButtonElement | null;
-    if (del) del.disabled = !this.currentId.startsWith("custom:");
+  }
+
+  private chip(id: string, label: string, hint: string): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "preset-chip";
+    b.textContent = label;
+    b.title = hint;
+    b.dataset.presetId = id;
+    const active = id === this.currentId;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-pressed", String(active));
+    return b;
   }
 }

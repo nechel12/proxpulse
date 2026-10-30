@@ -164,15 +164,17 @@ fn merge_auto_items(
         if !r.alive {
             continue;
         }
-        if let Some(ms) = r.latency_ms {
-            avg_sum += ms;
-            avg_n += 1;
-        }
         let Some((raw, _, old_country)) = current.get(&r.url) else {
             continue;
         };
         if max_ping_ms > 0 && r.latency_ms.is_some_and(|ms| ms > max_ping_ms) {
             continue;
+        }
+        // The average describes the pool that was actually kept, so it is
+        // accumulated only after the deletion and max-ping filters.
+        if let Some(ms) = r.latency_ms {
+            avg_sum += ms;
+            avg_n += 1;
         }
         let country = r
             .country_code
@@ -490,7 +492,7 @@ mod tests {
         assert_eq!(items[0].latency, Some(10));
         assert_eq!(items[0].country.as_deref(), Some("FR"));
         assert_eq!(items[1].raw, "raw-c");
-        assert_eq!(avg, Some((10 + 999) / 2));
+        assert_eq!(avg, Some(10));
 
         // A proxy deleted while the check was running is not resurrected.
         let current = HashMap::from([(

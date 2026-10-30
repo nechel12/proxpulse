@@ -13,6 +13,7 @@ import { type Lang, translate } from "./i18n.ts";
 import { extractProxiesFromText } from "./parse.ts";
 import { parseFallback, parseTextAsync, type ParseResult } from "./parse-runner.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
+import { type TargetMode } from "./profiles.ts";
 import { SettingsPanel } from "./settings-panel.ts";
 import { initUpdater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
@@ -97,8 +98,7 @@ function applyI18n() {
   renderPool();
   profiles.render(t);
   updateCounts();
-  settings.updateJudgeUI();
-  settings.updateIpapiUI();
+  settings.updateTargetUI();
   renderNet();
   refreshStatusTexts();
   dispatchMonitor.renderPill(t);
@@ -538,39 +538,71 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // settings profiles
+  // presets and check target
   profiles.load();
   profiles.render(t);
-  ($("profile-sel") as HTMLSelectElement).addEventListener("change", (e) => {
-    const id = (e.target as HTMLSelectElement).value;
+
+  // Any manual tweak turns the configuration into a custom one instead of
+  // pretending the selected preset still matches.
+  const markCustomPreset = () => {
+    if (!profiles.currentId) return;
+    profiles.currentId = "";
+    profiles.render(t);
+  };
+
+  ($("preset-chips") as HTMLElement).addEventListener("click", (e) => {
+    const node = e.target as HTMLElement;
+    const del = node.closest<HTMLElement>("[data-preset-delete]");
+    if (del) {
+      profiles.deleteId(del.dataset.presetDelete ?? "");
+      profiles.save();
+      profiles.render(t);
+      return;
+    }
+    const chip = node.closest<HTMLElement>("[data-preset-id]");
+    const id = chip?.dataset.presetId ?? "";
+    const data = profiles.find(id);
+    if (!data) return;
     profiles.currentId = id;
-    const d = profiles.find(id);
-    if (d) settings.applyProfile(d);
+    settings.applyProfile(data);
     profiles.render(t);
   });
-  ($("btn-profile-save") as HTMLButtonElement).addEventListener("click", async () => {
-    const res = await askText(t("profile_name"));
+  ($("btn-preset-save") as HTMLButtonElement).addEventListener("click", async () => {
+    const res = await askText(t("preset_name"));
     if (res == null) return;
     const name = res.trim().slice(0, 40);
     if (!name) return;
-    const data = settings.snapshotProfile();
-    if (!profiles.upsert(name, data)) {
-      setStatusT("profile_limit");
+    if (!profiles.upsert(name, settings.snapshotProfile())) {
+      setStatusT("preset_limit");
       return;
     }
     profiles.save();
     profiles.currentId = "custom:" + name;
     profiles.render(t);
   });
-  ($("btn-profile-del") as HTMLButtonElement).addEventListener("click", () => {
-    profiles.deleteCurrent();
-    profiles.save();
-    profiles.render(t);
+
+  document.querySelectorAll<HTMLButtonElement>("#target-mode .seg-btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      const mode = (b.dataset.target as TargetMode) ?? "public";
+      if (settings.targetMode() === mode) return;
+      markCustomPreset();
+      settings.setTargetMode(mode);
+    });
   });
-  ($("test-url") as HTMLSelectElement).addEventListener("change", () => settings.updateJudgeUI());
-  ($("test-url-custom") as HTMLInputElement).addEventListener("input", () => settings.updateJudgeUI());
-  ($("judge-fast") as HTMLButtonElement).addEventListener("click", () => settings.setJudgeFull(false));
-  ($("judge-full") as HTMLButtonElement).addEventListener("click", () => settings.setJudgeFull(true));
+  $("test-url").addEventListener("change", () => settings.updateTargetUI());
+  $("test-url-custom").addEventListener("input", () => settings.updateTargetUI());
+  $("judge-server").addEventListener("change", () => settings.updateTargetUI());
+  $("judge-url").addEventListener("input", () => settings.updateTargetUI());
+  $("judge-fast").addEventListener("click", () => {
+    markCustomPreset();
+    settings.setJudgeFull(false);
+  });
+  $("judge-full").addEventListener("click", () => {
+    markCustomPreset();
+    settings.setJudgeFull(true);
+  });
+  $("check-settings").addEventListener("input", markCustomPreset);
+  $("check-settings").addEventListener("change", markCustomPreset);
 
   // ip-api Pro key. The key is stored locally and is visible to checked
   // proxies (the request must originate from the proxy); see README.
@@ -708,19 +740,19 @@ window.addEventListener("DOMContentLoaded", () => {
   webhooks.load();
   settings.loadIpapiSettings();
   loadAutoSettings();
-  settings.loadCurrentSettings();
+  if (!settings.loadCurrentSettings()) profiles.currentId = "builtin:standard";
   ($("chk-webhook-creds") as HTMLInputElement).checked = webhooks.includeCreds;
   ($("chk-webhook-creds") as HTMLInputElement).addEventListener("change", (e) => {
     webhooks.includeCreds = (e.target as HTMLInputElement).checked;
     webhooks.saveCreds();
     scheduleAutoConfig();
   });
-  webhooks.render();
+  webhooks.render(t);
   ($("btn-webhook-add") as HTMLButtonElement).addEventListener("click", () => {
     if (webhooks.urls.length >= 10) return;
     webhooks.urls.push("");
     webhooks.saveUrls();
-    webhooks.render();
+    webhooks.render(t);
     const inputs = document.querySelectorAll<HTMLInputElement>("#webhook-list input");
     inputs[inputs.length - 1]?.focus();
   });

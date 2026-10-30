@@ -331,10 +331,16 @@ pub(crate) fn strip_header(buf: &[u8], hdr_end: usize, name: &str) -> Vec<u8> {
 /// absolute-form with Proxy-Authorization. Unlike CONNECT, this works with
 /// proxies that only allow CONNECT to port 443.
 pub(crate) fn prepare_forward_request(buf: &[u8], hdr_end: usize, up: &Upstream) -> Vec<u8> {
-    // Drop any Proxy-Authorization sent by the client: it is meant for the
-    // local listener, not for the upstream. Then add this upstream's own
-    // credentials, if any.
+    // Drop headers that are hop-by-hop between the client and this listener.
+    // Proxy-Authorization is meant for the local listener, not the upstream;
+    // Proxy-Connection and Keep-Alive are equally meaningless to the origin.
+    // Connection/Upgrade/Transfer-Encoding stay intact so upgrades and body
+    // framing keep working. Then add this upstream's own credentials.
     let stripped = strip_header(buf, hdr_end, "proxy-authorization");
+    let end = find_header_end(&stripped).unwrap_or(stripped.len());
+    let stripped = strip_header(&stripped, end, "proxy-connection");
+    let end = find_header_end(&stripped).unwrap_or(stripped.len());
+    let stripped = strip_header(&stripped, end, "keep-alive");
     let Some(auth) = basic_proxy_auth(up.user.as_deref(), up.pass.as_deref()) else {
         return stripped;
     };
@@ -370,39 +376,47 @@ pub(crate) async fn http_connect<S: AsyncRead + AsyncWrite + Unpin>(
     // consume bytes that the proxy already sent for the tunnel and lose them.
     let mut one = [0u8; 1];
     loop {
-        if buf.len() > 32768 {
-            return Err(Error::new(ErrorKind::InvalidData, "proxy header too big"));
+        loop {
+            if buf.len() > 32768 {
+                return Err(Error::new(ErrorKind::InvalidData, "proxy header too big"));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(Error::new(ErrorKind::TimedOut, "proxy read timeout"));
+            }
+            let n = match tokio::time::timeout(remaining, s.read(&mut one)).await {
+                Ok(Ok(0)) => return Err(Error::new(ErrorKind::UnexpectedEof, "proxy closed")),
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => return Err(e),
+                Err(_) => return Err(Error::new(ErrorKind::TimedOut, "proxy read timeout")),
+            };
+            buf.extend_from_slice(&one[..n]);
+            if buf.ends_with(b"\r\n\r\n") {
+                break;
+            }
         }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(Error::new(ErrorKind::TimedOut, "proxy read timeout"));
+        let head = String::from_utf8_lossy(&buf);
+        let code = head
+            .lines()
+            .next()
+            .unwrap_or("")
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or("");
+        // A proxy may send interim 1xx responses (for example 100 Continue)
+        // before the final 200; skip them and read the next response head.
+        if code.len() == 3 && code.starts_with('1') {
+            buf.clear();
+            continue;
         }
-        let n = match tokio::time::timeout(remaining, s.read(&mut one)).await {
-            Ok(Ok(0)) => return Err(Error::new(ErrorKind::UnexpectedEof, "proxy closed")),
-            Ok(Ok(n)) => n,
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err(Error::new(ErrorKind::TimedOut, "proxy read timeout")),
-        };
-        buf.extend_from_slice(&one[..n]);
-        if buf.ends_with(b"\r\n\r\n") {
-            break;
+        if code != "200" {
+            return Err(Error::new(
+                ErrorKind::ConnectionRefused,
+                format!("http proxy: {code}"),
+            ));
         }
+        return Ok(s);
     }
-    let head = String::from_utf8_lossy(&buf);
-    let code = head
-        .lines()
-        .next()
-        .unwrap_or("")
-        .split_whitespace()
-        .nth(1)
-        .unwrap_or("");
-    if code != "200" {
-        return Err(Error::new(
-            ErrorKind::ConnectionRefused,
-            format!("http proxy: {code}"),
-        ));
-    }
-    Ok(s)
 }
 
 async fn tls_to_proxy(

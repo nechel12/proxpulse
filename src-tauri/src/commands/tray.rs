@@ -7,11 +7,23 @@ use tokio::sync::Mutex;
 
 // ================= tray status =================
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 struct TrayInfo {
     webhook_on: bool,
     webhook_url: String,
     lang: String,
+}
+
+impl Default for TrayInfo {
+    fn default() -> Self {
+        Self {
+            webhook_on: false,
+            webhook_url: String::new(),
+            // The UI defaults to Russian until the webview reports its saved
+            // language, so the initial tray menu must match that default.
+            lang: "ru".to_string(),
+        }
+    }
 }
 
 #[derive(Default)]

@@ -109,11 +109,19 @@ pub(crate) async fn check_app_update(app: AppHandle) -> Result<UpdateInfo, Strin
 }
 
 #[tauri::command]
-pub(crate) async fn install_app_update(app: AppHandle) -> Result<(), String> {
+pub(crate) async fn install_app_update(
+    app: AppHandle,
+    expected_version: String,
+) -> Result<(), String> {
     let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
     let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
         return Err("no update".to_string());
     };
+    // The update is re-fetched here, so make sure the user is still installing
+    // the version they confirmed in the UI.
+    if update.version != expected_version {
+        return Err("update version changed; check again".to_string());
+    }
     update
         .download_and_install(|_, _| {}, || {})
         .await

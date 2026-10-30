@@ -1,0 +1,12 @@
+[advisories]
+# tauri-plugin-updater (2.11 and 2.14) still depends on zip 4.x, whose
+# extraction advisories are fixed only in zip 9. The updater verifies the
+# minisign signature of every downloaded archive before extracting it
+# (updater.rs: verify_signature -> extract), so only archives signed by the
+# release key are ever unpacked and these cannot be triggered by an untrusted
+# update. Drop this ignore once tauri-plugin-updater ships with zip >= 9.
+ignore = [
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]

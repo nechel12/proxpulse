@@ -122,7 +122,9 @@ export class PoolView {
         const td = document.createElement("td");
         const b = document.createElement("button");
         b.className = "btn ghost";
-        b.textContent = "?";
+        b.textContent = "×";
+        b.title = t("pool_remove");
+        b.setAttribute("aria-label", t("pool_remove"));
         b.addEventListener("click", () => onDelete(p.raw));
         td.appendChild(b);
         tr.appendChild(td);

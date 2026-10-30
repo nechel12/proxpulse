@@ -1,5 +1,6 @@
 use crate::commands::dispatch::DispatchItem;
 use crate::http::{read_body_capped, short_error, BODY_LIMIT_WEBHOOK};
+use crate::netguard::{guarded_client_builder, resolve_public_target};
 use crate::{is_http_url, strip_credentials, WebhookResult};
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,32 +41,13 @@ fn csv_cell(s: &str) -> String {
     }
 }
 
-fn webhook_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .use_rustls_tls()
-        .user_agent(concat!("ProxPulse/", env!("CARGO_PKG_VERSION")))
-        // A webhook may redirect to an arbitrary (including plain HTTP)
-        // host. Following such a redirect would re-send the body, including
-        // proxy credentials, outside the original HTTPS endpoint.
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| e.to_string())
-}
-
-async fn send_webhook_one(
+async fn send_webhook_request(
+    client: &reqwest::Client,
     url: &str,
     format: &str,
     include_credentials: bool,
     items: &[DispatchItem],
 ) -> Result<String, String> {
-    let url = url.trim().to_string();
-    if !is_http_url(&url) {
-        return Err("bad webhook url".to_string());
-    }
-    if include_credentials && url.to_ascii_lowercase().starts_with("http://") {
-        return Err("https required when sending proxy credentials".to_string());
-    }
     let proxies = webhook_proxies(items, include_credentials);
     let (body, ctype) = match format {
         "json" => {
@@ -94,7 +76,6 @@ async fn send_webhook_one(
         }
         _ => (proxies.join("\n"), "text/plain"),
     };
-    let client = webhook_client()?;
     let r = client
         .post(url)
         .header("Content-Type", ctype)
@@ -108,6 +89,29 @@ async fn send_webhook_one(
         .unwrap_or_default();
     let short: String = txt.chars().take(80).collect();
     Ok(format!("http {code} {short}"))
+}
+
+async fn send_webhook_one(
+    url: &str,
+    format: &str,
+    include_credentials: bool,
+    items: &[DispatchItem],
+) -> Result<String, String> {
+    let url = url.trim().to_string();
+    if !is_http_url(&url) {
+        return Err("bad webhook url".to_string());
+    }
+    let parsed = reqwest::Url::parse(&url).map_err(|_| "bad webhook url".to_string())?;
+    if include_credentials && parsed.scheme() == "http" {
+        return Err("https required when sending proxy credentials".to_string());
+    }
+    // Webhook URLs are user-supplied but must not reach local services.
+    let mut builder = guarded_client_builder(Duration::from_secs(15));
+    if let Some((host, addr)) = resolve_public_target(&parsed).await? {
+        builder = builder.resolve(&host, addr);
+    }
+    let client = builder.build().map_err(|e| e.to_string())?;
+    send_webhook_request(&client, &url, format, include_credentials, items).await
 }
 
 pub(crate) async fn send_webhooks_inner(
@@ -248,7 +252,11 @@ mod tests {
             latency: Some(1),
             country: None,
         }];
-        let result = send_webhook_one(
+        let client = guarded_client_builder(Duration::from_secs(15))
+            .build()
+            .unwrap();
+        let result = send_webhook_request(
+            &client,
             &format!("http://127.0.0.1:{redirect_port}/hook"),
             "txt",
             false,
@@ -263,5 +271,23 @@ mod tests {
                 .is_err(),
             "webhook client must not follow redirects"
         );
+    }
+
+    #[tokio::test]
+    async fn webhook_rejects_private_targets() {
+        let items = vec![DispatchItem {
+            raw: "host:8080".to_string(),
+            url: None,
+            latency: None,
+            country: None,
+        }];
+        let err = send_webhook_one("http://127.0.0.1:9/hook", "txt", false, &items)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "private address");
+        let err = send_webhook_one("http://localhost:9/hook", "txt", false, &items)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "private address");
     }
 }
