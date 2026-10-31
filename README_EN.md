@@ -250,8 +250,8 @@ is shown in the field.
 - For SOCKS5 upstreams (`socks5://` and `socks5h://`) the proxy resolves the
   site name, so the local DNS resolver does not see visited domains.
   `socks4://` cannot carry names and resolves locally; use `socks4a://`.
-- The pool merges new entries with old ones; “Sync” and “Clear” buttons; pool
-  filtering and sorting by ping or country.
+- The pool merges new entries with old ones; “Sync” and “Clear pool” (with a
+  confirmation) buttons; pool filtering and sorting by ping or country.
 - **Max ping**: proxies slower than the limit do not enter the pool (`0` — no
   limit).
 - Request and error counters, current upstream proxy, last error.

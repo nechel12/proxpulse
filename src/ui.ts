@@ -9,6 +9,16 @@ export function setProgress(done: number, total: number): void {
   if (el) el.style.width = `${p}%`;
 }
 
+/** Native confirmation dialog; falls back to `window.confirm` outside Tauri. */
+export async function askConfirm(message: string): Promise<boolean> {
+  try {
+    const { confirm } = await import("@tauri-apps/plugin-dialog");
+    return await confirm(message, { title: "ProxPulse", kind: "warning" });
+  } catch {
+    return window.confirm(message);
+  }
+}
+
 export function askText(title: string, value = ""): Promise<string | null> {
   const overlay = document.getElementById("text-modal");
   const input = document.getElementById("text-modal-input") as HTMLInputElement | null;

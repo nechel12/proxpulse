@@ -22,7 +22,7 @@ import { AutoSettingsStore } from "./auto-settings.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
-import { askText, screenVisible, setProgress } from "./ui.ts";
+import { askConfirm, askText, screenVisible, setProgress } from "./ui.ts";
 import { NetStatus } from "./net-status.ts";
 import { runCheckList } from "./check-client.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
@@ -484,7 +484,11 @@ window.addEventListener("DOMContentLoaded", () => {
     lastStatus = { key: "pool_synced", params: { n } };
   }
 
-  function doPoolClear(): void {
+  async function doPoolClear(): Promise<void> {
+    // The pool is shared by both tabs, persisted, and clearing it stops a
+    // running dispatcher: ask first.
+    if (pool.count === 0) return;
+    if (!(await askConfirm(t("pool_clear_confirm", { n: pool.count })))) return;
     pool.clear();
     void syncPool(false).then(() => {
       setStatusText("srv-status", () => t("srv_off"));
@@ -494,8 +498,8 @@ window.addEventListener("DOMContentLoaded", () => {
     updateCounts();
   }
 
-  ($("btn-pool-clear") as HTMLButtonElement).addEventListener("click", doPoolClear);
-  ($("btn-auto-pool-clear") as HTMLButtonElement).addEventListener("click", doPoolClear);
+  ($("btn-pool-clear") as HTMLButtonElement).addEventListener("click", () => void doPoolClear());
+  ($("btn-auto-pool-clear") as HTMLButtonElement).addEventListener("click", () => void doPoolClear());
 
   // export dropdown + dead toggle
   const menu = $("export-menu");
@@ -519,7 +523,9 @@ window.addEventListener("DOMContentLoaded", () => {
     ($("chk-dead") as HTMLButtonElement).setAttribute("aria-pressed", String(includeDead));
   });
 
-  $("btn-clear-out").addEventListener("click", () => {
+  $("btn-clear-out").addEventListener("click", async () => {
+    if (results.length === 0) return;
+    if (!(await askConfirm(t("results_clear_confirm", { n: results.length })))) return;
     results = [];
     render(); updateCounts(); setProgress(0, 1);
     lastStatus = { key: "st_cleared" };
