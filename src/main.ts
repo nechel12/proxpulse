@@ -343,7 +343,7 @@ async function startInner() {
 
   let busy = false;
   try {
-    results = await runCheckList(list, readCheckSettings(), geoCache.relevant(list), (done, total) => {
+    results = await runCheckList(list, readCheckSettings(), geoCache.fresh(), (done, total) => {
       lastStatus = { key: "st_checking", params: { done, total } };
       $("status-line").textContent = t("st_checking", lastStatus.params);
       const secs = Math.floor((performance.now() - t0) / 1000);

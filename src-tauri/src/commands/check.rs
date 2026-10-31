@@ -273,7 +273,9 @@ async fn check_candidate_inner(
     // Reuse previously seen geo. When the test URL does not reveal the exit
     // IP, the frontend-provided cache (TTL-filtered) is the only way to skip
     // a geo lookup for the default generate_204 URL.
-    if let Some(entry) = geo_cache.get(&strip_credentials(&raw)) {
+    // Keyed by the normalized URL without credentials: raw column formats
+    // (`host:port:user:pass`) would put the password into the key.
+    if let Some(entry) = geo_cache.get(&strip_credentials(&url)) {
         apply_cached_geo(&mut res, entry);
     }
     // deep stages run concurrently: worst case ~1 timeout instead of 4 in a row

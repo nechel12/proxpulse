@@ -387,7 +387,7 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
         };
         match connected {
             Ok(mut ups) => {
-                *st.current.lock().await = Some(strip_credentials(&up.raw));
+                *st.current.lock().await = Some(strip_credentials(&up.url));
                 st.requests.fetch_add(1, Ordering::Relaxed);
                 if is_connect {
                     // The client already received 200 before the tunnel
@@ -544,7 +544,7 @@ pub(crate) async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>)
     for up in &order {
         match connect_via(up, &t_host, t_port, Duration::from_secs(8)).await {
             Ok(mut u) => {
-                *st.current.lock().await = Some(strip_credentials(&up.raw));
+                *st.current.lock().await = Some(strip_credentials(&up.url));
                 st.requests.fetch_add(1, Ordering::Relaxed);
                 if write_all_t(&mut client, &[0x05, 0x00, 0x00, 1, 0, 0, 0, 0, 0, 0], d)
                     .await
