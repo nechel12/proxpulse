@@ -5,9 +5,10 @@ on:
     tags:
       - "v*"
 
+# Write access is granted per job: `verify` installs and runs third-party npm
+# and cargo code, so it only gets a read-only token.
 permissions:
-  contents: write
-  checks: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -18,8 +19,13 @@ jobs:
   verify:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install Linux build deps
         run: |
           sudo apt-get update
@@ -69,8 +75,14 @@ jobs:
             args: '--target x86_64-apple-darwin'
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 90
+    permissions:
+      contents: write
     steps:
+      # The token is used through the API (tauri-action, gh), never by git,
+      # so it is not left in .git/config for build scripts to read.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Linux build deps
         if: matrix.platform == 'ubuntu-22.04'
@@ -128,10 +140,14 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       # gh resolves the repo via git, so checkout is required even though
       # no files are used.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

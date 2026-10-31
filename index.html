@@ -131,8 +131,9 @@
               <button type="button" id="judge-fast" class="seg-btn" data-i18n="judge_fast">Быстрая</button>
               <button type="button" id="judge-full" class="seg-btn active" data-i18n="judge_full">Полная</button>
             </div>
-            <div class="hint" data-i18n="judge_hint">Полный режим возвращает гео, анонимность и целостность одним ответом; быстрый — только доступность.</div>
-            <div id="judge-http-hint" class="hint hidden" data-i18n="judge_http_hint">Judge по HTTP: IP и трафик не шифруются. Используйте HTTPS или localhost.</div>
+            <div class="hint" data-i18n="judge_hint">Полный режим возвращает гео, тип IP, анонимность и целостность одним ответом; быстрый — только доступность. Анонимность и целостность определяются только для Judge по HTTP.</div>
+            <div id="judge-http-hint" class="hint hidden" data-i18n="judge_http_hint">Judge по HTTP: трафик не шифруется, зато прокси видит запрос и может добавить заголовки или изменить ответ — только так определяются анонимность и целостность.</div>
+            <div id="judge-https-hint" class="hint hidden" data-i18n="judge_https_hint">Judge по HTTPS: запрос идёт внутри TLS-туннеля, прокси не может добавить заголовки или изменить ответ — анонимность и целостность не определяются (—).</div>
           </div>
 
           <div class="target-foot">
@@ -149,7 +150,7 @@
               <label class="chk"><input id="chk-tamper" type="checkbox" checked /><span data-i18n="chk_tamper">Целостность</span></label>
               <label class="chk"><input id="chk-tls" type="checkbox" checked /><span data-i18n="chk_tls">TLS-интегрити</span></label>
             </div>
-            <div class="hint" id="deep-hint" data-i18n="deep_hint">Глубокие проверки медленнее: гео — через ip-api, анонимность — через httpbin, целостность — сверка с example.com, TLS — сверка сертификата.</div>
+            <div class="hint" id="deep-hint" data-i18n="deep_hint">Глубокие проверки медленнее: гео — через ip-api, анонимность — заголовки через httpbin по HTTP, целостность — сверка example.com по HTTP, TLS — сверка сертификата.</div>
           </div>
 
           <details class="adv" id="adv-settings">

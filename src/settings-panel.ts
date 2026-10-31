@@ -156,14 +156,17 @@ export class SettingsPanel {
     if (builtin) builtin.textContent = this.deps.t("judge_builtin", { host: hostOf(JUDGE_DEFAULT) });
 
     let insecure = false;
-    if (judge && server === "custom") {
+    let tunneled = false;
+    if (judge) {
       try {
         const u = new URL(this.judgeBase());
         const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(u.hostname);
         insecure = u.protocol === "http:" && !local;
+        tunneled = u.protocol === "https:";
       } catch { /* invalid URL is reported by the backend */ }
     }
     document.getElementById("judge-http-hint")?.classList.toggle("hidden", !insecure);
+    document.getElementById("judge-https-hint")?.classList.toggle("hidden", !tunneled);
 
     this.renderJudgeMode();
     this.updateIpapiUI();

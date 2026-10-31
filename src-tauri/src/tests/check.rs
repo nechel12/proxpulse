@@ -1,8 +1,77 @@
-use crate::commands::check::{candidate_budget, dead_result, CheckFlags};
+use crate::commands::check::{candidate_budget, dead_result, is_tls_target, CheckFlags};
 use crate::tls::{is_cert_error, tls_client_config};
 use crate::*;
+use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::time::Duration;
+
+fn headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+#[test]
+fn deep_checks_use_plain_http() {
+    // Over https:// a proxy only tunnels and can neither add headers nor
+    // modify the body, so these probes must be plain HTTP.
+    assert!(ANON_URL.starts_with("http://"));
+    assert!(ANON_URL.contains("show_env=1"));
+    assert!(TAMPER_URL.starts_with("http://"));
+    assert!(is_tls_target("HTTPS://judge.example.com/judge"));
+    assert!(is_tls_target("  https://x"));
+    assert!(!is_tls_target("http://judge.example.com/judge"));
+}
+
+#[test]
+fn anonymity_classification() {
+    let me = "203.0.113.7";
+    // httpbin's load balancer appends the connecting address (the proxy exit)
+    // and adds X-Forwarded-Proto; neither is a proxy telltale.
+    let elite = headers(&[
+        ("Host", "httpbin.org"),
+        ("X-Forwarded-For", "198.51.100.1"),
+        ("X-Forwarded-Proto", "http"),
+    ]);
+    assert_eq!(classify_anonymity(&elite, me).as_deref(), Some("elite"));
+
+    let via = headers(&[("Via", "1.1 squid"), ("X-Forwarded-For", "198.51.100.1")]);
+    assert_eq!(classify_anonymity(&via, me).as_deref(), Some("anonymous"));
+
+    let fake_xff = headers(&[("X-Forwarded-For", "10.1.2.3,198.51.100.1")]);
+    assert_eq!(
+        classify_anonymity(&fake_xff, me).as_deref(),
+        Some("anonymous")
+    );
+
+    let leak_xff = headers(&[("X-Forwarded-For", "203.0.113.7, 198.51.100.1")]);
+    assert_eq!(
+        classify_anonymity(&leak_xff, me).as_deref(),
+        Some("transparent")
+    );
+
+    let leak_real_ip = headers(&[("X-Real-Ip", "203.0.113.7")]);
+    assert_eq!(
+        classify_anonymity(&leak_real_ip, me).as_deref(),
+        Some("transparent")
+    );
+
+    let leak_forwarded = headers(&[("Forwarded", "for=203.0.113.7:4711;proto=http")]);
+    assert_eq!(
+        classify_anonymity(&leak_forwarded, me).as_deref(),
+        Some("transparent")
+    );
+
+    // Whole-token match only: 203.0.113.7 is not inside 203.0.113.77.
+    let similar = headers(&[("X-Forwarded-For", "203.0.113.77,198.51.100.1")]);
+    assert_eq!(
+        classify_anonymity(&similar, me).as_deref(),
+        Some("anonymous")
+    );
+
+    assert_eq!(classify_anonymity(&elite, "not an ip"), None);
+}
 
 #[test]
 fn tls_config_builds() {

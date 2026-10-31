@@ -6,12 +6,13 @@ use crate::{normalize_proxy, strip_credentials};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::{Manager, State};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Semaphore};
@@ -86,6 +87,11 @@ pub(crate) struct DispatchInner {
     /// Caps local client connections; without it a local process could
     /// exhaust file descriptors.
     pub(crate) conn_sem: Arc<Semaphore>,
+    /// Consecutive failed auto-checks per upstream URL. A proxy is dropped
+    /// only after several misses, so one flaky cycle does not empty the pool.
+    pub(crate) fails: Mutex<HashMap<String, u32>>,
+    /// Serializes writes of the persisted pool file.
+    pub(crate) save_lock: Mutex<()>,
 }
 
 const MAX_CONNECTIONS: usize = 1024;
@@ -113,6 +119,8 @@ impl Default for DispatchState {
                 connections: Mutex::new(tokio::task::JoinSet::new()),
                 dns_cache: Mutex::new(HashMap::new()),
                 conn_sem: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+                fails: Mutex::new(HashMap::new()),
+                save_lock: Mutex::new(()),
             }),
         }
     }
@@ -641,7 +649,14 @@ pub(crate) fn upstream_from_item(
     ))
 }
 
-pub(crate) async fn store_pool(inner: &Arc<DispatchInner>, items: Vec<DispatchItem>) -> usize {
+/// Replace the pool. `stop_when_empty` is for explicit user actions: clearing
+/// the pool stops the dispatcher. Automatic pruning passes `false` so the
+/// listener survives and resumes serving once new proxies are added.
+pub(crate) async fn store_pool(
+    inner: &Arc<DispatchInner>,
+    items: Vec<DispatchItem>,
+    stop_when_empty: bool,
+) -> usize {
     let mut pool: Vec<Upstream> = Vec::new();
     let mut seen = HashSet::new();
     for it in items {
@@ -665,7 +680,15 @@ pub(crate) async fn store_pool(inner: &Arc<DispatchInner>, items: Vec<DispatchIt
         pool.retain(|u| !is_self_upstream(u, port));
     }
     let n = pool.len();
-    let stop_empty = n == 0 && running;
+    let stop_empty = stop_when_empty && n == 0 && running;
+    {
+        let urls: HashSet<&str> = pool.iter().map(|u| u.url.as_str()).collect();
+        inner
+            .fails
+            .lock()
+            .await
+            .retain(|url, _| urls.contains(url.as_str()));
+    }
     *inner.pool.lock().await = pool;
     if stop_empty {
         // A listener with zero upstreams only replies 502. Clearing the pool
@@ -675,12 +698,82 @@ pub(crate) async fn store_pool(inner: &Arc<DispatchInner>, items: Vec<DispatchIt
     n
 }
 
+const POOL_FILE: &str = "pool.json";
+const POOL_FILE_MAX: u64 = 16 * 1024 * 1024;
+
+fn pool_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join(POOL_FILE))
+}
+
+/// Write the pool atomically (temp file + rename). The file holds proxy
+/// credentials, so on Unix it is readable by the owner only.
+pub(crate) fn write_pool_file(path: &Path, items: &[DispatchPoolItem]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let json = serde_json::to_vec(items).map_err(std::io::Error::other)?;
+    let tmp = path.with_extension("json.tmp");
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    {
+        use std::io::Write;
+        let mut f = opts.open(&tmp)?;
+        f.write_all(&json)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
+pub(crate) fn read_pool_file(path: &Path) -> Vec<DispatchItem> {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Vec::new();
+    };
+    if meta.len() > POOL_FILE_MAX {
+        return Vec::new();
+    }
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Persist the current pool so it survives restarts; scheduled checks would
+/// otherwise start from an empty pool after every launch.
+pub(crate) async fn save_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>) {
+    let Some(path) = pool_path(app) else {
+        return;
+    };
+    let _guard = inner.save_lock.lock().await;
+    let items = pool_items(inner).await;
+    let _ = tauri::async_runtime::spawn_blocking(move || write_pool_file(&path, &items)).await;
+}
+
+pub(crate) async fn load_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>) {
+    let Some(path) = pool_path(app) else {
+        return;
+    };
+    let items = tauri::async_runtime::spawn_blocking(move || read_pool_file(&path))
+        .await
+        .unwrap_or_default();
+    if !items.is_empty() {
+        store_pool(inner, items, false).await;
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn set_dispatch_pool(
+    app: tauri::AppHandle,
     items: Vec<DispatchItem>,
     state: State<'_, DispatchState>,
 ) -> Result<usize, String> {
-    Ok(store_pool(&state.inner, items).await)
+    let n = store_pool(&state.inner, items, true).await;
+    save_pool(&app, &state.inner).await;
+    Ok(n)
 }
 
 async fn start_proxy_locked(

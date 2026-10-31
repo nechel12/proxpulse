@@ -331,6 +331,84 @@ pub(crate) async fn fetch_geo(client: &reqwest::Client, ipapi_key: Option<&str>)
     }
 }
 
+/// Header and content checks must use plain HTTP. For an `https://` target an
+/// HTTP proxy only opens a CONNECT tunnel: it can neither add `Via` /
+/// `X-Forwarded-For` nor modify the body, so every proxy would look elite and
+/// untampered. `show_env=1` makes httpbin return the forwarding headers it
+/// hides by default.
+pub(crate) const ANON_URL: &str = "http://httpbin.org/headers?show_env=1";
+pub(crate) const TAMPER_URL: &str = "http://example.com/";
+
+/// Added by httpbin's own load balancer, not by the checked proxy.
+const ANON_INFRA_HEADERS: [&str; 3] = ["x-forwarded-proto", "x-forwarded-port", "x-amzn-trace-id"];
+
+const ANON_TELLTALES: [&str; 15] = [
+    "via",
+    "forwarded",
+    "forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-server",
+    "x-forwarded-by",
+    "x-real-ip",
+    "x-client-ip",
+    "client-ip",
+    "x-proxy-id",
+    "x-proxy-connection",
+    "proxy-agent",
+    "proxy-connection",
+    "proxy-authorization",
+    "x-bluecoat-via",
+];
+
+/// Whole-token IP match: `1.2.3.4` must not match inside `11.2.3.45`.
+fn text_has_ip(text: &str, ip: std::net::IpAddr) -> bool {
+    text.split(|c: char| !(c.is_ascii_hexdigit() || c == '.' || c == ':'))
+        .filter(|t| !t.is_empty())
+        .any(|t| {
+            t.parse::<std::net::IpAddr>().ok() == Some(ip)
+                || t.rsplit_once(':')
+                    .and_then(|(h, _)| h.parse::<std::net::IpAddr>().ok())
+                    == Some(ip)
+        })
+}
+
+/// Classify the headers httpbin saw. The load balancer appends the address
+/// that connected to it (the proxy exit) to `X-Forwarded-For`, so only the
+/// entries before it were added by the proxy.
+pub(crate) fn classify_anonymity(
+    headers: &HashMap<String, String>,
+    direct_ip: &str,
+) -> Option<String> {
+    let direct = direct_ip.trim().parse::<std::net::IpAddr>().ok()?;
+    let lower: HashMap<String, &str> = headers
+        .iter()
+        .map(|(k, v)| (k.to_ascii_lowercase(), v.as_str()))
+        .collect();
+    let mut xff: Vec<&str> = lower
+        .get("x-forwarded-for")
+        .map(|v| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    xff.pop();
+    let leaked_in_xff = xff.iter().any(|e| text_has_ip(e, direct));
+    let leaked_elsewhere = lower.iter().any(|(k, v)| {
+        k != "x-forwarded-for"
+            && !ANON_INFRA_HEADERS.contains(&k.as_str())
+            && text_has_ip(v, direct)
+    });
+    if leaked_in_xff || leaked_elsewhere {
+        return Some("transparent".to_string());
+    }
+    if !xff.is_empty() || ANON_TELLTALES.iter().any(|k| lower.contains_key(*k)) {
+        return Some("anonymous".to_string());
+    }
+    Some("elite".to_string())
+}
+
 pub(crate) async fn detect_anonymity(
     client: &reqwest::Client,
     direct_ip: Option<&str>,
@@ -338,46 +416,13 @@ pub(crate) async fn detect_anonymity(
     // Without a direct-IP baseline "elite" would be a guess, not a result.
     // Return before spending a request through the proxy.
     let d = direct_ip.filter(|d| !d.is_empty())?;
-    let r = client
-        .get("https://httpbin.org/headers")
-        .send()
-        .await
-        .ok()?;
+    let r = client.get(ANON_URL).send().await.ok()?;
     if !r.status().is_success() {
         return None;
     }
     let body = read_body_capped(r, BODY_LIMIT_SMALL).await.ok()?;
     let parsed = serde_json::from_str::<HttpbinHeaders>(&body).ok()?;
-    let headers = parsed.headers.unwrap_or_default();
-    let mut lower: HashMap<String, String> = HashMap::new();
-    for (k, v) in headers {
-        lower.insert(k.to_lowercase(), v);
-    }
-    if lower.values().any(|v| v.contains(d)) {
-        return Some("transparent".to_string());
-    }
-    if let Some(xff) = lower.get("x-forwarded-for") {
-        if xff.contains(',') {
-            return Some("transparent".to_string());
-        }
-    }
-    let telltales = [
-        "via",
-        "forwarded",
-        "x-forwarded-for",
-        "x-forwarded-host",
-        "x-forwarded-proto",
-        "x-forwarded-by",
-        "forwarded-for",
-        "proxy-connection",
-        "proxy-authorization",
-        "x-proxy-id",
-        "proxy-agent",
-    ];
-    if telltales.iter().any(|k| lower.contains_key(*k)) {
-        return Some("anonymous".to_string());
-    }
-    Some("elite".to_string())
+    classify_anonymity(&parsed.headers.unwrap_or_default(), d)
 }
 
 pub(crate) async fn detect_tamper(
@@ -389,7 +434,7 @@ pub(crate) async fn detect_tamper(
         (Some(a), Some(b)) => (a, b),
         _ => return None,
     };
-    let r = client.get("https://example.com").send().await.ok()?;
+    let r = client.get(TAMPER_URL).send().await.ok()?;
     if !r.status().is_success() {
         return None;
     }

@@ -1,6 +1,6 @@
-use crate::commands::check::{run_checks, BusyGuard, CheckFlags, CheckState};
+use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckFlags, CheckState};
 use crate::commands::dispatch::{
-    pool_items, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
+    pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
 };
 use crate::commands::webhook::send_webhooks_inner;
 use crate::{epoch_secs, ProxyResult, WebhookResult};
@@ -151,26 +151,67 @@ fn emit_auto_status(
         },
     );
 }
-fn merge_auto_items(
+/// A proxy that fails this many scheduled checks in a row leaves the pool.
+pub(crate) const AUTO_DROP_AFTER: u32 = 2;
+/// Retry delay after a cycle that could not reach the check server directly.
+const OFFLINE_RETRY_SECS: u64 = 60;
+
+type PoolEntry = (String, Option<u64>, Option<String>);
+
+#[derive(Debug)]
+pub(crate) struct AutoMerge {
+    pub(crate) items: Vec<DispatchItem>,
+    pub(crate) fails: HashMap<String, u32>,
+    pub(crate) alive: usize,
+    pub(crate) avg: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoOutcome {
+    Finished,
+    Offline,
+}
+
+/// Merge check results into the pool as it is *now*: entries deleted while
+/// the check ran are not resurrected, and entries without a result (added
+/// during the run) are kept unchanged.
+pub(crate) fn merge_auto_items(
     results: &[ProxyResult],
-    current: &HashMap<String, (String, Option<u64>, Option<String>)>,
-    checked: &HashSet<String>,
+    current: &HashMap<String, PoolEntry>,
     max_ping_ms: u64,
-) -> (Vec<DispatchItem>, Option<u64>) {
+    prev_fails: &HashMap<String, u32>,
+) -> AutoMerge {
     let mut items = Vec::new();
+    let mut fails = HashMap::new();
+    let mut seen = HashSet::new();
+    let mut alive = 0;
     let mut avg_sum = 0u64;
     let mut avg_n = 0u64;
     for r in results {
-        if !r.alive {
-            continue;
-        }
-        let Some((raw, _, old_country)) = current.get(&r.url) else {
+        let Some((raw, latency, old_country)) = current.get(&r.url) else {
             continue;
         };
+        seen.insert(r.url.as_str());
+        if !r.alive {
+            // One miss may be a hiccup on our side; drop only after several
+            // consecutive failures.
+            let n = prev_fails.get(&r.url).copied().unwrap_or(0) + 1;
+            if n < AUTO_DROP_AFTER {
+                fails.insert(r.url.clone(), n);
+                items.push(DispatchItem {
+                    raw: raw.clone(),
+                    url: Some(r.url.clone()),
+                    latency: *latency,
+                    country: old_country.clone(),
+                });
+            }
+            continue;
+        }
         if max_ping_ms > 0 && r.latency_ms.is_some_and(|ms| ms > max_ping_ms) {
             continue;
         }
-        // The average describes the pool that was actually kept, so it is
+        alive += 1;
+        // The average describes the alive part of the kept pool, so it is
         // accumulated only after the deletion and max-ping filters.
         if let Some(ms) = r.latency_ms {
             avg_sum += ms;
@@ -189,8 +230,11 @@ fn merge_auto_items(
         });
     }
     for (url, (raw, latency, country)) in current {
-        if checked.contains(url) {
+        if seen.contains(url.as_str()) {
             continue;
+        }
+        if let Some(n) = prev_fails.get(url) {
+            fails.insert(url.clone(), *n);
         }
         items.push(DispatchItem {
             raw: raw.clone(),
@@ -199,35 +243,38 @@ fn merge_auto_items(
             country: country.clone(),
         });
     }
-    (items, avg_sum.checked_div(avg_n))
+    AutoMerge {
+        items,
+        fails,
+        alive,
+        avg: avg_sum.checked_div(avg_n),
+    }
 }
 
-async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) {
+async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) -> AutoOutcome {
     let auto: State<'_, AutoState> = app.state();
     if auto.inner.running.swap(true, Ordering::SeqCst) {
         emit_auto_status(app, kind, "skipped", 0, 0, None, None);
-        return;
+        return AutoOutcome::Finished;
     }
     let _run_guard = BusyGuard(auto.inner.running.clone());
 
     let settings = auto.inner.settings.lock().await.clone();
     let disp: State<'_, DispatchState> = app.state();
-    let (urls, checked) = {
+    let urls: Vec<String> = {
         let pool = disp.inner.pool.lock().await;
-        let urls: Vec<String> = pool.iter().map(|u| u.url.clone()).collect();
-        let checked: HashSet<String> = urls.iter().cloned().collect();
-        (urls, checked)
+        pool.iter().map(|u| u.url.clone()).collect()
     };
     let input_total = urls.len();
     if input_total == 0 {
         emit_auto_status(app, kind, "empty", 0, 0, None, None);
-        return;
+        return AutoOutcome::Finished;
     }
 
     let check: State<'_, CheckState> = app.state();
     if check.busy.swap(true, Ordering::SeqCst) {
         emit_auto_status(app, kind, "skipped", 0, input_total, None, None);
-        return;
+        return AutoOutcome::Finished;
     }
     let _busy_guard = BusyGuard(check.busy.clone());
     check.cancel.store(false, Ordering::SeqCst);
@@ -265,22 +312,38 @@ async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) {
     let canceled = check.cancel.load(Ordering::Relaxed);
 
     match result {
-        Err(e) => emit_auto_status(app, kind, "error", 0, input_total, None, Some(e)),
+        Err(e) => {
+            emit_auto_status(app, kind, "error", 0, input_total, None, Some(e));
+            AutoOutcome::Finished
+        }
         Ok(results) => {
             if canceled {
                 let alive = results.iter().filter(|r| r.alive).count();
                 emit_auto_status(app, kind, "stopped", alive, results.len(), None, None);
-                return;
+                return AutoOutcome::Finished;
             }
             let total = results.len();
-            let current: HashMap<String, (String, Option<u64>, Option<String>)> = {
+            // Zero alive proxies usually means this machine is offline (for
+            // example right after waking from sleep), not that the whole pool
+            // died. Without direct access to the check server the results say
+            // nothing about the proxies, so the pool is left untouched.
+            if !results.iter().any(|r| r.alive)
+                && !direct_reachable(&settings.test_url, timeout).await
+            {
+                emit_auto_status(app, kind, "offline", 0, total, None, None);
+                return AutoOutcome::Offline;
+            }
+            let current: HashMap<String, PoolEntry> = {
                 let pool = disp.inner.pool.lock().await;
                 pool.iter()
                     .map(|u| (u.url.clone(), (u.raw.clone(), u.latency, u.country.clone())))
                     .collect()
             };
-            let (items, avg) = merge_auto_items(&results, &current, &checked, settings.max_ping_ms);
-            let kept = store_pool(&disp.inner, items).await;
+            let prev_fails = disp.inner.fails.lock().await.clone();
+            let merged = merge_auto_items(&results, &current, settings.max_ping_ms, &prev_fails);
+            *disp.inner.fails.lock().await = merged.fails;
+            store_pool(&disp.inner, merged.items, false).await;
+            save_pool(app, &disp.inner).await;
             let pool = pool_items(&disp.inner).await;
             let _ = app.emit(
                 "auto://pool",
@@ -291,7 +354,7 @@ async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) {
             // The check and pool update are done; only webhook delivery
             // remains, and it must not keep a manual check blocked.
             drop(_busy_guard);
-            emit_auto_status(app, kind, "done", kept, total, avg, None);
+            emit_auto_status(app, kind, "done", merged.alive, total, merged.avg, None);
 
             if matches!(kind, AutoKind::Auto) && !settings.webhook_urls.is_empty() {
                 let webhook_items: Vec<DispatchItem> = pool
@@ -312,7 +375,20 @@ async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) {
                 .await;
                 let _ = app.emit("auto://webhook", AutoWebhookPayload { results });
             }
+            AutoOutcome::Finished
         }
+    }
+}
+
+/// Next run time after a cycle: an offline cycle is retried soon instead of
+/// waiting a whole interval with possibly stale results.
+fn next_run(enabled: bool, interval_min: u64, outcome: AutoOutcome, now: u64) -> u64 {
+    if !enabled {
+        0
+    } else if outcome == AutoOutcome::Offline {
+        now + OFFLINE_RETRY_SECS
+    } else {
+        now + interval_min.clamp(1, 1440) * 60
     }
 }
 
@@ -337,24 +413,26 @@ pub(crate) async fn auto_scheduler_loop(app: tauri::AppHandle) {
         let Some(kind) = kind else {
             continue;
         };
-        run_auto_cycle(&app, kind).await;
+        let outcome = run_auto_cycle(&app, kind).await;
         let now = epoch_secs();
         let settings = auto.inner.settings.lock().await.clone();
         match kind {
             AutoKind::Dispatch => auto.inner.disp_next.store(
-                if settings.disp_enabled {
-                    now + settings.disp_interval_min.clamp(1, 1440) * 60
-                } else {
-                    0
-                },
+                next_run(
+                    settings.disp_enabled,
+                    settings.disp_interval_min,
+                    outcome,
+                    now,
+                ),
                 Ordering::SeqCst,
             ),
             AutoKind::Auto => auto.inner.auto_next.store(
-                if settings.auto_enabled {
-                    now + settings.auto_interval_min.clamp(1, 1440) * 60
-                } else {
-                    0
-                },
+                next_run(
+                    settings.auto_enabled,
+                    settings.auto_interval_min,
+                    outcome,
+                    now,
+                ),
                 Ordering::SeqCst,
             ),
         }
@@ -443,7 +521,7 @@ pub(crate) async fn run_auto_now(app: tauri::AppHandle, schedule: String) -> Res
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        run_auto_cycle(&app, kind).await;
+        let _ = run_auto_cycle(&app, kind).await;
     });
     Ok(())
 }
@@ -452,7 +530,7 @@ pub(crate) async fn run_auto_now(app: tauri::AppHandle, schedule: String) -> Res
 mod tests {
     use super::*;
     use crate::commands::check::dead_result;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
     fn alive_result(url: &str, latency: u64, country: &str) -> ProxyResult {
         let mut r = dead_result(url.into(), "HTTP".into(), 1, String::new());
@@ -462,6 +540,14 @@ mod tests {
         r.country = Some(country.into());
         r.country_code = Some(country.into());
         r
+    }
+
+    fn dead(url: &str) -> ProxyResult {
+        dead_result(url.into(), "HTTP".into(), 1, "timeout".into())
+    }
+
+    fn urls(m: &AutoMerge) -> Vec<&str> {
+        m.items.iter().map(|i| i.url.as_deref().unwrap()).collect()
     }
 
     #[test]
@@ -480,28 +566,73 @@ mod tests {
                 ("raw-c".to_string(), Some(300), Some("US".to_string())),
             ),
         ]);
-        let checked = HashSet::from(["http://a:80".to_string(), "http://b:80".to_string()]);
         let results = vec![
             alive_result("http://a:80", 10, "FR"),
             alive_result("http://b:80", 999, "FR"),
         ];
-        let (items, avg) = merge_auto_items(&results, &current, &checked, 100);
-        let urls: Vec<&str> = items.iter().map(|i| i.url.as_deref().unwrap()).collect();
-        assert_eq!(urls, vec!["http://a:80", "http://c:80"]);
-        assert_eq!(items[0].raw, "raw-a");
-        assert_eq!(items[0].latency, Some(10));
-        assert_eq!(items[0].country.as_deref(), Some("FR"));
-        assert_eq!(items[1].raw, "raw-c");
-        assert_eq!(avg, Some(10));
+        let m = merge_auto_items(&results, &current, 100, &HashMap::new());
+        assert_eq!(urls(&m), vec!["http://a:80", "http://c:80"]);
+        assert_eq!(m.items[0].raw, "raw-a");
+        assert_eq!(m.items[0].latency, Some(10));
+        assert_eq!(m.items[0].country.as_deref(), Some("FR"));
+        assert_eq!(m.items[1].raw, "raw-c");
+        assert_eq!(m.avg, Some(10));
+        assert_eq!(m.alive, 1);
 
-        // A proxy deleted while the check was running is not resurrected.
+        // A proxy deleted while the check was running is not resurrected,
+        // and an entry without a result is kept as is.
         let current = HashMap::from([(
             "http://b:80".to_string(),
             ("raw-b".to_string(), Some(200), None),
         )]);
         let results = vec![alive_result("http://a:80", 10, "FR")];
-        let (items, _) = merge_auto_items(&results, &current, &checked, 0);
-        assert!(items.is_empty());
+        let m = merge_auto_items(&results, &current, 0, &HashMap::new());
+        assert_eq!(urls(&m), vec!["http://b:80"]);
+        assert_eq!(m.alive, 0);
+    }
+
+    #[test]
+    fn auto_pool_drops_only_after_consecutive_failures() {
+        let current = HashMap::from([
+            (
+                "http://a:80".to_string(),
+                ("raw-a".to_string(), Some(100), Some("DE".to_string())),
+            ),
+            (
+                "http://b:80".to_string(),
+                ("raw-b".to_string(), Some(200), None),
+            ),
+        ]);
+        let results = vec![dead("http://a:80"), alive_result("http://b:80", 50, "NL")];
+
+        // First miss: kept with its previous latency and country.
+        let first = merge_auto_items(&results, &current, 0, &HashMap::new());
+        assert_eq!(urls(&first), vec!["http://a:80", "http://b:80"]);
+        assert_eq!(first.items[0].latency, Some(100));
+        assert_eq!(first.items[0].country.as_deref(), Some("DE"));
+        assert_eq!(first.alive, 1);
+        assert_eq!(first.fails.get("http://a:80"), Some(&1));
+        assert!(!first.fails.contains_key("http://b:80"));
+
+        // Second consecutive miss: dropped.
+        let second = merge_auto_items(&results, &current, 0, &first.fails);
+        assert_eq!(urls(&second), vec!["http://b:80"]);
+        assert!(second.fails.is_empty());
+
+        // A success in between resets the counter.
+        let recovered = vec![alive_result("http://a:80", 70, "DE")];
+        let m = merge_auto_items(&recovered, &current, 0, &first.fails);
+        assert!(!m.fails.contains_key("http://a:80"));
+    }
+
+    #[test]
+    fn offline_cycle_is_retried_soon() {
+        assert_eq!(next_run(false, 30, AutoOutcome::Offline, 1000), 0);
+        assert_eq!(
+            next_run(true, 30, AutoOutcome::Offline, 1000),
+            1000 + OFFLINE_RETRY_SECS
+        );
+        assert_eq!(next_run(true, 30, AutoOutcome::Finished, 1000), 1000 + 1800);
     }
 
     #[test]

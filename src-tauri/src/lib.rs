@@ -24,8 +24,8 @@ use commands::app::{
 use commands::auto::{auto_scheduler_loop, run_auto_now, set_auto_config, AutoState};
 use commands::check::{cancel_check, check_busy, check_direct, check_proxies, CheckState};
 use commands::dispatch::{
-    get_dispatch_pool, local_proxy_status, set_dispatch_pool, start_local_proxy, start_proxy_inner,
-    stop_local_proxy, stop_proxy_inner, DispatchState,
+    get_dispatch_pool, load_pool, local_proxy_status, set_dispatch_pool, start_local_proxy,
+    start_proxy_inner, stop_local_proxy, stop_proxy_inner, DispatchState,
 };
 use commands::export::export_text_file;
 use commands::import::fetch_url_text;
@@ -349,6 +349,12 @@ pub fn run() {
                 // The menu is built from the same localized code as later
                 // refreshes instead of hardcoding English labels here.
                 tauri::async_runtime::block_on(refresh_tray_menu(app.handle()));
+            }
+            // Restore the pool before the webview asks for it and before the
+            // scheduler runs, so scheduled checks survive a restart.
+            {
+                let disp: State<DispatchState> = app.state();
+                tauri::async_runtime::block_on(load_pool(app.handle(), &disp.inner));
             }
             // Scheduling and webhooks run in Rust, so hiding the window or
             // a throttled WebView does not stop scheduled checks.

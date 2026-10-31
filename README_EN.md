@@ -144,6 +144,13 @@ Modes: **Fast** (`/generate_204`) and **Full** (`/judge` — geolocation,
 anonymity and IP type in one response, plus a content-hash integrity check).
 Judge mode replaces the deep checks with its own response.
 
+> **An HTTPS judge cannot detect anonymity or integrity.** A request to an
+> `https://` URL travels inside a TLS tunnel (CONNECT or SOCKS): the proxy
+> cannot see it, add `Via`/`X-Forwarded-For` or alter the response, so every
+> proxy would look `elite` and `ok`. In that case the “Anon” and “Integrity”
+> columns stay empty (`—`); geo and IP type are still filled in. Use your own
+> judge over `http://` to detect anonymity.
+
 > **ip-api: free tier vs Pro.** The free ip-api endpoint is HTTP-only: the
 > proxy and the network see requests and your IP, and a response can be
 > modified in transit. This is a deliberate trade-off; using the free HTTP
@@ -180,10 +187,17 @@ the collapsible “Parameters” block.
 
 - **Geolocation and IP type** — via ip-api: country, city, ISP, ORG, ASN,
   mobile/datacenter/residential.
-- **Anonymity** — `elite` / `anonymous` / `transparent`: header heuristics via
-  httpbin and comparison with the direct IP.
-- **Content integrity** — example.com body compared with a direct connection
-  (`ok` / `modified`).
+- **Anonymity** — `elite` / `anonymous` / `transparent`: heuristics over the
+  headers seen by `http://httpbin.org/headers?show_env=1` and comparison with
+  the direct IP.
+- **Content integrity** — the `http://example.com` body compared with a direct
+  connection (`ok` / `modified`).
+
+Anonymity and integrity are checked **over plain HTTP**: only then does the
+proxy see the request and get a chance to add its own headers or alter the
+response. Over `https://` a proxy merely tunnels the traffic, so these checks
+would show nothing. Proxies that allow only CONNECT to port 443 fail these
+checks and the column stays empty.
 - **TLS integrity** — example.com certificate SHA256 compared with a direct
   connection (`ok` / `modified`).
 
@@ -232,11 +246,16 @@ is shown in the field.
   limit).
 - Request and error counters, current upstream proxy, last error.
 - Pool auto-check every N minutes with removal of unavailable proxies.
+- The pool is saved to disk and restored after an application restart.
 
 ## Auto (the “Auto” tab)
 
-The shared pool is re-checked on a separate timer every N minutes; unavailable
-proxies are removed. After each auto-check, the pool is sent as POST requests
+The shared pool is re-checked on a separate timer every N minutes; a proxy is
+removed after two failed auto-checks in a row. If no proxy answers at all, the
+app checks direct access to the check server: without it (offline, waking from
+sleep) the pool is left unchanged and the check is retried in a minute.
+Auto-checks never stop the dispatcher, even if the pool becomes empty.
+After each auto-check, the pool is sent as POST requests
 to the configured webhooks (up to 10, TXT/JSON/CSV format). “Check now” and
 “Send now” run these actions manually.
 
@@ -268,7 +287,8 @@ are rejected, and redirects are not followed.
 During a check, the following leaves the machine: requests to the selected
 test URL; requests to ip-api, httpbin and example.com when deep checks are
 enabled; direct no-proxy requests for baselines (your IP and the example.com
-reference); requests to the selected Judge instance; a GitHub release check;
+reference) and for a connectivity check when no proxy answered an auto-check;
+requests to the selected Judge instance; a GitHub release check;
 POST requests to the configured webhooks; URL list downloads.
 
 Proxy credentials are sent to the selected proxy using its authentication
@@ -282,6 +302,13 @@ tokens), the ip-api Pro key (if set), geo cache (up to 2000 entries, 6-hour TTL,
 credential-free keys), recent errors, ping history, current check settings,
 auto-check state and settings presets. Clearing `localStorage` removes this
 data.
+
+The dispatcher pool is stored in `pool.json` in the app data directory
+(Windows: `%APPDATA%\com.nechel12.proxpulse`, Linux:
+`~/.local/share/com.nechel12.proxpulse`, macOS:
+`~/Library/Application Support/com.nechel12.proxpulse`). The file contains the
+proxies **including usernames and passwords**; on Linux and macOS it is
+readable by the owner only. The pool “Clear” button clears the file as well.
 
 ## Security
 

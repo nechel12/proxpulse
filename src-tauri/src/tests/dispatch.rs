@@ -1,7 +1,7 @@
 use crate::commands::dispatch::{
     abort_connections, handle_http, handle_socks5, is_self_literal, is_self_upstream,
-    is_self_upstream_async, parse_target, pick_order, pool_items, store_pool, upstream_from_item,
-    CountingIo, DispatchItem,
+    is_self_upstream_async, parse_target, pick_order, pool_items, read_pool_file, store_pool,
+    upstream_from_item, write_pool_file, CountingIo, DispatchItem, DispatchPoolItem,
 };
 use crate::transport::Upstream;
 use crate::*;
@@ -159,13 +159,89 @@ async fn store_pool_keeps_normalized_url_and_country() {
             country: Some("NL".into()),
         },
     ];
-    assert_eq!(store_pool(&st.inner, items).await, 1);
+    assert_eq!(store_pool(&st.inner, items, true).await, 1);
     let pool = pool_items(&st.inner).await;
     assert_eq!(pool.len(), 1);
     assert_eq!(pool[0].url, "socks5://u:p@1.2.3.4:8080");
     assert_eq!(pool[0].raw, "u:p@1.2.3.4:8080");
     assert_eq!(pool[0].latency, Some(42));
     assert_eq!(pool[0].country.as_deref(), Some("DE"));
+}
+
+fn pool_item(url: &str) -> DispatchItem {
+    DispatchItem {
+        raw: url.into(),
+        url: Some(url.into()),
+        latency: Some(10),
+        country: None,
+    }
+}
+
+#[tokio::test]
+async fn automatic_prune_keeps_the_listener_running() {
+    let st = DispatchState::default();
+    store_pool(&st.inner, vec![pool_item("http://1.2.3.4:8080")], true).await;
+    // Port 0 lets the OS pick a free port for the test listener.
+    start_proxy_inner(&st.inner, 0, "round-robin".into(), "both".into())
+        .await
+        .unwrap();
+    assert!(st.inner.running.load(Ordering::SeqCst));
+
+    // Automatic pruning to an empty pool must not stop the dispatcher.
+    store_pool(&st.inner, Vec::new(), false).await;
+    assert!(st.inner.running.load(Ordering::SeqCst));
+
+    // Clearing the pool is an explicit user action and stops it.
+    store_pool(&st.inner, Vec::new(), true).await;
+    assert!(!st.inner.running.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn store_pool_forgets_failures_of_removed_entries() {
+    let st = DispatchState::default();
+    let items = vec![
+        pool_item("http://1.2.3.4:8080"),
+        pool_item("http://5.6.7.8:8080"),
+    ];
+    store_pool(&st.inner, items, true).await;
+    *st.inner.fails.lock().await = HashMap::from([
+        ("http://1.2.3.4:8080".to_string(), 1),
+        ("http://5.6.7.8:8080".to_string(), 1),
+    ]);
+    store_pool(&st.inner, vec![pool_item("http://1.2.3.4:8080")], true).await;
+    let fails = st.inner.fails.lock().await.clone();
+    assert_eq!(fails.len(), 1);
+    assert_eq!(fails.get("http://1.2.3.4:8080"), Some(&1));
+}
+
+#[test]
+fn pool_file_round_trip() {
+    let dir = std::env::temp_dir().join(format!("proxpulse-pool-{}", std::process::id()));
+    let path = dir.join("pool.json");
+    assert!(
+        read_pool_file(&path).is_empty(),
+        "missing file reads as empty"
+    );
+    let items = vec![DispatchPoolItem {
+        raw: "u:p@1.2.3.4:8080".into(),
+        url: "http://u:p@1.2.3.4:8080".into(),
+        latency: Some(42),
+        country: Some("DE".into()),
+    }];
+    write_pool_file(&path, &items).unwrap();
+    let back = read_pool_file(&path);
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].raw, "u:p@1.2.3.4:8080");
+    assert_eq!(back[0].url.as_deref(), Some("http://u:p@1.2.3.4:8080"));
+    assert_eq!(back[0].latency, Some(42));
+    assert_eq!(back[0].country.as_deref(), Some("DE"));
+
+    std::fs::write(&path, b"not json").unwrap();
+    assert!(
+        read_pool_file(&path).is_empty(),
+        "corrupt file reads as empty"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]

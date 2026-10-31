@@ -1,6 +1,6 @@
 export type AutoStatusEvent = {
   schedule: "disp" | "auto";
-  state: "running" | "done" | "stopped" | "skipped" | "empty" | "error";
+  state: "running" | "done" | "stopped" | "skipped" | "empty" | "error" | "offline";
   alive: number;
   total: number;
   avgMs: number | null;
@@ -57,6 +57,9 @@ export class AutoStatusController {
         break;
       case "error":
         this.deps.setStatusText(id, () => this.deps.t("auto_err", { e: ev.error ?? "" }));
+        break;
+      case "offline":
+        this.deps.setStatusText(id, () => `${this.deps.t("auto_offline")} ${time()}`);
         break;
     }
     if (ev.state === "done") this.deps.onDone(ev.avgMs, ev.alive);

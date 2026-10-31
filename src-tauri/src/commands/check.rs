@@ -75,6 +75,14 @@ pub(crate) fn cancel_check(state: State<'_, CheckState>) -> Result<(), String> {
     Ok(())
 }
 
+/// `https://` targets are reached through a CONNECT tunnel (or SOCKS), which
+/// hides the request from the proxy: header and content checks see nothing.
+pub(crate) fn is_tls_target(url: &str) -> bool {
+    url.trim()
+        .get(..8)
+        .is_some_and(|p| p.eq_ignore_ascii_case("https://"))
+}
+
 pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckFlags) -> Duration {
     // Main attempts: repeats × timeout. Deep stages run concurrently; the
     // slowest is TLS via an HTTPS proxy: TCP + CONNECT + handshake = 3×.
@@ -244,6 +252,11 @@ async fn check_candidate_inner(
     if let Some(b) = first_body {
         if flags.judge {
             let proxy_sha = try_parse_judge_body(&mut res, &b);
+            if is_tls_target(&test_url) {
+                // Inside a TLS tunnel the proxy can neither add headers nor
+                // change the body: "elite" would be a guess, not a result.
+                res.anonymity = None;
+            }
             res.tamper = match (&baseline.judge_content_sha, &proxy_sha) {
                 (Some(a), Some(c)) => Some(if a == c {
                     "ok".to_string()
@@ -363,7 +376,7 @@ async fn fetch_baseline(flags: CheckFlags) -> Baseline {
             }
         }
         let c = build_client(None, timeout, true).ok()?;
-        let r = c.get("https://example.com").send().await.ok()?;
+        let r = c.get(TAMPER_URL).send().await.ok()?;
         if !r.status().is_success() {
             return None;
         }
@@ -451,9 +464,12 @@ pub(crate) async fn run_checks(
     );
 
     // Direct judge content hash (for tamper check in judge mode). The fast
-    // mode returns an empty 204 body, so the hash would never be used; skip
-    // the extra /judge request entirely.
-    let judge_url = if flags.judge && !test_url.trim_end_matches('/').ends_with("/generate_204") {
+    // mode returns an empty 204 body, and an HTTPS body cannot be modified by
+    // the proxy, so in both cases skip the extra /judge request entirely.
+    let judge_url = if flags.judge
+        && !is_tls_target(&test_url)
+        && !test_url.trim_end_matches('/').ends_with("/generate_204")
+    {
         judge_direct_url(&test_url)
     } else {
         None
@@ -685,6 +701,15 @@ pub(crate) async fn check_proxies(
 #[tauri::command]
 pub(crate) fn check_busy(state: State<'_, CheckState>) -> bool {
     state.busy.load(Ordering::SeqCst)
+}
+
+/// Whether the check server answers without a proxy. Tells "every proxy is
+/// dead" apart from "this machine is offline".
+pub(crate) async fn direct_reachable(test_url: &str, timeout: Duration) -> bool {
+    let Ok(client) = build_client(None, timeout, true) else {
+        return false;
+    };
+    matches!(client.get(test_url.trim()).send().await, Ok(r) if r.status().is_success())
 }
 
 #[tauri::command]
