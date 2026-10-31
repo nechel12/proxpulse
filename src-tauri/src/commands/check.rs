@@ -163,8 +163,9 @@ async fn check_candidate_inner(
         Err(e) => return dead_result(raw, proto, 0, e),
     };
 
-    // judge mode: pass our direct IP so the judge can detect leaks
-    let req_url = if flags.judge {
+    // HTTP judge: pass our direct IP so the judge can detect leaks. An HTTPS
+    // judge cannot see proxy headers, so it gets no reason to learn our IP.
+    let req_url = if flags.judge && !is_tls_target(&test_url) {
         match baseline.direct_ip.as_deref() {
             Some(dip) if !dip.is_empty() => {
                 let sep = if test_url.contains('?') { '&' } else { '?' };
@@ -334,9 +335,18 @@ async fn check_candidate_inner(
     res
 }
 
-async fn fetch_baseline(flags: CheckFlags) -> Baseline {
+/// Our direct IP is needed only where a leak can be seen: the anonymity
+/// probe, or a judge reached over plain HTTP.
+pub(crate) fn wants_direct_ip(flags: &CheckFlags, test_url: &str) -> bool {
+    if flags.judge {
+        !is_tls_target(test_url)
+    } else {
+        flags.anon
+    }
+}
+
+async fn fetch_baseline(flags: CheckFlags, want_ip: bool) -> Baseline {
     let timeout = Duration::from_millis(9000);
-    let want_ip = flags.judge || flags.anon;
     let direct_ip = async {
         if !want_ip {
             return None;
@@ -475,7 +485,10 @@ pub(crate) async fn run_checks(
         None
     };
     let (baseline_res, judge_sha) = tokio::join!(
-        tokio::time::timeout(Duration::from_secs(20), fetch_baseline(flags.clone())),
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            fetch_baseline(flags.clone(), wants_direct_ip(&flags, &test_url))
+        ),
         async {
             match &judge_url {
                 Some(u) => fetch_direct_judge_sha(u, timeout).await,

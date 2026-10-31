@@ -139,7 +139,8 @@ The check server is selected in the settings and comes in two flavours.
   will be requested is shown below the list.
 
 **ProxPulse Judge** — a dedicated check backend. The built-in public instance
-is used by default; “Custom server…” opens an input for another instance.
+`https://proxycheck.lmtunnel.com` is used by default; “Custom server…” opens
+an input for another instance.
 Modes: **Fast** (`/generate_204`) and **Full** (`/judge` — geolocation,
 anonymity and IP type in one response, plus a content-hash integrity check).
 Judge mode replaces the deep checks with its own response.
@@ -150,6 +151,10 @@ Judge mode replaces the deep checks with its own response.
 > proxy would look `elite` and `ok`. In that case the “Anon” and “Integrity”
 > columns stay empty (`—`); geo and IP type are still filled in. Use your own
 > judge over `http://` to detect anonymity.
+>
+> An HTTP judge receives your real IP in the `direct_ip` parameter, which is
+> how it spots proxies that forward it. An HTTPS judge does not get this
+> parameter, since it cannot detect such a leak anyway.
 
 > **ip-api: free tier vs Pro.** The free ip-api endpoint is HTTP-only: the
 > proxy and the network see requests and your IP, and a response can be

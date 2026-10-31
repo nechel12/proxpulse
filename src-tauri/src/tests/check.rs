@@ -1,4 +1,6 @@
-use crate::commands::check::{candidate_budget, dead_result, is_tls_target, CheckFlags};
+use crate::commands::check::{
+    candidate_budget, dead_result, is_tls_target, wants_direct_ip, CheckFlags,
+};
 use crate::tls::{is_cert_error, tls_client_config};
 use crate::*;
 use std::collections::HashMap;
@@ -22,6 +24,37 @@ fn deep_checks_use_plain_http() {
     assert!(is_tls_target("HTTPS://judge.example.com/judge"));
     assert!(is_tls_target("  https://x"));
     assert!(!is_tls_target("http://judge.example.com/judge"));
+}
+
+#[test]
+fn direct_ip_is_requested_only_where_a_leak_is_visible() {
+    let flags = |judge: bool, anon: bool| CheckFlags {
+        geo: false,
+        anon,
+        tamper: false,
+        tls: false,
+        precheck: false,
+        precheck_timeout: Duration::from_millis(300),
+        judge,
+        ipapi_key: None,
+    };
+    // An HTTPS judge never sees proxy headers: it does not get our IP.
+    assert!(!wants_direct_ip(
+        &flags(true, false),
+        "https://judge.example.com/judge"
+    ));
+    assert!(wants_direct_ip(
+        &flags(true, false),
+        "http://judge.example.com/judge"
+    ));
+    assert!(wants_direct_ip(
+        &flags(false, true),
+        "https://www.google.com/generate_204"
+    ));
+    assert!(!wants_direct_ip(
+        &flags(false, false),
+        "https://www.google.com/generate_204"
+    ));
 }
 
 #[test]
