@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { I18N, translate } from "./i18n.ts";
+import { I18N, detectLang, translate } from "./i18n.ts";
 
 describe("i18n", () => {
   it("has the same keys in RU and EN", () => {
@@ -15,5 +15,15 @@ describe("i18n", () => {
 
   it("falls back to the key for unknown entries", () => {
     expect(translate("en", "missing.key")).toBe("missing.key");
+  });
+
+  it("picks the initial language from the saved choice or the system", () => {
+    expect(detectLang("en", ["ru-RU"])).toBe("en");
+    expect(detectLang("ru", ["en-US"])).toBe("ru");
+    expect(detectLang(null, ["ru-RU", "en-US"])).toBe("ru");
+    expect(detectLang(null, ["RU"])).toBe("ru");
+    expect(detectLang(null, ["en-GB", "ru-RU"])).toBe("en");
+    expect(detectLang(null, ["de-DE"])).toBe("en");
+    expect(detectLang("garbage", [])).toBe("en");
   });
 });

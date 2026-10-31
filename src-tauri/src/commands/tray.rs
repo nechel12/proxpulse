@@ -19,8 +19,8 @@ impl Default for TrayInfo {
         Self {
             webhook_on: false,
             webhook_url: String::new(),
-            // The UI defaults to Russian until the webview reports its saved
-            // language, so the initial tray menu must match that default.
+            // Placeholder until the webview reports its language (saved
+            // choice or system language) right after startup.
             lang: "ru".to_string(),
         }
     }

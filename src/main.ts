@@ -9,7 +9,7 @@ import { refreshStatusTexts, setStatusText } from "./status.ts";
 import { poolCountry } from "./format.ts";
 import { GeoCacheStore } from "./geo-store.ts";
 import { WebhookPanel } from "./webhooks.ts";
-import { type Lang, translate } from "./i18n.ts";
+import { type Lang, detectLang, translate } from "./i18n.ts";
 import { extractProxiesFromText } from "./parse.ts";
 import { parseFallback, parseTextAsync, type ParseResult } from "./parse-runner.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
@@ -30,11 +30,14 @@ import type { ProxyResult } from "./types.ts";
 
 // ================= i18n =================
 
-let lang: Lang = "ru";
+let savedLang: string | null = null;
 try {
-  const savedLang = localStorage.getItem("pp-lang");
-  if (savedLang === "ru" || savedLang === "en") lang = savedLang;
+  savedLang = localStorage.getItem("pp-lang");
 } catch { /* localStorage may be unavailable */ }
+let lang: Lang = detectLang(
+  savedLang,
+  typeof navigator === "undefined" ? [] : (navigator.languages ?? [navigator.language]),
+);
 
 function t(key: string, params?: Record<string, string | number>): string {
   return translate(lang, key, params);

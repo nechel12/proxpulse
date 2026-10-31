@@ -9,7 +9,8 @@ geolocation, anonymity, traffic integrity and TLS checks, plus a local proxy
 dispatcher, scheduled re-checks and webhook delivery of working proxies.
 
 Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
-Dark theme with red accents; Russian and English UI.
+Dark theme with red accents; Russian and English UI (picked from the system
+language on first launch).
 
 ## Features
 

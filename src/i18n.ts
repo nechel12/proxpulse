@@ -254,6 +254,16 @@ export const I18N: Record<Lang, Record<string, string>> = {
   },
 };
 
+/**
+ * Initial UI language: a saved choice wins, otherwise the system language.
+ * Only Russian maps to the Russian UI; everything else gets English.
+ */
+export function detectLang(saved: string | null, systemLangs: readonly string[]): Lang {
+  if (saved === "ru" || saved === "en") return saved;
+  const first = systemLangs.find((l) => typeof l === "string" && l.length > 0) ?? "";
+  return first.toLowerCase().split("-")[0] === "ru" ? "ru" : "en";
+}
+
 export function translate(
   lang: Lang,
   key: string,
