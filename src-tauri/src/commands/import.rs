@@ -1,6 +1,41 @@
+use crate::extract::extract_proxies;
 use crate::http::{read_body_capped, short_error, BODY_LIMIT_IMPORT};
 use crate::netguard::build_guarded_client;
+use serde::Serialize;
 use std::time::Duration;
+
+/// Upper bound for one parse; the UI asks for its own cap + 1.
+const PARSE_LIMIT_MAX: usize = 100_000;
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ParsedList {
+    count: usize,
+    truncated: bool,
+    list: Option<Vec<String>>,
+}
+
+/// Extract proxies from pasted, imported or downloaded text. The UI counts
+/// and checks exactly this list, so the count matches what gets checked.
+#[tauri::command]
+pub(crate) async fn parse_proxy_text(
+    text: String,
+    limit: usize,
+    want_list: bool,
+    default_proto: Option<String>,
+) -> Result<ParsedList, String> {
+    let limit = limit.min(PARSE_LIMIT_MAX);
+    let proto = default_proto.unwrap_or_else(|| "http".to_string());
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = extract_proxies(&text, limit, &proto);
+        ParsedList {
+            count: list.len(),
+            truncated: list.len() >= limit,
+            list: want_list.then_some(list),
+        }
+    })
+    .await
+    .map_err(|e| short_error(&e.to_string()))
+}
 
 #[tauri::command]
 pub(crate) async fn fetch_url_text(url: String) -> Result<String, String> {

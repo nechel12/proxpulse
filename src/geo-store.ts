@@ -1,5 +1,4 @@
 import type { ProxyResult } from "./types.ts";
-import { stripProxyCredentials } from "./parse.ts";
 import {
   type GeoEntry,
   type GeoFields,
@@ -9,6 +8,19 @@ import {
 
 const GEO_CACHE_MAX = 2000;
 const STORAGE_KEY = "pp-geocache";
+
+/** Remove `user:pass@` from a proxy URL, keeping the scheme. */
+export function stripProxyCredentials(raw: string): string {
+  const at = raw.lastIndexOf("@");
+  if (at < 0) return raw;
+  const host = raw.slice(at + 1);
+  if (!host) return raw;
+  const schemeSep = raw.indexOf("://");
+  if (schemeSep >= 0 && schemeSep < at) {
+    return raw.slice(0, schemeSep + 3) + host;
+  }
+  return host;
+}
 
 /** `scheme://host:port` without userinfo. */
 const URL_KEY_RE = /^[a-z][a-z0-9+.-]*:\/\/[^\s@/]+$/i;

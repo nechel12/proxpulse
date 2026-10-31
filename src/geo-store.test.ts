@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GeoCacheStore, geoKey } from "./geo-store.ts";
+import { GeoCacheStore, geoKey, stripProxyCredentials } from "./geo-store.ts";
 import type { ProxyResult } from "./types.ts";
 
 const result = {
@@ -28,6 +28,21 @@ function memoryStorage(initial: Record<string, string> = {}) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("stripProxyCredentials", () => {
+  it("removes userinfo and keeps the scheme", () => {
+    expect(stripProxyCredentials("http://user:pass@1.2.3.4:8080")).toBe("http://1.2.3.4:8080");
+    expect(stripProxyCredentials("socks5://u:p@h:1080")).toBe("socks5://h:1080");
+  });
+  it("works without a scheme", () => {
+    expect(stripProxyCredentials("user:pass@1.2.3.4:8080")).toBe("1.2.3.4:8080");
+    expect(stripProxyCredentials("u:p@ss@host:80")).toBe("host:80");
+  });
+  it("leaves credentials-free values alone", () => {
+    expect(stripProxyCredentials("1.2.3.4:8080")).toBe("1.2.3.4:8080");
+    expect(stripProxyCredentials("http://1.2.3.4:8080")).toBe("http://1.2.3.4:8080");
+  });
 });
 
 describe("GeoCacheStore", () => {

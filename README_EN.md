@@ -81,7 +81,7 @@ Checks:
 
 ```sh
 npm run build         # tsc + vite build
-npm test              # vitest: parsing, presets, CSV, export, i18n, formatting
+npm test              # vitest: presets, CSV, export, i18n, geo cache, formatting
 npm run lint          # ESLint
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml --lib
@@ -353,8 +353,7 @@ src/auto-status.ts, auto-events.ts  # auto-check status and events
 src/webhooks.ts                     # webhook panel
 src/dispatch-monitor.ts             # local dispatcher monitor
 src/updater.ts, info-panel.ts       # updates and app info
-src/parse.ts                        # proxy parsing (pure functions)
-src/parse-runner.ts, parseWorker.ts # worker parsing with fallback
+src/parse-runner.ts                 # list parsing via the backend
 src/geocache.ts, geo-store.ts       # geo cache
 src/i18n.ts                         # RU/EN dictionaries
 src/*.test.ts                       # pure-module tests (vitest)
@@ -362,7 +361,8 @@ src/styles.css                      # dark theme
 src-tauri/src/lib.rs                # backend entry point
 src-tauri/src/commands/*.rs         # Tauri commands (check, dispatch, auto, tray, ...)
 src-tauri/src/http.rs               # HTTP clients, body limits, geo
-src-tauri/src/proxy.rs              # proxy parsing/normalization
+src-tauri/src/extract.rs            # proxy extraction from text (the only parser)
+src-tauri/src/proxy.rs              # proxy normalization
 src-tauri/src/transport.rs          # SOCKS/HTTP CONNECT and TLS to proxies
 src-tauri/src/tls.rs                # TLS config and certificate fingerprints
 src-tauri/src/netguard.rs           # SSRF guard for user-supplied URLs

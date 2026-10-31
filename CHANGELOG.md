@@ -41,6 +41,11 @@ All notable changes to ProxPulse. The format follows
 
 ### Changed
 
+- One parser: proxy lists are extracted by the backend, and every entry must
+  pass the same normalization a check uses. The live count in the source
+  panel now equals the number of proxies a check will test; entries that
+  used to show up as "bad format" are no longer counted or checked, and one
+  proxy written two ways is checked once.
 - One schedule re-checks the shared pool, replacing the separate dispatcher
   and auto timers; sending the pool to webhooks is an option of it. Saved
   settings of both timers are merged on first start.
@@ -71,7 +76,7 @@ All notable changes to ProxPulse. The format follows
 
 ### Performance
 
-- Large lists are parsed in a worker, rendered rows are capped, HTTP clients
+- Large lists are parsed off the UI thread, rendered rows are capped, HTTP clients
   and the TLS configuration are reused, and deep checks are rate-capped.
 
 ## [0.4.4] — 2026-10-23

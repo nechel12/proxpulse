@@ -84,7 +84,7 @@ npm run build:unsigned # локальная сборка без updater-арте
 
 ```sh
 npm run build         # tsc + vite build
-npm test              # vitest: парсинг, пресеты, CSV, экспорт, i18n, форматирование
+npm test              # vitest: пресеты, CSV, экспорт, i18n, гео-кэш, форматирование
 npm run lint          # ESLint
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml --lib
@@ -361,8 +361,7 @@ src/auto-status.ts, auto-events.ts # статус и события автопр
 src/webhooks.ts                    # панель вебхуков
 src/dispatch-monitor.ts            # монитор локального диспетчера
 src/updater.ts, info-panel.ts      # обновления и информация
-src/parse.ts                       # парсинг прокси (чистые функции)
-src/parse-runner.ts, parseWorker.ts # парсинг в worker с fallback
+src/parse-runner.ts                # разбор списка через бэкенд
 src/geocache.ts, geo-store.ts      # кэш геоданных
 src/i18n.ts                        # словари RU/EN
 src/*.test.ts                      # тесты чистых модулей (vitest)
@@ -370,7 +369,8 @@ src/styles.css                     # тёмная тема
 src-tauri/src/lib.rs               # точка входа бэкенда
 src-tauri/src/commands/*.rs        # команды Tauri (check, dispatch, auto, tray, ...)
 src-tauri/src/http.rs              # HTTP-клиенты, лимиты тел, гео
-src-tauri/src/proxy.rs             # парсинг/нормализация прокси
+src-tauri/src/extract.rs           # извлечение прокси из текста (единственный парсер)
+src-tauri/src/proxy.rs             # нормализация прокси
 src-tauri/src/transport.rs         # SOCKS/HTTP CONNECT и TLS до прокси
 src-tauri/src/tls.rs               # TLS-конфиг и отпечатки сертификатов
 src-tauri/src/netguard.rs          # SSRF-гард для пользовательских URL

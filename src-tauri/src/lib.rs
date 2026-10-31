@@ -9,6 +9,7 @@ use tauri::{
 };
 use tokio::sync::{Mutex, Semaphore};
 
+mod extract;
 mod http;
 mod netguard;
 mod transport;
@@ -28,7 +29,7 @@ use commands::dispatch::{
     start_proxy_inner, stop_local_proxy, stop_proxy_inner, DispatchState,
 };
 use commands::export::export_text_file;
-use commands::import::fetch_url_text;
+use commands::import::{fetch_url_text, parse_proxy_text};
 use commands::tray::{refresh_tray_menu, update_tray_status, TrayState};
 use commands::webhook::{send_webhook, send_webhooks};
 
@@ -269,6 +270,7 @@ pub fn run() {
             export_text_file,
             install_kind,
             fetch_url_text,
+            parse_proxy_text,
             set_dispatch_pool,
             get_dispatch_pool,
             start_local_proxy,

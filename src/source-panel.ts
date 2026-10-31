@@ -5,7 +5,6 @@ type SetStatus = (key: string, params?: Record<string, string | number>) => void
 
 type Deps = {
   parseTextAsync: ParseFn;
-  extractProxies: (text: string, limit: number) => string[];
   fetchUrl: (url: string) => Promise<string>;
   setStatus: SetStatus;
   maxProxies: number;
@@ -35,13 +34,7 @@ export function initSourcePanel(deps: Deps): void {
         countEl.textContent = String(Math.min(r.count, deps.maxProxies)) + (r.count > deps.maxProxies ? "+" : "");
       })
       .catch(() => {
-        if (gen !== updGen) return;
-        try {
-          const list = deps.extractProxies(text, deps.maxProxies + 1);
-          countEl.textContent = String(Math.min(list.length, deps.maxProxies)) + (list.length > deps.maxProxies ? "+" : "");
-        } catch {
-          countEl.textContent = "!";
-        }
+        if (gen === updGen) countEl.textContent = "!";
       });
   };
 
@@ -67,13 +60,7 @@ export function initSourcePanel(deps: Deps): void {
     if (!u) return;
     try {
       const txt = await deps.fetchUrl(u);
-      let found: string[] = [];
-      try {
-        const parsed = await deps.parseTextAsync(txt, deps.maxProxies, true);
-        found = parsed.list ?? [];
-      } catch {
-        found = deps.extractProxies(txt, deps.maxProxies);
-      }
+      const found = (await deps.parseTextAsync(txt, deps.maxProxies, true)).list ?? [];
       if (found.length === 0) {
         deps.setStatus("file_none", { name: u.slice(0, 60) });
         return;
@@ -96,13 +83,7 @@ export function initSourcePanel(deps: Deps): void {
       }
       try {
         const txt = await f.text();
-        let found: string[] = [];
-        try {
-          const parsed = await deps.parseTextAsync(txt, deps.maxProxies, true);
-          found = parsed.list ?? [];
-        } catch {
-          found = deps.extractProxies(txt, deps.maxProxies);
-        }
+        const found = (await deps.parseTextAsync(txt, deps.maxProxies, true)).list ?? [];
         if (found.length > 0) parts.push(...found);
         else deps.setStatus("file_none", { name: f.name });
       } catch {

@@ -10,8 +10,7 @@ import { poolCountry } from "./format.ts";
 import { GeoCacheStore } from "./geo-store.ts";
 import { WebhookPanel } from "./webhooks.ts";
 import { type Lang, detectLang, translate } from "./i18n.ts";
-import { extractProxiesFromText } from "./parse.ts";
-import { parseFallback, parseTextAsync, type ParseResult } from "./parse-runner.ts";
+import { parseTextAsync, type ParseResult } from "./parse-runner.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
 import { type TargetMode } from "./profiles.ts";
 import { SettingsPanel } from "./settings-panel.ts";
@@ -205,6 +204,11 @@ const MAX_INPUT_CHARS = 10 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILE_MB = 10;
 
+/** Parse with the current "type without scheme": it decides duplicates. */
+function parseList(text: string, limit: number, wantList: boolean): Promise<ParseResult> {
+  return parseTextAsync(text, limit, wantList, ($("default-proto") as HTMLSelectElement).value);
+}
+
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -322,9 +326,10 @@ async function startInner() {
   setStatusT("st_parsing");
   let parsed: ParseResult;
   try {
-    parsed = await parseTextAsync(source, MAX_PROXIES + 1, true);
-  } catch {
-    parsed = parseFallback(source, MAX_PROXIES + 1, true);
+    parsed = await parseList(source, MAX_PROXIES + 1, true);
+  } catch (e) {
+    setStatusT("st_parse_fail", { e: String(e).slice(0, 120) });
+    return;
   }
   let list = parsed.list ?? [];
   if (list.length === 0) {
@@ -445,8 +450,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   initSourcePanel({
-    parseTextAsync,
-    extractProxies: extractProxiesFromText,
+    parseTextAsync: parseList,
     fetchUrl: (url) => invoke<string>("fetch_url_text", { url }),
     setStatus: setStatusT,
     maxProxies: MAX_PROXIES,
