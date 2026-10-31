@@ -485,16 +485,18 @@ pub(crate) async fn connect_to_http_proxy(
     }
 }
 
-/// socks4/socks5 resolve the destination locally; socks4a/socks5h send the
-/// hostname to the proxy. This matches the checker (reqwest) and strict
-/// SOCKS4 servers that do not implement the SOCKS4a extension.
+/// Only plain socks4 resolves the destination locally: the protocol has no
+/// hostname field, and strict SOCKS4 servers lack the SOCKS4a extension.
+/// SOCKS5 (both `socks5` and `socks5h`) always sends the hostname, so traffic
+/// routed through the dispatcher does not leak every visited domain to the
+/// local DNS resolver.
 pub(crate) async fn socks_target_host(
     scheme: &str,
     t_host: &str,
     t_port: u16,
     timeout: Duration,
 ) -> std::io::Result<String> {
-    let local = matches!(scheme, "socks4" | "socks5");
+    let local = scheme == "socks4";
     if !local || t_host.parse::<IpAddr>().is_ok() {
         return Ok(t_host.to_string());
     }

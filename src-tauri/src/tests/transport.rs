@@ -20,15 +20,19 @@ fn socks4_ipv6_policy() {
 #[tokio::test]
 async fn socks_local_dns_modes() {
     let timeout = Duration::from_secs(2);
-    let local = socks_target_host("socks5", "localhost", 80, timeout)
+    // socks4 has no hostname field, so it must resolve locally.
+    let local = socks_target_host("socks4", "localhost", 80, timeout)
         .await
         .unwrap();
     assert!(local.parse::<IpAddr>().unwrap().is_loopback());
 
-    let remote = socks_target_host("socks5h", "localhost", 80, timeout)
-        .await
-        .unwrap();
-    assert_eq!(remote, "localhost");
+    // SOCKS5 always lets the proxy resolve: no local DNS leak.
+    for scheme in ["socks5", "socks5h", "socks4a"] {
+        let remote = socks_target_host(scheme, "localhost", 80, timeout)
+            .await
+            .unwrap();
+        assert_eq!(remote, "localhost", "{scheme}");
+    }
 
     assert_eq!(
         socks_target_host("socks4", "127.0.0.1", 80, timeout)

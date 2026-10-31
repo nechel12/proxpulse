@@ -242,6 +242,9 @@ is shown in the field.
   (CONNECT) stays on one upstream until it closes. Every plain HTTP request
   gets `Connection: close` and its own connection, so a request to another
   site never lands in someone else's tunnel without authorization.
+- For SOCKS5 upstreams (`socks5://` and `socks5h://`) the proxy resolves the
+  site name, so the local DNS resolver does not see visited domains.
+  `socks4://` cannot carry names and resolves locally; use `socks4a://`.
 - The pool merges new entries with old ones; “Sync” and “Clear” buttons; pool
   filtering and sorting by ping or country.
 - **Max ping**: proxies slower than the limit do not enter the pool (`0` — no
