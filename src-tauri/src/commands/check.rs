@@ -26,6 +26,87 @@ impl Drop for BusyGuard {
 
 const CHECK_BUSY: &str = "another check is running";
 
+/// Limits shared by manual checks, scheduled checks and the UI inputs
+/// (`index.html`, `readCheckSettings`).
+pub(crate) const TIMEOUT_MS: (u64, u64) = (1_000, 30_000);
+pub(crate) const PRECHECK_TIMEOUT_MS: (u64, u64) = (300, 10_000);
+pub(crate) const MAX_CONCURRENCY: usize = 500;
+pub(crate) const MAX_REPEATS: usize = 5;
+
+/// Check parameters, one definition for a manual check and a scheduled pool
+/// check. Mirrors `CheckSettings` in `src/check-client.ts`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct CheckConfig {
+    pub(crate) test_url: String,
+    pub(crate) timeout_ms: u64,
+    pub(crate) concurrency: usize,
+    pub(crate) repeats: usize,
+    pub(crate) default_proto: String,
+    pub(crate) with_geo: bool,
+    pub(crate) with_anonymity: bool,
+    pub(crate) with_tamper: bool,
+    pub(crate) with_tls: bool,
+    pub(crate) precheck: bool,
+    pub(crate) precheck_timeout_ms: u64,
+    pub(crate) judge_mode: bool,
+    pub(crate) ipapi_key: Option<String>,
+}
+
+impl Default for CheckConfig {
+    fn default() -> Self {
+        Self {
+            test_url: "https://www.google.com/generate_204".to_string(),
+            timeout_ms: 5000,
+            concurrency: 50,
+            repeats: 1,
+            default_proto: "http".to_string(),
+            with_geo: true,
+            with_anonymity: true,
+            with_tamper: true,
+            with_tls: true,
+            precheck: true,
+            precheck_timeout_ms: 1500,
+            judge_mode: false,
+            ipapi_key: None,
+        }
+    }
+}
+
+impl CheckConfig {
+    pub(crate) fn sanitized(mut self) -> Self {
+        self.test_url = self.test_url.trim().to_string();
+        self.timeout_ms = self.timeout_ms.clamp(TIMEOUT_MS.0, TIMEOUT_MS.1);
+        self.concurrency = self.concurrency.clamp(1, MAX_CONCURRENCY);
+        self.repeats = self.repeats.clamp(1, MAX_REPEATS);
+        self.precheck_timeout_ms = self
+            .precheck_timeout_ms
+            .clamp(PRECHECK_TIMEOUT_MS.0, PRECHECK_TIMEOUT_MS.1);
+        self.ipapi_key = self
+            .ipapi_key
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty());
+        self
+    }
+
+    pub(crate) fn timeout(&self) -> Duration {
+        Duration::from_millis(self.timeout_ms)
+    }
+
+    pub(crate) fn flags(&self) -> CheckFlags {
+        CheckFlags {
+            geo: self.with_geo,
+            anon: self.with_anonymity,
+            tamper: self.with_tamper,
+            tls: self.with_tls,
+            precheck: self.precheck,
+            precheck_timeout: Duration::from_millis(self.precheck_timeout_ms),
+            judge: self.judge_mode,
+            ipapi_key: self.ipapi_key.as_deref().map(Arc::from),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct CheckFlags {
     pub(crate) geo: bool,
@@ -429,17 +510,17 @@ async fn fetch_baseline(flags: CheckFlags, want_ip: bool) -> Baseline {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_checks(
     proxies: Vec<String>,
-    test_url: String,
-    timeout: Duration,
-    conc: usize,
-    repeats: usize,
-    default_proto: &str,
-    flags: CheckFlags,
+    cfg: CheckConfig,
     geo_cache: Vec<GeoCacheEntry>,
     cancel: Arc<AtomicBool>,
     on_result: Option<&Channel<ProxyResult>>,
 ) -> Result<Vec<ProxyResult>, String> {
-    let test_url = test_url.trim().to_string();
+    let cfg = cfg.sanitized();
+    let flags = cfg.flags();
+    let timeout = cfg.timeout();
+    let (conc, repeats) = (cfg.concurrency, cfg.repeats);
+    let default_proto = cfg.default_proto.as_str();
+    let test_url = cfg.test_url.clone();
     if test_url.is_empty() {
         return Err("empty test url".to_string());
     }
@@ -642,22 +723,9 @@ pub(crate) async fn run_checks(
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn check_proxies(
     proxies: Vec<String>,
-    test_url: String,
-    timeout_ms: u64,
-    concurrency: usize,
-    default_proto: String,
-    repeats: Option<usize>,
-    with_geo: Option<bool>,
-    with_anonymity: Option<bool>,
-    with_tamper: Option<bool>,
-    with_tls: Option<bool>,
-    precheck: Option<bool>,
-    precheck_timeout_ms: Option<u64>,
-    judge_mode: Option<bool>,
-    ipapi_key: Option<String>,
+    config: CheckConfig,
     geo_cache: Option<Vec<GeoCacheEntry>>,
     state: State<'_, CheckState>,
     on_result: Channel<ProxyResult>,
@@ -669,33 +737,9 @@ pub(crate) async fn check_proxies(
     let _guard = BusyGuard(busy);
     state.cancel.store(false, Ordering::SeqCst);
 
-    let timeout = Duration::from_millis(timeout_ms.clamp(500, 60_000));
-    let conc = concurrency.clamp(1, 500);
-    let repeats = repeats.unwrap_or(1).clamp(1, 5);
-    let flags = CheckFlags {
-        geo: with_geo.unwrap_or(true),
-        anon: with_anonymity.unwrap_or(true),
-        tamper: with_tamper.unwrap_or(true),
-        tls: with_tls.unwrap_or(true),
-        precheck: precheck.unwrap_or(true),
-        precheck_timeout: Duration::from_millis(
-            precheck_timeout_ms.unwrap_or(1500).clamp(300, 10_000),
-        ),
-        judge: judge_mode.unwrap_or(false),
-        ipapi_key: ipapi_key
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .map(|s| Arc::from(s.as_str())),
-    };
-
     run_checks(
         proxies,
-        test_url,
-        timeout,
-        conc,
-        repeats,
-        &default_proto,
-        flags,
+        config,
         geo_cache.unwrap_or_default(),
         state.cancel.clone(),
         Some(&on_result),
@@ -733,7 +777,7 @@ pub(crate) async fn check_direct(test_url: String, timeout_ms: u64) -> Result<u6
     if !is_http_url(&test_url) {
         return Err("test url must start with http(s)://".to_string());
     }
-    let timeout = Duration::from_millis(timeout_ms.clamp(500, 30_000));
+    let timeout = Duration::from_millis(timeout_ms.clamp(TIMEOUT_MS.0, TIMEOUT_MS.1));
     let client = build_client(None, timeout, true).map_err(|e| e.to_string())?;
     let start = Instant::now();
     let r = client

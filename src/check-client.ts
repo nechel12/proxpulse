@@ -3,6 +3,14 @@ import { clip } from "./clip.ts";
 import type { GeoEntry } from "./geocache.ts";
 import type { ProxyResult } from "./types.ts";
 
+/** Same shape and limits as `CheckConfig` in `src-tauri/src/commands/check.rs`. */
+export const CHECK_LIMITS = {
+  timeoutMs: [1000, 30000],
+  concurrency: [1, 500],
+  repeats: [1, 5],
+  precheckTimeoutMs: [300, 10000],
+} as const;
+
 export type CheckSettings = {
   testUrl: string;
   timeoutMs: number;
@@ -90,19 +98,7 @@ export async function runCheckList(
   try {
     await invoke<void>("check_proxies", {
       proxies: list,
-      testUrl: settings.testUrl,
-      timeoutMs: settings.timeoutMs,
-      concurrency: settings.concurrency,
-      defaultProto: settings.defaultProto,
-      repeats: settings.repeats,
-      withGeo: settings.withGeo,
-      withAnonymity: settings.withAnonymity,
-      withTamper: settings.withTamper,
-      withTls: settings.withTls,
-      precheck: settings.precheck,
-      precheckTimeoutMs: settings.precheckTimeoutMs,
-      judgeMode: settings.judgeMode,
-      ipapiKey: settings.ipapiKey,
+      config: settings,
       geoCache,
       onResult: channel,
     });

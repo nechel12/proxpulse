@@ -1,21 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { CheckSettings } from "./check-client.ts";
 import { logErr } from "./diagnostics.ts";
-
-type CheckSettings = {
-  testUrl: string;
-  timeoutMs: number;
-  concurrency: number;
-  repeats: number;
-  defaultProto: string;
-  withGeo: boolean;
-  withAnonymity: boolean;
-  withTamper: boolean;
-  withTls: boolean;
-  precheck: boolean;
-  precheckTimeoutMs: number;
-  judgeMode: boolean;
-  ipapiKey: string | null;
-};
 
 type Deps = {
   readCheckSettings: () => CheckSettings;

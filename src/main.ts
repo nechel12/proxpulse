@@ -24,7 +24,7 @@ import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
 import { askConfirm, askText, screenVisible, setProgress } from "./ui.ts";
 import { NetStatus } from "./net-status.ts";
-import { runCheckList } from "./check-client.ts";
+import { CHECK_LIMITS, runCheckList, type CheckSettings } from "./check-client.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
 import type { ProxyResult } from "./types.ts";
 
@@ -179,20 +179,24 @@ function syncMaxPingInputs(): void {
 
 const geoCache = new GeoCacheStore();
 
-function readCheckSettings() {
+function numberIn(id: string, [min, max]: readonly [number, number], fallback: number): number {
+  return Math.max(min, Math.min(max, Number(($(id) as HTMLInputElement).value) || fallback));
+}
+
+function readCheckSettings(): CheckSettings {
   const judge = settings.isJudgeMode();
   return {
     testUrl: settings.effectiveTestUrl(),
-    timeoutMs: Math.max(1000, Math.min(30000, Number(($("timeout") as HTMLInputElement).value) || 5000)),
-    concurrency: Math.max(1, Math.min(500, Number(($("concurrency") as HTMLInputElement).value) || 50)),
-    repeats: Math.max(1, Math.min(5, Number(($("repeats") as HTMLInputElement).value) || 1)),
+    timeoutMs: numberIn("timeout", CHECK_LIMITS.timeoutMs, 5000),
+    concurrency: numberIn("concurrency", CHECK_LIMITS.concurrency, 50),
+    repeats: numberIn("repeats", CHECK_LIMITS.repeats, 1),
     defaultProto: ($("default-proto") as HTMLSelectElement).value,
     withGeo: judge ? false : ($("chk-geo") as HTMLInputElement).checked,
     withAnonymity: judge ? false : ($("chk-anon") as HTMLInputElement).checked,
     withTamper: judge ? false : ($("chk-tamper") as HTMLInputElement).checked,
     withTls: judge ? false : ($("chk-tls") as HTMLInputElement).checked,
     precheck: ($("chk-precheck") as HTMLInputElement).checked,
-    precheckTimeoutMs: Math.max(300, Math.min(10000, Number(($("precheck-timeout") as HTMLInputElement).value) || 1500)),
+    precheckTimeoutMs: numberIn("precheck-timeout", CHECK_LIMITS.precheckTimeoutMs, 1500),
     judgeMode: judge,
     ipapiKey: settings.activeIpapiKey(),
   };

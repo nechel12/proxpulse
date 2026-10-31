@@ -1,4 +1,4 @@
-use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckFlags, CheckState};
+use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckConfig, CheckState};
 use crate::commands::dispatch::{
     pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
 };
@@ -280,35 +280,24 @@ async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) -> AutoOutcome {
     check.cancel.store(false, Ordering::SeqCst);
     emit_auto_status(app, kind, "running", 0, input_total, None, None);
 
-    let timeout = Duration::from_millis(settings.timeout_ms.clamp(500, 60_000));
-    let flags = CheckFlags {
-        geo: settings.with_geo,
-        anon: settings.with_anonymity,
-        tamper: settings.with_tamper,
-        tls: settings.with_tls,
+    let cfg = CheckConfig {
+        test_url: settings.test_url.clone(),
+        timeout_ms: settings.timeout_ms,
+        concurrency: settings.concurrency,
+        repeats: settings.repeats,
+        default_proto: settings.default_proto.clone(),
+        with_geo: settings.with_geo,
+        with_anonymity: settings.with_anonymity,
+        with_tamper: settings.with_tamper,
+        with_tls: settings.with_tls,
         precheck: settings.precheck,
-        precheck_timeout: Duration::from_millis(settings.precheck_timeout_ms.clamp(300, 10_000)),
-        judge: settings.judge_mode,
-        ipapi_key: settings
-            .ipapi_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(Arc::from),
-    };
-    let result = run_checks(
-        urls,
-        settings.test_url.clone(),
-        timeout,
-        settings.concurrency.clamp(1, 500),
-        settings.repeats.clamp(1, 5),
-        &settings.default_proto,
-        flags,
-        Vec::new(),
-        check.cancel.clone(),
-        None,
-    )
-    .await;
+        precheck_timeout_ms: settings.precheck_timeout_ms,
+        judge_mode: settings.judge_mode,
+        ipapi_key: settings.ipapi_key.clone(),
+    }
+    .sanitized();
+    let timeout = cfg.timeout();
+    let result = run_checks(urls, cfg, Vec::new(), check.cancel.clone(), None).await;
     let canceled = check.cancel.load(Ordering::Relaxed);
 
     match result {
