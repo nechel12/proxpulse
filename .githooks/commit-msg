@@ -1,0 +1,20 @@
+#!/bin/sh
+# Удаляет атрибуцию Claude из сообщения коммита.
+# Включение: git config core.hooksPath .githooks
+
+file=$1
+tmp="$file.$$"
+
+if awk '
+  {
+    line = tolower($0)
+    if (line ~ /^co-authored-by:[[:space:]]*claude([[:space:]<]|\[|$)/) next
+    if (line ~ /generated with \[?claude code/) next
+    print
+  }
+' "$file" > "$tmp"; then
+  mv "$tmp" "$file"
+else
+  rm -f "$tmp"
+  exit 1
+fi
