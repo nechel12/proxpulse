@@ -394,10 +394,11 @@ scripts/check-versions.mjs         # синхронизация версий
 
 Сообщения об ошибках и пул-реквесты приветствуются. В отчёте об ошибке
 укажите версию приложения, операционную систему и диагностику из вкладки
-«Инфо». Перед отправкой PR выполните проверки из раздела «Сборка из
-исходников»: `npm run build`, `npm test`,
-`cargo test --manifest-path src-tauri/Cargo.toml --lib`,
-`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`.
+«Инфо» — шаблон issue подскажет поля. Перед отправкой PR выполните все
+проверки из раздела «Сборка из исходников»; подробности — в
+[CONTRIBUTING.md](CONTRIBUTING.md), история изменений — в
+[CHANGELOG.md](CHANGELOG.md), правила общения — в
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 Трекер задач: [Issues](https://github.com/nechel12/proxpulse/issues).
 

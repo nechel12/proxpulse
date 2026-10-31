@@ -385,10 +385,11 @@ scripts/check-versions.mjs          # version synchronization
 ## Contributing
 
 Bug reports and pull requests are welcome. In a bug report, include the app
-version, operating system and diagnostics from the Info tab. Before opening a
-PR, run the checks from “Build from source”: `npm run build`, `npm test`,
-`cargo test --manifest-path src-tauri/Cargo.toml --lib`,
-`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`.
+version, operating system and diagnostics from the Info tab — the issue form
+asks for them. Before opening a PR, run all checks from “Build from source”;
+see [CONTRIBUTING.md](CONTRIBUTING.md) for details,
+[CHANGELOG.md](CHANGELOG.md) for the history of changes and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for conduct rules.
 
 Issue tracker: [Issues](https://github.com/nechel12/proxpulse/issues).
 

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/nechel12/proxpulse/security/advisories/new
+    about: Report security issues privately, not in a public issue.
+  - name: Judge server issues
+    url: https://github.com/nechel12/proxpulse-judge/issues
+    about: Problems with a self-hosted or public ProxPulse Judge instance.
