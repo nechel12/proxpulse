@@ -5,15 +5,36 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      # Tauri checks that @tauri-apps/* and the tauri crates share a
+      # major.minor version: merge this PR together with the cargo "tauri"
+      # group, or the build fails on the version mismatch.
+      tauri:
+        patterns: ["@tauri-apps/*"]
+      dev-tools:
+        dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      # TypeScript majors need typescript-eslint support first; upgrade by hand.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: cargo
     directory: "/src-tauri"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      tauri:
+        patterns: ["tauri", "tauri-*"]
+      rustls:
+        patterns: ["rustls", "rustls-*", "tokio-rustls", "webpki-roots"]
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]

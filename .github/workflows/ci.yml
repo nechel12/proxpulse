@@ -107,6 +107,33 @@ jobs:
       - run: npm run build
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 
+  msrv:
+    # Cargo.toml declares rust-version = 1.90, which is also the highest
+    # rust-version among the dependencies (tauri 2.12); the other jobs build
+    # on stable only, so check the declared minimum here.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.90"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri -> target
+          key: msrv
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --locked
+
   audit:
     runs-on: ubuntu-latest
     permissions:
