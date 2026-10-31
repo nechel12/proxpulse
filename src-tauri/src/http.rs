@@ -137,7 +137,11 @@ pub(crate) fn build_client(
     }
     if let Some(u) = proxy_url {
         let p = reqwest::Proxy::all(u).map_err(|e| short_error(&e.to_string()))?;
-        b = b.proxy(p);
+        // No idle connections through a checked proxy: every sample (and
+        // every later run) then measures the full path, TCP + proxy
+        // handshake + request. A reused tunnel would make later samples look
+        // faster, turning "jitter" into the handshake cost.
+        b = b.proxy(p).pool_max_idle_per_host(0);
     }
     let client = b.build().map_err(|e| short_error(&e.to_string()))?;
     let mut cache = client_cache().lock().unwrap_or_else(|e| e.into_inner());

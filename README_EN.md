@@ -177,7 +177,7 @@ Judge mode replaces the deep checks with its own response.
 |---|---|---|
 | Timeout | 5000 ms | single HTTP request limit (1000–30000) |
 | Threads | 50 | parallel checks (1–500) |
-| Samples | 1 | repeats per proxy for ping, jitter and success rate (1–5) |
+| Samples | 1 | repeats per proxy for ping, jitter and success rate (1–5); every sample opens a new connection, so the ping includes connecting to the proxy |
 | No-scheme type | HTTP | value used when no scheme is given; HTTP + SOCKS5 mode checks both |
 | Port precheck | on, 1500 ms | fast TCP connect: unavailable proxies are dropped before the full check |
 
