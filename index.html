@@ -272,11 +272,7 @@
           <div class="panel-head" style="margin-top:14px">
             <span class="ph-title" data-i18n="disp_auto_title">▸ Автопроверка</span>
           </div>
-          <div class="checks end">
-            <button id="disp-auto-on" class="sqchk" aria-pressed="false"><span class="sq"></span><span data-i18n="auto_on">Вкл</span></button>
-            <label class="fld" style="flex:1"><span data-i18n="auto_every">Каждые, мин</span><input id="disp-auto-min" type="number" value="30" min="1" max="1440" /></label>
-          </div>
-          <label class="fld" style="margin-top:8px"><span data-i18n="max_ping">Макс. пинг, мс</span><input id="disp-max-ping" type="number" value="0" min="0" data-i18n-ph="max_ping_ph" placeholder="0 — без лимита" /></label>
+          <div class="hint" data-i18n="disp_auto_hint">Пул перепроверяется по расписанию из вкладки «Авто»; там же макс. пинг.</div>
           <div id="disp-auto-status" class="status-line">—</div>
         </div>
       </section>
@@ -317,7 +313,7 @@
         <div class="panel-head">
           <span class="ph-title" data-i18n="auto_title">▸ Авторежим</span>
         </div>
-        <div class="hint" data-i18n="auto_hint">Общий рабочий пул перепроверяется по таймеру, мёртвые вылетают, живые уходят на вебхук.</div>
+        <div class="hint" data-i18n="auto_hint">Общий пул перепроверяется по таймеру: живость, пинг и страна. Прокси удаляется после двух неудач подряд.</div>
         <div class="settings">
           <div class="checks end">
             <button id="auto-on" class="sqchk" aria-pressed="false"><span class="sq"></span><span data-i18n="auto_on">Вкл</span></button>
@@ -344,9 +340,12 @@
             </label>
             <div class="fld"><span>&nbsp;</span><button id="btn-webhook-send" class="btn ghost" data-i18n="webhook_send">Отправить сейчас</button></div>
           </div>
+          <div class="checks" style="margin-top:8px">
+            <button id="auto-webhook-on" class="sqchk" aria-pressed="true"><span class="sq"></span><span data-i18n="webhook_after_check">Отправлять после автопроверки</span></button>
+          </div>
           <label class="chk" style="margin-top:8px"><input id="chk-webhook-creds" type="checkbox" /><span data-i18n="webhook_creds">Отправлять логин/пароль</span></label>
           <div class="hint" data-i18n="webhook_creds_hint">По умолчанию credentials вырезаются из URL. Включение требует HTTPS.</div>
-          <div class="hint" data-i18n="webhook_hint">После каждой автопроверки список уходит POST-запросом. Пусто — отправки нет.</div>
+          <div class="hint" data-i18n="webhook_hint">Пул уходит POST-запросом на каждый URL. Пусто — отправки нет.</div>
           <div id="webhook-status" class="status-line">—</div>
         </div>
       </section>

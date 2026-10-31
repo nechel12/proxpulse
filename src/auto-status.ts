@@ -1,5 +1,4 @@
 export type AutoStatusEvent = {
-  schedule: "disp" | "auto";
   state: "running" | "done" | "stopped" | "skipped" | "empty" | "error" | "offline";
   alive: number;
   total: number;
@@ -25,41 +24,38 @@ export class AutoStatusController {
   constructor(private deps: Deps) {}
 
   handle(ev: AutoStatusEvent): void {
-    const id = ev.schedule === "disp" ? "disp-auto-status" : "auto-status";
     const time = () =>
       new Date(ev.at * 1000).toLocaleTimeString(this.deps.locale() === "ru" ? "ru-RU" : "en-US");
+    // One schedule for the shared pool: both tabs show its status.
+    const show = (render: () => string) => {
+      for (const id of ["auto-status", "disp-auto-status"]) this.deps.setStatusText(id, render);
+    };
     if (ev.state === "running") {
-      this.deps.setStatusText(id, () => this.deps.t("auto_running", { n: ev.total }));
+      show(() => this.deps.t("auto_running", { n: ev.total }));
       this.running = true;
       this.buttons(true);
       return;
     }
     if (ev.state === "skipped") {
-      this.deps.setStatusText(id, () => this.deps.t("auto_skip"));
+      show(() => this.deps.t("auto_skip"));
       return;
     }
     this.running = false;
     switch (ev.state) {
       case "done":
-        this.deps.setStatusText(id, () => `${this.deps.t("auto_pruned", {
-          alive: ev.alive,
-          total: ev.total,
-        })} ${time()}`);
+        show(() => `${this.deps.t("auto_pruned", { alive: ev.alive, total: ev.total })} ${time()}`);
         break;
       case "stopped":
-        this.deps.setStatusText(id, () => this.deps.t("st_stopped", {
-          alive: ev.alive,
-          total: ev.total,
-        }));
+        show(() => this.deps.t("st_stopped", { alive: ev.alive, total: ev.total }));
         break;
       case "empty":
-        this.deps.setStatusText(id, () => this.deps.t("pool_empty"));
+        show(() => this.deps.t("pool_empty"));
         break;
       case "error":
-        this.deps.setStatusText(id, () => this.deps.t("auto_err", { e: ev.error ?? "" }));
+        show(() => this.deps.t("auto_err", { e: ev.error ?? "" }));
         break;
       case "offline":
-        this.deps.setStatusText(id, () => `${this.deps.t("auto_offline")} ${time()}`);
+        show(() => `${this.deps.t("auto_offline")} ${time()}`);
         break;
     }
     if (ev.state === "done") this.deps.onDone(ev.avgMs, ev.alive);

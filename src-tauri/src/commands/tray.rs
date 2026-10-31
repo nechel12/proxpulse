@@ -76,8 +76,7 @@ pub(crate) async fn refresh_tray_menu(app: &tauri::AppHandle) {
             Some(v.saturating_sub(now))
         }
     };
-    let disp_next = remaining(auto.inner.disp_next.load(Ordering::SeqCst));
-    let auto_next = remaining(auto.inner.auto_next.load(Ordering::SeqCst));
+    let auto_next = remaining(auto.inner.next.load(Ordering::SeqCst));
     let ru = info.lang == "ru";
     let dispatch_txt = if running {
         if ru {
@@ -90,26 +89,17 @@ pub(crate) async fn refresh_tray_menu(app: &tauri::AppHandle) {
     } else {
         "Dispatcher: OFF".to_string()
     };
-    let next_disp_txt = format!(
-        "{} {}",
-        if ru {
-            "След. диспетчер:"
-        } else {
-            "Next dispatch:"
-        },
-        fmt_countdown(disp_next, ru)
-    );
     let next_auto_txt = format!(
         "{} {}",
         if ru {
-            "След. авто:"
+            "След. автопроверка:"
         } else {
-            "Next auto:"
+            "Next auto-check:"
         },
         fmt_countdown(auto_next, ru)
     );
     let sig = format!(
-        "{dispatch_txt}|{next_disp_txt}|{next_auto_txt}|{}|{}|{}",
+        "{dispatch_txt}|{next_auto_txt}|{}|{}|{}",
         info.webhook_on, info.webhook_url, info.lang
     );
     {
@@ -135,7 +125,6 @@ pub(crate) async fn refresh_tray_menu(app: &tauri::AppHandle) {
         )?;
         let dispatch =
             MenuItem::with_id(app, "dispatch_toggle", &dispatch_txt, true, None::<&str>)?;
-        let next_disp = MenuItem::with_id(app, "next_disp", &next_disp_txt, false, None::<&str>)?;
         let next_auto = MenuItem::with_id(app, "next_auto", &next_auto_txt, false, None::<&str>)?;
         let webhook_txt = if info.webhook_on && !info.webhook_url.trim().is_empty() {
             let label = if ru {
@@ -167,7 +156,7 @@ pub(crate) async fn refresh_tray_menu(app: &tauri::AppHandle) {
         let menu = Menu::with_items(
             app,
             &[
-                &show, &hide, &sep1, &dispatch, &next_disp, &next_auto, &webhook, &sep2, &quit,
+                &show, &hide, &sep1, &dispatch, &next_auto, &webhook, &sep2, &quit,
             ],
         )?;
         if let Some(tray_icon) = app.tray_by_id("main") {

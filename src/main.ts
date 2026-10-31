@@ -169,10 +169,8 @@ function loadMaxPing(): void {
 }
 
 function syncMaxPingInputs(): void {
-  for (const id of ["disp-max-ping", "auto-max-ping"]) {
-    const el = document.getElementById(id) as HTMLInputElement | null;
-    if (el) el.value = String(maxPingMs);
-  }
+  const el = document.getElementById("auto-max-ping") as HTMLInputElement | null;
+  if (el) el.value = String(maxPingMs);
 }
 
 // ---------- geo cache (skip repeated geo lookups for unchanged exit IPs) ----------
@@ -250,7 +248,7 @@ async function updateTray(): Promise<void> {
   try {
     const urls = webhooks.getUrls();
     await invoke("update_tray_status", {
-      webhookOn: autoSettings.autoOn && urls.length > 0,
+      webhookOn: autoSettings.enabled && autoSettings.sendWebhooks && urls.length > 0,
       webhookUrl: urls[0] ?? "",
       lang,
     });
@@ -639,8 +637,8 @@ window.addEventListener("DOMContentLoaded", () => {
       armTimers();
     });
   };
-  bindSqchk("disp-auto-on", () => autoSettings.dispAutoOn, (v) => { autoSettings.dispAutoOn = v; });
-  bindSqchk("auto-on", () => autoSettings.autoOn, (v) => { autoSettings.autoOn = v; });
+  bindSqchk("auto-on", () => autoSettings.enabled, (v) => { autoSettings.enabled = v; });
+  bindSqchk("auto-webhook-on", () => autoSettings.sendWebhooks, (v) => { autoSettings.sendWebhooks = v; });
 
   // dispatcher
   ($("srv-port") as HTMLInputElement).addEventListener("input", () => dispatchMonitor.refreshAddr());
@@ -718,9 +716,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initUpdater({ t, setStatusText, logErr, isTauriRuntime });
 
   // auto timers + webhook
-  for (const id of ["disp-auto-min", "auto-min"]) {
-    document.getElementById(id)?.addEventListener("change", armTimers);
-  }
+  document.getElementById("auto-min")?.addEventListener("change", armTimers);
   loadMaxPing();
   syncMaxPingInputs();
   document.querySelectorAll<HTMLInputElement>("[data-pool-filter]").forEach((el) => {
@@ -739,17 +735,15 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   pingHist = loadPingHist();
   renderPingGraph(pingHist, lang);
-  for (const id of ["disp-max-ping", "auto-max-ping"]) {
-    document.getElementById(id)?.addEventListener("change", (e) => {
-      const v = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0));
-      maxPingMs = Number.isFinite(v) ? v : 0;
-      try {
-        localStorage.setItem("pp-maxping", String(maxPingMs));
-      } catch { /* ignore */ }
-      syncMaxPingInputs();
-      scheduleAutoConfig();
-    });
-  }
+  document.getElementById("auto-max-ping")?.addEventListener("change", (e) => {
+    const v = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0));
+    maxPingMs = Number.isFinite(v) ? v : 0;
+    try {
+      localStorage.setItem("pp-maxping", String(maxPingMs));
+    } catch { /* ignore */ }
+    syncMaxPingInputs();
+    scheduleAutoConfig();
+  });
   webhooks.load();
   settings.loadIpapiSettings();
   loadAutoSettings();
@@ -770,7 +764,7 @@ window.addEventListener("DOMContentLoaded", () => {
     inputs[inputs.length - 1]?.focus();
   });
   ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => {
-    void invoke("run_auto_now", { schedule: "auto" }).catch((e) => {
+    void invoke("run_auto_now").catch((e) => {
       const msg = String(e).slice(0, 120);
       setStatusText("auto-status", () => t("auto_err", { e: msg }));
     });

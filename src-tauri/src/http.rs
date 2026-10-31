@@ -221,14 +221,15 @@ pub(crate) fn apply_ipapi(res: &mut ProxyResult, g: &IpApi) {
     }
 }
 
-/// Fill geo from the frontend cache. The frontend filters entries by a TTL;
-/// when the test URL does not reveal the exit IP, the cached IP is used.
-/// Reusing a cached IP here also lets the frontend refresh its timestamp.
+/// Fill geo from a cache: the frontend's (TTL-filtered, always with an exit
+/// IP) or the pool's known countries for scheduled checks (no IP). When the
+/// test URL does not reveal the exit IP, the cached IP is used; reusing it
+/// also lets the frontend refresh its timestamp. Only a known *different*
+/// exit IP invalidates an entry.
 pub(crate) fn apply_cached_geo(res: &mut ProxyResult, entry: &GeoCacheEntry) -> bool {
     let use_cached = match (&res.ip, &entry.ip) {
         (Some(a), Some(b)) => a == b,
-        (None, _) => true,
-        _ => false,
+        _ => true,
     };
     if !use_cached {
         return false;

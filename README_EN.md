@@ -253,27 +253,33 @@ is shown in the field.
   `socks4://` cannot carry names and resolves locally; use `socks4a://`.
 - The pool merges new entries with old ones; “Sync” and “Clear pool” (with a
   confirmation) buttons; pool filtering and sorting by ping or country.
-- **Max ping**: proxies slower than the limit do not enter the pool (`0` — no
-  limit).
+- **Max ping** (set on the Auto tab): proxies slower than the limit do not
+  enter the pool (`0` — no limit).
 - Request and error counters, current upstream proxy, last error.
-- Pool auto-check every N minutes with removal of unavailable proxies.
+- The pool is re-checked on the schedule from the Auto tab; its status is
+  shown here too.
 - The pool is saved to disk and restored after an application restart.
 
 ## Auto (the “Auto” tab)
 
-The shared pool is re-checked on a separate timer every N minutes; a proxy is
-removed after two failed auto-checks in a row. If no proxy answers at all, the
-app checks direct access to the check server: without it (offline, waking from
-sleep) the pool is left unchanged and the check is retried in a minute.
-Auto-checks never stop the dispatcher, even if the pool becomes empty.
-After each auto-check, the pool is sent as POST requests
-to the configured webhooks (up to 10, TXT/JSON/CSV format). “Check now” and
-“Send now” run these actions manually.
+One schedule re-checks the shared pool every N minutes. Scheduled checks are
+light: liveness, ping and country; geo is looked up only for proxies without
+a country, and anonymity, integrity and TLS are not checked (the pool does not
+use those results). A proxy is removed after two failed auto-checks in a row.
+If no proxy answers at all, the app checks direct access to the check server:
+without it (offline, waking from sleep) the pool is left unchanged and the
+check is retried in a minute. Auto-checks never stop the dispatcher, even if
+the pool becomes empty.
+
+With **“Send after each auto-check”** enabled, the pool is POSTed to the
+configured webhooks (up to 10, TXT/JSON/CSV format) after every check. “Check
+now” and “Send now” run these actions manually.
 
 The scheduler and webhook delivery run in the Rust backend, so checks keep
-running while the window is hidden in the tray. The on/off state and intervals
+running while the window is hidden in the tray. The on/off state and interval
 are persisted; after a restart the schedule is restored from the current
-settings.
+settings. Settings of the two former timers (dispatcher and auto) are merged
+into the single schedule on first start.
 
 By default proxy credentials are stripped from URLs before posting. The
 **“Send credentials”** option includes them, but requires HTTPS; an

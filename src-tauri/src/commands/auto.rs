@@ -3,7 +3,7 @@ use crate::commands::dispatch::{
     pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
 };
 use crate::commands::webhook::send_webhooks_inner;
-use crate::{epoch_secs, ProxyResult, WebhookResult};
+use crate::{epoch_secs, strip_credentials, GeoCacheEntry, ProxyResult, WebhookResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -14,64 +14,42 @@ use tokio::sync::Mutex;
 
 // ================= scheduled checks =================
 
+/// One schedule for the shared pool. It used to be two independent timers
+/// (dispatcher tab and auto tab) re-checking the same pool; now webhook
+/// delivery is an option of the single schedule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub(crate) struct AutoSettings {
-    disp_enabled: bool,
-    disp_interval_min: u64,
-    auto_enabled: bool,
-    auto_interval_min: u64,
+    enabled: bool,
+    interval_min: u64,
+    /// POST the pool to the webhooks after every scheduled check.
+    send_webhooks: bool,
     max_ping_ms: u64,
     webhook_urls: Vec<String>,
     webhook_format: String,
     webhook_include_credentials: bool,
-    test_url: String,
-    timeout_ms: u64,
-    concurrency: usize,
-    repeats: usize,
-    default_proto: String,
-    with_geo: bool,
-    with_anonymity: bool,
-    with_tamper: bool,
-    with_tls: bool,
-    precheck: bool,
-    precheck_timeout_ms: u64,
-    judge_mode: bool,
-    ipapi_key: Option<String>,
+    check: CheckConfig,
 }
 
 impl Default for AutoSettings {
     fn default() -> Self {
         Self {
-            disp_enabled: false,
-            disp_interval_min: 30,
-            auto_enabled: false,
-            auto_interval_min: 30,
+            enabled: false,
+            interval_min: 30,
+            send_webhooks: false,
             max_ping_ms: 0,
             webhook_urls: Vec::new(),
             webhook_format: "txt".to_string(),
             webhook_include_credentials: false,
-            test_url: "https://www.google.com/generate_204".to_string(),
-            timeout_ms: 5000,
-            concurrency: 50,
-            repeats: 1,
-            default_proto: "http".to_string(),
-            with_geo: true,
-            with_anonymity: true,
-            with_tamper: true,
-            with_tls: true,
-            precheck: true,
-            precheck_timeout_ms: 1500,
-            judge_mode: false,
-            ipapi_key: None,
+            check: CheckConfig::default(),
         }
     }
 }
 
 pub(crate) struct AutoInner {
     pub(crate) settings: Mutex<AutoSettings>,
-    pub(crate) disp_next: AtomicU64,
-    pub(crate) auto_next: AtomicU64,
+    /// Unix time of the next scheduled check, 0 when the schedule is off.
+    pub(crate) next: AtomicU64,
     pub(crate) running: Arc<AtomicBool>,
 }
 
@@ -84,25 +62,9 @@ impl Default for AutoState {
         Self {
             inner: Arc::new(AutoInner {
                 settings: Mutex::new(AutoSettings::default()),
-                disp_next: AtomicU64::new(0),
-                auto_next: AtomicU64::new(0),
+                next: AtomicU64::new(0),
                 running: Arc::new(AtomicBool::new(false)),
             }),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum AutoKind {
-    Dispatch,
-    Auto,
-}
-
-impl AutoKind {
-    fn schedule(self) -> &'static str {
-        match self {
-            AutoKind::Dispatch => "disp",
-            AutoKind::Auto => "auto",
         }
     }
 }
@@ -110,7 +72,6 @@ impl AutoKind {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AutoStatus {
-    schedule: String,
     state: String,
     alive: usize,
     total: usize,
@@ -131,7 +92,6 @@ struct AutoWebhookPayload {
 
 fn emit_auto_status(
     app: &tauri::AppHandle,
-    kind: AutoKind,
     state: &str,
     alive: usize,
     total: usize,
@@ -141,7 +101,6 @@ fn emit_auto_status(
     let _ = app.emit(
         "auto://status",
         AutoStatus {
-            schedule: kind.schedule().to_string(),
             state: state.to_string(),
             alive,
             total,
@@ -151,6 +110,7 @@ fn emit_auto_status(
         },
     );
 }
+
 /// A proxy that fails this many scheduled checks in a row leaves the pool.
 pub(crate) const AUTO_DROP_AFTER: u32 = 2;
 /// Retry delay after a cycle that could not reach the check server directly.
@@ -170,6 +130,40 @@ pub(crate) struct AutoMerge {
 enum AutoOutcome {
     Finished,
     Offline,
+}
+
+/// Scheduled checks only keep the pool fresh: liveness, ping and country.
+/// The merge discards anonymity, integrity and TLS results, so their extra
+/// requests through every proxy (and third-party quota) are skipped.
+pub(crate) fn pool_check_config(check: &CheckConfig) -> CheckConfig {
+    CheckConfig {
+        with_anonymity: false,
+        with_tamper: false,
+        with_tls: false,
+        ..check.clone()
+    }
+}
+
+/// Countries already known for pool entries, passed as a geo cache, so a
+/// scheduled check looks geo up only for entries that have none.
+pub(crate) fn pool_geo_cache(pool: &[DispatchPoolItem]) -> Vec<GeoCacheEntry> {
+    pool.iter()
+        .filter_map(|p| {
+            let country = p.country.clone().filter(|c| !c.trim().is_empty())?;
+            let is_code = country.len() == 2 && country.chars().all(|c| c.is_ascii_uppercase());
+            Some(GeoCacheEntry {
+                proxy: strip_credentials(&p.url),
+                ip: None,
+                country: (!is_code).then(|| country.clone()),
+                country_code: is_code.then_some(country),
+                city: None,
+                isp: None,
+                org: None,
+                asn: None,
+                ip_type: None,
+            })
+        })
+        .collect()
 }
 
 /// Merge check results into the pool as it is *now*: entries deleted while
@@ -251,64 +245,55 @@ pub(crate) fn merge_auto_items(
     }
 }
 
-async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) -> AutoOutcome {
+async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
     let auto: State<'_, AutoState> = app.state();
     if auto.inner.running.swap(true, Ordering::SeqCst) {
-        emit_auto_status(app, kind, "skipped", 0, 0, None, None);
+        emit_auto_status(app, "skipped", 0, 0, None, None);
         return AutoOutcome::Finished;
     }
     let _run_guard = BusyGuard(auto.inner.running.clone());
 
     let settings = auto.inner.settings.lock().await.clone();
     let disp: State<'_, DispatchState> = app.state();
-    let urls: Vec<String> = {
-        let pool = disp.inner.pool.lock().await;
-        pool.iter().map(|u| u.url.clone()).collect()
-    };
+    let pool_now = pool_items(&disp.inner).await;
+    let urls: Vec<String> = pool_now.iter().map(|p| p.url.clone()).collect();
     let input_total = urls.len();
     if input_total == 0 {
-        emit_auto_status(app, kind, "empty", 0, 0, None, None);
+        emit_auto_status(app, "empty", 0, 0, None, None);
         return AutoOutcome::Finished;
     }
 
     let check: State<'_, CheckState> = app.state();
     if check.busy.swap(true, Ordering::SeqCst) {
-        emit_auto_status(app, kind, "skipped", 0, input_total, None, None);
+        emit_auto_status(app, "skipped", 0, input_total, None, None);
         return AutoOutcome::Finished;
     }
     let _busy_guard = BusyGuard(check.busy.clone());
     check.cancel.store(false, Ordering::SeqCst);
-    emit_auto_status(app, kind, "running", 0, input_total, None, None);
+    emit_auto_status(app, "running", 0, input_total, None, None);
 
-    let cfg = CheckConfig {
-        test_url: settings.test_url.clone(),
-        timeout_ms: settings.timeout_ms,
-        concurrency: settings.concurrency,
-        repeats: settings.repeats,
-        default_proto: settings.default_proto.clone(),
-        with_geo: settings.with_geo,
-        with_anonymity: settings.with_anonymity,
-        with_tamper: settings.with_tamper,
-        with_tls: settings.with_tls,
-        precheck: settings.precheck,
-        precheck_timeout_ms: settings.precheck_timeout_ms,
-        judge_mode: settings.judge_mode,
-        ipapi_key: settings.ipapi_key.clone(),
-    }
-    .sanitized();
+    let cfg = pool_check_config(&settings.check).sanitized();
     let timeout = cfg.timeout();
-    let result = run_checks(urls, cfg, Vec::new(), check.cancel.clone(), None).await;
+    let test_url = cfg.test_url.clone();
+    let result = run_checks(
+        urls,
+        cfg,
+        pool_geo_cache(&pool_now),
+        check.cancel.clone(),
+        None,
+    )
+    .await;
     let canceled = check.cancel.load(Ordering::Relaxed);
 
     match result {
         Err(e) => {
-            emit_auto_status(app, kind, "error", 0, input_total, None, Some(e));
+            emit_auto_status(app, "error", 0, input_total, None, Some(e));
             AutoOutcome::Finished
         }
         Ok(results) => {
             if canceled {
                 let alive = results.iter().filter(|r| r.alive).count();
-                emit_auto_status(app, kind, "stopped", alive, results.len(), None, None);
+                emit_auto_status(app, "stopped", alive, results.len(), None, None);
                 return AutoOutcome::Finished;
             }
             let total = results.len();
@@ -316,10 +301,8 @@ async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) -> AutoOutcome {
             // example right after waking from sleep), not that the whole pool
             // died. Without direct access to the check server the results say
             // nothing about the proxies, so the pool is left untouched.
-            if !results.iter().any(|r| r.alive)
-                && !direct_reachable(&settings.test_url, timeout).await
-            {
-                emit_auto_status(app, kind, "offline", 0, total, None, None);
+            if !results.iter().any(|r| r.alive) && !direct_reachable(&test_url, timeout).await {
+                emit_auto_status(app, "offline", 0, total, None, None);
                 return AutoOutcome::Offline;
             }
             let current: HashMap<String, PoolEntry> = {
@@ -343,9 +326,9 @@ async fn run_auto_cycle(app: &tauri::AppHandle, kind: AutoKind) -> AutoOutcome {
             // The check and pool update are done; only webhook delivery
             // remains, and it must not keep a manual check blocked.
             drop(_busy_guard);
-            emit_auto_status(app, kind, "done", merged.alive, total, merged.avg, None);
+            emit_auto_status(app, "done", merged.alive, total, merged.avg, None);
 
-            if matches!(kind, AutoKind::Auto) && !settings.webhook_urls.is_empty() {
+            if settings.send_webhooks && !settings.webhook_urls.is_empty() {
                 let webhook_items: Vec<DispatchItem> = pool
                     .iter()
                     .map(|p| DispatchItem {
@@ -388,56 +371,30 @@ pub(crate) async fn auto_scheduler_loop(app: tauri::AppHandle) {
         if auto.inner.running.load(Ordering::SeqCst) {
             continue;
         }
-        let now = epoch_secs();
-        let settings = auto.inner.settings.lock().await.clone();
-        let disp_next = auto.inner.disp_next.load(Ordering::SeqCst);
-        let auto_next = auto.inner.auto_next.load(Ordering::SeqCst);
-        let kind = if settings.disp_enabled && disp_next != 0 && now >= disp_next {
-            Some(AutoKind::Dispatch)
-        } else if settings.auto_enabled && auto_next != 0 && now >= auto_next {
-            Some(AutoKind::Auto)
-        } else {
-            None
-        };
-        let Some(kind) = kind else {
+        let next = auto.inner.next.load(Ordering::SeqCst);
+        let enabled = auto.inner.settings.lock().await.enabled;
+        if !enabled || next == 0 || epoch_secs() < next {
             continue;
-        };
-        let outcome = run_auto_cycle(&app, kind).await;
-        let now = epoch_secs();
-        let settings = auto.inner.settings.lock().await.clone();
-        match kind {
-            AutoKind::Dispatch => auto.inner.disp_next.store(
-                next_run(
-                    settings.disp_enabled,
-                    settings.disp_interval_min,
-                    outcome,
-                    now,
-                ),
-                Ordering::SeqCst,
-            ),
-            AutoKind::Auto => auto.inner.auto_next.store(
-                next_run(
-                    settings.auto_enabled,
-                    settings.auto_interval_min,
-                    outcome,
-                    now,
-                ),
-                Ordering::SeqCst,
-            ),
         }
+        let outcome = run_auto_cycle(&app).await;
+        let settings = auto.inner.settings.lock().await.clone();
+        auto.inner.next.store(
+            next_run(
+                settings.enabled,
+                settings.interval_min,
+                outcome,
+                epoch_secs(),
+            ),
+            Ordering::SeqCst,
+        );
     }
 }
 
 fn sanitize_auto_settings(mut s: AutoSettings) -> AutoSettings {
-    s.disp_interval_min = s.disp_interval_min.clamp(1, 1440);
-    s.auto_interval_min = s.auto_interval_min.clamp(1, 1440);
-    s.timeout_ms = s.timeout_ms.clamp(500, 60_000);
-    s.concurrency = s.concurrency.clamp(1, 500);
-    s.repeats = s.repeats.clamp(1, 5);
-    s.precheck_timeout_ms = s.precheck_timeout_ms.clamp(300, 10_000);
-    s.test_url = s.test_url.trim().to_string();
-    if s.test_url.is_empty() {
-        s.test_url = AutoSettings::default().test_url;
+    s.interval_min = s.interval_min.clamp(1, 1440);
+    s.check = s.check.sanitized();
+    if s.check.test_url.is_empty() {
+        s.check.test_url = CheckConfig::default().test_url;
     }
     s.webhook_format = match s.webhook_format.as_str() {
         "json" => "json".to_string(),
@@ -451,10 +408,6 @@ fn sanitize_auto_settings(mut s: AutoSettings) -> AutoSettings {
         .filter(|u| !u.is_empty())
         .take(10)
         .collect();
-    s.ipapi_key = s
-        .ipapi_key
-        .map(|k| k.trim().to_string())
-        .filter(|k| !k.is_empty());
     s
 }
 
@@ -471,46 +424,24 @@ pub(crate) async fn set_auto_config(
         *cur = s.clone();
         old
     };
-    let now = epoch_secs();
-    if s.disp_enabled {
-        if !old.disp_enabled
-            || old.disp_interval_min != s.disp_interval_min
-            || state.inner.disp_next.load(Ordering::SeqCst) == 0
-        {
-            state
-                .inner
-                .disp_next
-                .store(now + s.disp_interval_min * 60, Ordering::SeqCst);
-        }
-    } else {
-        state.inner.disp_next.store(0, Ordering::SeqCst);
-    }
-    if s.auto_enabled {
-        if !old.auto_enabled
-            || old.auto_interval_min != s.auto_interval_min
-            || state.inner.auto_next.load(Ordering::SeqCst) == 0
-        {
-            state
-                .inner
-                .auto_next
-                .store(now + s.auto_interval_min * 60, Ordering::SeqCst);
-        }
-    } else {
-        state.inner.auto_next.store(0, Ordering::SeqCst);
+    if !s.enabled {
+        state.inner.next.store(0, Ordering::SeqCst);
+    } else if !old.enabled
+        || old.interval_min != s.interval_min
+        || state.inner.next.load(Ordering::SeqCst) == 0
+    {
+        state
+            .inner
+            .next
+            .store(epoch_secs() + s.interval_min * 60, Ordering::SeqCst);
     }
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) async fn run_auto_now(app: tauri::AppHandle, schedule: String) -> Result<(), String> {
-    let kind = if schedule == "disp" {
-        AutoKind::Dispatch
-    } else {
-        AutoKind::Auto
-    };
-    let app = app.clone();
+pub(crate) async fn run_auto_now(app: tauri::AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
-        let _ = run_auto_cycle(&app, kind).await;
+        let _ = run_auto_cycle(&app).await;
     });
     Ok(())
 }
@@ -625,30 +556,104 @@ mod tests {
     }
 
     #[test]
+    fn scheduled_checks_skip_discarded_deep_checks() {
+        let user = CheckConfig {
+            with_geo: true,
+            with_anonymity: true,
+            with_tamper: true,
+            with_tls: true,
+            repeats: 3,
+            ..CheckConfig::default()
+        };
+        let cfg = pool_check_config(&user);
+        assert!(cfg.with_geo, "the country is kept in the pool");
+        assert!(!cfg.with_anonymity && !cfg.with_tamper && !cfg.with_tls);
+        assert_eq!(cfg.repeats, 3, "liveness settings are the user's");
+    }
+
+    #[test]
+    fn pool_countries_become_geo_cache_without_credentials() {
+        let pool = vec![
+            DispatchPoolItem {
+                raw: "u:p@1.2.3.4:8080".into(),
+                url: "http://u:p@1.2.3.4:8080".into(),
+                latency: Some(10),
+                country: Some("DE".into()),
+            },
+            DispatchPoolItem {
+                raw: "5.6.7.8:1080".into(),
+                url: "socks5://5.6.7.8:1080".into(),
+                latency: None,
+                country: Some("Testland".into()),
+            },
+            DispatchPoolItem {
+                raw: "9.9.9.9:80".into(),
+                url: "http://9.9.9.9:80".into(),
+                latency: None,
+                country: None,
+            },
+        ];
+        let cache = pool_geo_cache(&pool);
+        assert_eq!(
+            cache.len(),
+            2,
+            "entries without a country still get a lookup"
+        );
+        assert_eq!(cache[0].proxy, "http://1.2.3.4:8080");
+        assert_eq!(cache[0].country_code.as_deref(), Some("DE"));
+        assert_eq!(cache[1].country.as_deref(), Some("Testland"));
+        assert!(cache[1].country_code.is_none());
+    }
+
+    #[test]
     fn auto_settings_are_sanitized() {
         let s = AutoSettings {
-            disp_interval_min: 0,
-            auto_interval_min: 9999,
-            timeout_ms: 1,
-            concurrency: 0,
-            repeats: 99,
-            precheck_timeout_ms: 1,
-            test_url: "   ".into(),
+            interval_min: 9999,
             webhook_format: "xml".into(),
             webhook_urls: vec![" ".into(), " https://hook ".into()],
-            ipapi_key: Some("   ".into()),
+            check: CheckConfig {
+                timeout_ms: 1,
+                concurrency: 0,
+                repeats: 99,
+                precheck_timeout_ms: 1,
+                test_url: "   ".into(),
+                ipapi_key: Some("   ".into()),
+                ..CheckConfig::default()
+            },
             ..AutoSettings::default()
         };
         let s = sanitize_auto_settings(s);
-        assert_eq!(s.disp_interval_min, 1);
-        assert_eq!(s.auto_interval_min, 1440);
-        assert_eq!(s.timeout_ms, 500);
-        assert_eq!(s.concurrency, 1);
-        assert_eq!(s.repeats, 5);
-        assert_eq!(s.precheck_timeout_ms, 300);
-        assert_eq!(s.test_url, AutoSettings::default().test_url);
+        assert_eq!(s.interval_min, 1440);
+        assert_eq!(s.check.timeout_ms, 1000);
+        assert_eq!(s.check.concurrency, 1);
+        assert_eq!(s.check.repeats, 5);
+        assert_eq!(s.check.precheck_timeout_ms, 300);
+        assert_eq!(s.check.test_url, CheckConfig::default().test_url);
         assert_eq!(s.webhook_format, "txt");
         assert_eq!(s.webhook_urls, vec!["https://hook"]);
-        assert!(s.ipapi_key.is_none());
+        assert!(s.check.ipapi_key.is_none());
+    }
+
+    #[test]
+    fn settings_deserialize_from_the_frontend_shape() {
+        let json = r#"{
+            "enabled": true, "intervalMin": 15, "sendWebhooks": true,
+            "maxPingMs": 800, "webhookUrls": ["https://hook"], "webhookFormat": "json",
+            "webhookIncludeCredentials": false,
+            "check": { "testUrl": "https://cp.cloudflare.com/generate_204", "timeoutMs": 4000,
+                       "concurrency": 80, "repeats": 2, "defaultProto": "socks5",
+                       "withGeo": false, "withAnonymity": true, "withTamper": false,
+                       "withTls": false, "precheck": true, "precheckTimeoutMs": 900,
+                       "judgeMode": false, "ipapiKey": null }
+        }"#;
+        let s: AutoSettings = serde_json::from_str(json).unwrap();
+        assert!(s.enabled && s.send_webhooks);
+        assert_eq!(s.interval_min, 15);
+        assert_eq!(s.check.concurrency, 80);
+        assert_eq!(s.check.default_proto, "socks5");
+        // Missing fields fall back to defaults instead of failing.
+        let s: AutoSettings = serde_json::from_str(r#"{"enabled": true}"#).unwrap();
+        assert_eq!(s.interval_min, 30);
+        assert_eq!(s.check.test_url, CheckConfig::default().test_url);
     }
 }

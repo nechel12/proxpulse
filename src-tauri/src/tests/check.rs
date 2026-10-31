@@ -201,6 +201,18 @@ fn cached_geo_is_used_without_exit_ip() {
     other.ip = Some("9.9.9.9".into());
     assert!(!apply_cached_geo(&mut other, &entry));
     assert!(other.country.is_none());
+
+    // Pool countries carry no IP: they apply whatever exit IP was seen.
+    let pool_entry = GeoCacheEntry {
+        ip: None,
+        city: None,
+        ..entry
+    };
+    let mut seen_ip = dead_result("1.2.3.4:8080".into(), "HTTP".into(), 0, String::new());
+    seen_ip.ip = Some("9.9.9.9".into());
+    assert!(apply_cached_geo(&mut seen_ip, &pool_entry));
+    assert_eq!(seen_ip.ip.as_deref(), Some("9.9.9.9"));
+    assert_eq!(seen_ip.country_code.as_deref(), Some("TL"));
 }
 
 #[test]
