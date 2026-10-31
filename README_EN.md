@@ -238,8 +238,10 @@ is shown in the field.
 
 - Modes: **rotation**, **fastest**, **failover**. Fastest makes a single
   attempt through the best upstream; failover tries up to five; rotation
-  picks an upstream when a connection is established. Browser keep-alive
-  keeps one upstream for the lifetime of a connection.
+  picks an upstream when a connection is established. An HTTPS tunnel
+  (CONNECT) stays on one upstream until it closes. Every plain HTTP request
+  gets `Connection: close` and its own connection, so a request to another
+  site never lands in someone else's tunnel without authorization.
 - The pool merges new entries with old ones; “Sync” and “Clear” buttons; pool
   filtering and sorting by ping or country.
 - **Max ping**: proxies slower than the limit do not enter the pool (`0` — no

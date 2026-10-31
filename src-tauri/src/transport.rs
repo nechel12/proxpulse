@@ -327,6 +327,36 @@ pub(crate) fn strip_header(buf: &[u8], hdr_end: usize, name: &str) -> Vec<u8> {
     out
 }
 
+/// The dispatcher rewrites only the first request on a client connection
+/// (absolute-form, upstream credentials, routing by its host). Later
+/// keep-alive requests would reach the upstream unrewritten: without
+/// credentials, or through a SOCKS tunnel even to the first request's host.
+/// So the far end is asked to close after this response and the client opens
+/// a new connection for the next request. Upgrade requests keep their
+/// `Connection` header: an upgraded connection stays with one host anyway.
+pub(crate) fn close_after_response(buf: &[u8], hdr_end: usize) -> Vec<u8> {
+    let end = hdr_end.min(buf.len());
+    let has_upgrade = String::from_utf8_lossy(&buf[..end])
+        .lines()
+        .skip(1)
+        .any(|l| {
+            l.split_once(':')
+                .is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case("upgrade"))
+        });
+    if has_upgrade {
+        return buf.to_vec();
+    }
+    let stripped = strip_header(buf, end, "connection");
+    let Some(end) = find_header_end(&stripped) else {
+        return stripped;
+    };
+    let mut out = Vec::with_capacity(stripped.len() + 19);
+    out.extend_from_slice(&stripped[..end - 2]);
+    out.extend_from_slice(b"Connection: close\r\n\r\n");
+    out.extend_from_slice(&stripped[end..]);
+    out
+}
+
 /// For plain HTTP through an HTTP(S) proxy, the request must be sent in
 /// absolute-form with Proxy-Authorization. Unlike CONNECT, this works with
 /// proxies that only allow CONNECT to port 443.

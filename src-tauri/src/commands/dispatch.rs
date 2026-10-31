@@ -1,5 +1,5 @@
 use crate::transport::{
-    connect_to_http_proxy, connect_via, find_header_end, parse_upstream_url,
+    close_after_response, connect_to_http_proxy, connect_via, find_header_end, parse_upstream_url,
     prepare_forward_request, read_exact_t, strip_header, write_all_t, Upstream,
 };
 use crate::{normalize_proxy, strip_credentials};
@@ -408,9 +408,8 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                     }
                     return;
                 }
-                let write_res = if use_forward {
-                    let forward = prepare_forward_request(&buf, hdr_end, up);
-                    ups.write_all(&forward).await
+                let request = if use_forward {
+                    prepare_forward_request(&buf, hdr_end, up)
                 } else {
                     // SOCKS tunnel: strip local-proxy headers before handing
                     // the request to the origin.
@@ -418,9 +417,12 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                     let end = find_header_end(&stripped).unwrap_or(stripped.len());
                     let stripped = strip_header(&stripped, end, "proxy-connection");
                     let end = find_header_end(&stripped).unwrap_or(stripped.len());
-                    let stripped = strip_header(&stripped, end, "keep-alive");
-                    ups.write_all(&stripped).await
+                    strip_header(&stripped, end, "keep-alive")
                 };
+                // One request per client connection: only this request was
+                // rewritten for (and routed to) this upstream.
+                let end = find_header_end(&request).unwrap_or(request.len());
+                let write_res = ups.write_all(&close_after_response(&request, end)).await;
                 if let Err(e) = write_res {
                     st.errors.fetch_add(1, Ordering::Relaxed);
                     last_err = e.to_string();

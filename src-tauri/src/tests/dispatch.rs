@@ -406,5 +406,8 @@ async fn http_forward_uses_absolute_form_and_proxy_auth() {
         .unwrap();
     assert!(captured.starts_with("GET http://example.com/ HTTP/1.1"));
     assert!(captured.contains("Proxy-Authorization: Basic dTpw"));
+    // Only this request is rewritten for the upstream, so the connection
+    // must not be reused for the next one.
+    assert!(captured.contains("Connection: close\r\n"));
     assert!(String::from_utf8_lossy(&resp).contains("200 OK"));
 }

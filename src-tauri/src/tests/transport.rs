@@ -159,6 +159,27 @@ fn forward_request_strips_hop_by_hop_headers() {
     assert!(text.contains("Upgrade: websocket"));
 }
 
+#[test]
+fn forwarded_request_asks_to_close() {
+    let body = b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\nConnection: keep-alive\r\nContent-Length: 4\r\n\r\nBODY";
+    let end = find_header_end(body).unwrap();
+    let text = String::from_utf8(close_after_response(body, end)).unwrap();
+    assert_eq!(text.to_ascii_lowercase().matches("connection:").count(), 1);
+    assert!(text.contains("\r\nConnection: close\r\n\r\nBODY"));
+    assert!(text.contains("Content-Length: 4"));
+
+    let bare = b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n";
+    let text =
+        String::from_utf8(close_after_response(bare, find_header_end(bare).unwrap())).unwrap();
+    assert!(text.ends_with("Host: example.com\r\nConnection: close\r\n\r\n"));
+
+    // Upgrades (WebSocket) keep their Connection header.
+    let upgrade =
+        b"GET http://example.com/ws HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n";
+    let end = find_header_end(upgrade).unwrap();
+    assert_eq!(close_after_response(upgrade, end), upgrade.to_vec());
+}
+
 #[tokio::test]
 async fn http_connect_preserves_tunnel_bytes() {
     let mock = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
