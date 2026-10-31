@@ -121,7 +121,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     auto_skip: "Пропуск: идёт другая проверка.",
     auto_err: "Ошибка автопроверки: {e}",
     auto_offline: "Сервер проверки недоступен напрямую (нет сети?) — пул не изменён.",
-    webhook_sent: "Вебхук: {r}", webhook_fail: "Вебхук не ушёл: {e}",
+    webhook_sent: "Вебхук: {r}", webhook_fail: "Вебхук: ошибка — {e}",
     webhook_empty: "Пул пуст, отправлять нечего.",
   },
   en: {
@@ -243,7 +243,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     auto_skip: "Skipped: another check is running.",
     auto_err: "Auto-check failed: {e}",
     auto_offline: "Check server unreachable directly (offline?) — pool left unchanged.",
-    webhook_sent: "Webhook: {r}", webhook_fail: "Webhook failed: {e}",
+    webhook_sent: "Webhook: {r}", webhook_fail: "Webhook error: {e}",
     webhook_empty: "Pool is empty, nothing to send.",
   },
 };

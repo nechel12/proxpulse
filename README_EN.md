@@ -268,6 +268,7 @@ By default proxy credentials are stripped from URLs before posting. The
 **“Send credentials”** option includes them, but requires HTTPS; an
 `http://` webhook with credentials is rejected.
 
+A webhook response with a non-2xx status is shown as an error.
 A webhook must point to a public http(s) host: local and private addresses
 are rejected, and redirects are not followed.
 

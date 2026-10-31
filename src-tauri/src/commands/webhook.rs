@@ -83,12 +83,19 @@ async fn send_webhook_request(
         .send()
         .await
         .map_err(|e| short_error(&e.to_string()))?;
-    let code = r.status().as_u16();
+    let status = r.status();
     let txt = read_body_capped(r, BODY_LIMIT_WEBHOOK)
         .await
         .unwrap_or_default();
     let short: String = txt.chars().take(80).collect();
-    Ok(format!("http {code} {short}"))
+    let message = format!("http {} {short}", status.as_u16());
+    // A 4xx/5xx (or an unfollowed redirect) means the receiver did not
+    // accept the list; it must not be reported as delivered.
+    if status.is_success() {
+        Ok(message)
+    } else {
+        Err(message.trim_end().to_string())
+    }
 }
 
 async fn send_webhook_one(
@@ -263,14 +270,67 @@ mod tests {
             &items,
         )
         .await
-        .unwrap();
-        assert!(result.starts_with("http 307"));
+        .unwrap_err();
+        assert!(result.starts_with("http 307"), "{result}");
         assert!(
             tokio::time::timeout(Duration::from_millis(300), target.accept())
                 .await
                 .is_err(),
             "webhook client must not follow redirects"
         );
+    }
+
+    async fn one_shot_server(response: &'static str) -> u16 {
+        let server = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = server.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut s, _) = server.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf).await;
+            let _ = s.write_all(response.as_bytes()).await;
+            let _ = s.shutdown().await;
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn webhook_status_follows_http_code() {
+        let items = vec![DispatchItem {
+            raw: "host:8080".to_string(),
+            url: None,
+            latency: None,
+            country: None,
+        }];
+        let client = guarded_client_builder(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        let port = one_shot_server(
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 4\r\nConnection: close\r\n\r\noops",
+        )
+        .await;
+        let err = send_webhook_request(
+            &client,
+            &format!("http://127.0.0.1:{port}/hook"),
+            "txt",
+            false,
+            &items,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, "http 500 oops");
+
+        let port = one_shot_server("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n").await;
+        let ok = send_webhook_request(
+            &client,
+            &format!("http://127.0.0.1:{port}/hook"),
+            "txt",
+            false,
+            &items,
+        )
+        .await
+        .unwrap();
+        assert!(ok.starts_with("http 204"), "{ok}");
     }
 
     #[tokio::test]
