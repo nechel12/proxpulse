@@ -92,8 +92,14 @@ function applyI18n() {
     const k = (el as HTMLElement).dataset.i18nTitle as string;
     (el as HTMLElement).title = t(k);
   });
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+    const k = (el as HTMLElement).dataset.i18nAria as string;
+    el.setAttribute("aria-label", t(k));
+  });
   document.querySelectorAll(".lang button").forEach((b) => {
-    b.classList.toggle("active", (b as HTMLElement).dataset.lang === lang);
+    const active = (b as HTMLElement).dataset.lang === lang;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-pressed", String(active));
   });
   updateBrowserHint();
   $("status-line").textContent = t(lastStatus.key, lastStatus.params);
@@ -442,8 +448,10 @@ window.addEventListener("DOMContentLoaded", () => {
   // tabs
   document.querySelectorAll(".tab").forEach((tb) => {
     tb.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
-      tb.classList.add("active");
+      document.querySelectorAll(".tab").forEach((x) => {
+        x.classList.toggle("active", x === tb);
+        x.setAttribute("aria-selected", String(x === tb));
+      });
       const name = (tb as HTMLElement).dataset.tab;
       document.querySelectorAll(".screen").forEach((s) => s.classList.add("hidden"));
       const scr = document.getElementById(`screen-${name}`);

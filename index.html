@@ -25,28 +25,28 @@
         <div class="stat bad"><label data-i18n="stat_dead">Мёртвые</label><b id="st-dead">0</b></div>
         <div class="stat"><label data-i18n="stat_ping">Ср. пинг</label><b id="st-ping">—</b></div>
       </div>
-      <div class="lang">
-        <button data-lang="ru" class="active">RU</button>
-        <button data-lang="en">EN</button>
+      <div class="lang" role="group" aria-label="Language">
+        <button data-lang="ru" class="active" aria-pressed="true">RU</button>
+        <button data-lang="en" aria-pressed="false">EN</button>
       </div>
-      <button id="btn-tray" class="icon-btn" data-i18n-title="tray_hide">⇲</button>
+      <button id="btn-tray" class="icon-btn" data-i18n-title="tray_hide" data-i18n-aria="tray_hide">⇲</button>
       <div class="top-status">
         <span id="net-dot" class="dot idle"></span>
         <span id="net-text" data-i18n="net_idle">idle</span>
       </div>
     </header>
 
-    <nav class="tabs">
-      <button class="tab active" data-tab="check" data-i18n="tab_check">Проверка</button>
-      <button class="tab" data-tab="dispatch" data-i18n="tab_dispatch">Диспетчер</button>
-      <button class="tab" data-tab="auto" data-i18n="tab_auto">Авто</button>
-      <button class="tab" data-tab="info" data-i18n="tab_info">Инфо</button>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" role="tab" aria-selected="true" aria-controls="screen-check" data-tab="check" data-i18n="tab_check">Проверка</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="screen-dispatch" data-tab="dispatch" data-i18n="tab_dispatch">Диспетчер</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="screen-auto" data-tab="auto" data-i18n="tab_auto">Авто</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="screen-info" data-tab="info" data-i18n="tab_info">Инфо</button>
     </nav>
 
     <div class="progress-wrap"><div id="progress" class="progress"></div></div>
 
     <!-- ============ SCREEN: CHECK ============ -->
-    <main id="screen-check" class="screen">
+    <main id="screen-check" class="screen" role="tabpanel">
     <div class="layout">
       <section class="panel left">
         <div class="panel-head">
@@ -174,7 +174,7 @@
               </div>
               <div class="checks end" id="precheck-row">
                 <label class="chk"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Пречек порта</span></label>
-                <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" data-i18n-title="precheck_timeout" /></label>
+                <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" data-i18n-title="precheck_timeout" data-i18n-aria="precheck_timeout" /></label>
               </div>
               <div class="hint" id="precheck-hint" data-i18n="precheck_hint">Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.</div>
             </div>
@@ -231,7 +231,7 @@
     </main>
 
     <!-- ============ SCREEN: DISPATCH ============ -->
-    <main id="screen-dispatch" class="screen hidden">
+    <main id="screen-dispatch" class="screen hidden" role="tabpanel">
     <div class="layout">
       <section class="panel left">
         <div class="panel-head">
@@ -307,7 +307,7 @@
     </main>
 
     <!-- ============ SCREEN: AUTO ============ -->
-    <main id="screen-auto" class="screen hidden">
+    <main id="screen-auto" class="screen hidden" role="tabpanel">
     <div class="layout">
       <section class="panel left">
         <div class="panel-head">
@@ -380,7 +380,7 @@
     </main>
 
     <!-- ============ SCREEN: INFO ============ -->
-    <main id="screen-info" class="screen hidden">
+    <main id="screen-info" class="screen hidden" role="tabpanel">
     <div class="layout-single">
       <section class="panel">
         <div class="panel-head">

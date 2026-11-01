@@ -207,6 +207,10 @@ details.adv[open] summary::before { content: "▾ "; }
 .seg-btn + .seg-btn { border-left: 1px solid var(--line); }
 .seg-btn.active { background: var(--red-dim); color: #fff; }
 .actions { display: flex; gap: 8px; margin-top: 12px; }
+/* Keyboard focus must be visible on every control, not only text inputs. */
+button:focus-visible, select:focus-visible, summary:focus-visible, .chk input:focus-visible {
+  outline: 2px solid var(--red2); outline-offset: 2px;
+}
 /* Start/Stop and the status stay visible however long the settings get.
    Negative bottom offsets cover the panel's 14px padding, which sticky
    positioning excludes, so scrolled content does not show below the bar. */
