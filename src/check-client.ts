@@ -1,7 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { clip } from "./clip.ts";
 import type { GeoEntry } from "./geocache.ts";
-import type { ProxyResult } from "./types.ts";
+import type { CheckEvent, ProxyResult } from "./types.ts";
 
 /** Same shape and limits as `CheckConfig` in `src-tauri/src/commands/check.rs`. */
 export const CHECK_LIMITS = {
@@ -79,18 +79,19 @@ export async function runCheckList(
     onLive?.([...out]);
     onProgress?.(done, total);
   };
-  const channel = new Channel<ProxyResult>();
+  const channel = new Channel<CheckEvent>();
   let finishDone: () => void = () => {};
   const done = new Promise<void>((resolve) => {
     finishDone = resolve;
   });
   let finished = false;
-  channel.onmessage = (r) => {
+  channel.onmessage = (ev) => {
     if (finished) return;
-    if (r.proto === "__done__") {
+    if (ev.kind === "done") {
       finishDone();
       return;
     }
+    const { kind: _kind, ...r } = ev;
     pushLive(r);
     paint(out.length, list.length);
     if (out.length >= list.length) finishDone();

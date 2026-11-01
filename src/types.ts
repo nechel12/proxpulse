@@ -21,3 +21,6 @@ export type ProxyResult = {
   tls_info: string | null;
   error: string | null;
 };
+
+/** Messages on the check channel (`CheckEvent` in check.rs). */
+export type CheckEvent = (ProxyResult & { kind: "result" }) | { kind: "done" };

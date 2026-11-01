@@ -297,3 +297,16 @@ fn certificate_errors_are_classified() {
         "tls handshake timeout"
     )));
 }
+
+#[test]
+fn check_events_are_tagged() {
+    use crate::commands::check::CheckEvent;
+    let r = dead_result("1.2.3.4:80".into(), "HTTP".into(), 1, "timeout".into());
+    let v = serde_json::to_value(CheckEvent::Result(Box::new(r))).unwrap();
+    assert_eq!(v["kind"], "result");
+    assert_eq!(v["proxy"], "1.2.3.4:80");
+    assert_eq!(
+        serde_json::to_value(CheckEvent::Done).unwrap(),
+        serde_json::json!({ "kind": "done" })
+    );
+}

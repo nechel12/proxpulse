@@ -150,6 +150,22 @@ pub(crate) fn dead_result(raw: String, proto: String, attempts: u32, err: String
     }
 }
 
+/// Messages on the check channel: one per finished proxy, then `done` once
+/// the channel is drained (the command does not return the list again).
+#[derive(Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum CheckEvent {
+    Result(Box<ProxyResult>),
+    Done,
+}
+
+/// Resolves once Stop is pressed, so a long phase can be abandoned at once.
+async fn wait_cancelled(flag: &AtomicBool) {
+    while !flag.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 #[tauri::command]
 pub(crate) fn cancel_check(state: State<'_, CheckState>) -> Result<(), String> {
     state.cancel.store(true, Ordering::SeqCst);
@@ -513,7 +529,7 @@ pub(crate) async fn run_checks(
     cfg: CheckConfig,
     geo_cache: Vec<GeoCacheEntry>,
     cancel: Arc<AtomicBool>,
-    on_result: Option<&Channel<ProxyResult>>,
+    on_result: Option<&Channel<CheckEvent>>,
 ) -> Result<Vec<ProxyResult>, String> {
     let cfg = cfg.sanitized();
     let flags = cfg.flags();
@@ -567,18 +583,25 @@ pub(crate) async fn run_checks(
     } else {
         None
     };
-    let (baseline_res, judge_sha) = tokio::join!(
-        tokio::time::timeout(
-            Duration::from_secs(20),
-            fetch_baseline(flags.clone(), wants_direct_ip(&flags, &test_url))
-        ),
-        async {
-            match &judge_url {
-                Some(u) => fetch_direct_judge_sha(u, timeout).await,
-                None => None,
+    let baseline_phase = async {
+        tokio::join!(
+            tokio::time::timeout(
+                Duration::from_secs(20),
+                fetch_baseline(flags.clone(), wants_direct_ip(&flags, &test_url))
+            ),
+            async {
+                match &judge_url {
+                    Some(u) => fetch_direct_judge_sha(u, timeout).await,
+                    None => None,
+                }
             }
-        }
-    );
+        )
+    };
+    // The baseline can take up to 20 s; Stop must not wait for it.
+    let (baseline_res, judge_sha) = tokio::select! {
+        r = baseline_phase => r,
+        _ = wait_cancelled(&cancel) => return Ok(Vec::new()),
+    };
     let mut baseline_inner = baseline_res.unwrap_or(Baseline {
         direct_ip: None,
         example_len: None,
@@ -682,7 +705,7 @@ pub(crate) async fn run_checks(
                 Some(Ok((id, v))) => {
                     task_raw.remove(&id);
                     if let Some(ch) = on_result {
-                        let _ = ch.send(v.clone());
+                        let _ = ch.send(CheckEvent::Result(Box::new(v.clone())));
                     }
                     out.push(v);
                 }
@@ -728,7 +751,7 @@ pub(crate) async fn check_proxies(
     config: CheckConfig,
     geo_cache: Option<Vec<GeoCacheEntry>>,
     state: State<'_, CheckState>,
-    on_result: Channel<ProxyResult>,
+    on_result: Channel<CheckEvent>,
 ) -> Result<(), String> {
     let busy = state.busy.clone();
     if busy.swap(true, Ordering::SeqCst) {
@@ -745,15 +768,10 @@ pub(crate) async fn check_proxies(
         Some(&on_result),
     )
     .await?;
-    // The channel carries the authoritative result list; this marker tells
-    // the UI that the channel is drained. Returning the Vec as well duplicated
-    // the whole payload over IPC.
-    let _ = on_result.send(dead_result(
-        String::new(),
-        "__done__".to_string(),
-        0,
-        String::new(),
-    ));
+    // The channel carries the authoritative result list; `Done` tells the UI
+    // that it is drained. Returning the Vec as well duplicated the whole
+    // payload over IPC.
+    let _ = on_result.send(CheckEvent::Done);
     Ok(())
 }
 
