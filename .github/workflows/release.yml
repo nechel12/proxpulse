@@ -129,9 +129,11 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Named like the other Windows assets: version without "v", then arch.
         run: |
-          cp src-tauri/target/release/proxpulse.exe "ProxPulse_${{ github.ref_name }}_portable.exe"
-          gh release upload "${{ github.ref_name }}" "ProxPulse_${{ github.ref_name }}_portable.exe" --clobber
+          NAME="ProxPulse_${GITHUB_REF_NAME#v}_x64-portable.exe"
+          cp src-tauri/target/release/proxpulse.exe "$NAME"
+          gh release upload "$GITHUB_REF_NAME" "$NAME" --clobber
 
   # Replaces the placeholder body with an exact file → platform map
   # (filenames contain the version, so it is generated here, not static).
@@ -149,6 +151,19 @@ jobs:
         with:
           persist-credentials: false
 
+      # Checksums for manual downloads (the updater verifies its own
+      # signatures). Every platform job has uploaded its files by now.
+      - name: Publish checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir assets
+          gh release download "$GITHUB_REF_NAME" --dir assets
+          rm -f assets/SHA256SUMS.txt
+          (cd assets && sha256sum -- * > ../SHA256SUMS.txt)
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS.txt --clobber
+
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -159,7 +174,7 @@ jobs:
           **Windows (x64)**
           - \`ProxPulse_${VER}_x64-setup.exe\` — NSIS installer (recommended, auto-updates)
           - \`ProxPulse_${VER}_x64_en-US.msi\` — MSI installer (manual updates)
-          - \`ProxPulse_${TAG}_portable.exe\` — portable, no install (manual updates)
+          - \`ProxPulse_${VER}_x64-portable.exe\` — portable, no install (manual updates)
 
           **Linux (x64)**
           - \`ProxPulse_${VER}_amd64.AppImage\` — portable (auto-updates)
@@ -173,4 +188,6 @@ jobs:
           - \`ProxPulse_${VER}_x64.dmg\`
 
           Linux auto-update is AppImage-only. \`latest.json\` and \`.sig\` files
-          are for the built-in updater; you do not need to download them."
+          are for the built-in updater; you do not need to download them.
+          \`SHA256SUMS.txt\` lists the SHA-256 checksum of every file:
+          \`sha256sum --ignore-missing -c SHA256SUMS.txt\`."

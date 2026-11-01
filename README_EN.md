@@ -32,14 +32,15 @@ Russian UI — in [README.md](README.md).
 
 Ready builds are available in [Releases](https://github.com/nechel12/proxpulse/releases):
 
-- **Windows (x64):** `-setup.exe` or `.msi` installer, and a portable `.exe`;
+- **Windows (x64):** `-setup.exe` or `.msi` installer, and a portable `-portable.exe`;
 - **Linux (x64):** `.AppImage`, `.deb`, `.rpm`;
 - **macOS:** `.dmg` for Apple Silicon and Intel.
 
 Built-in auto-update works for Windows NSIS (`-setup.exe`), macOS and the
 Linux AppImage. MSI, `.deb` and `.rpm` are installed and updated manually
 (installer or package manager). Portable builds are updated by replacing the
-file. The file to download for each platform is described in the release notes.
+file. The file to download for each platform is described in the release notes;
+`SHA256SUMS.txt` lists the checksums of all files.
 
 > **Windows:** builds are not Authenticode-signed, so SmartScreen may show
 > "Windows protected your PC" — click "More info" → "Run anyway".
