@@ -312,12 +312,17 @@ pub(crate) fn geo_url(ipapi_key: Option<&str>) -> String {
     }
 }
 
+/// After a 429/403 from ip-api, geo lookups pause for `GEO_COOLDOWN`.
+pub(crate) async fn geo_cooling_down() -> bool {
+    GEO_COOLDOWN_UNTIL
+        .lock()
+        .await
+        .is_some_and(|t| Instant::now() < t)
+}
+
 pub(crate) async fn fetch_geo(client: &reqwest::Client, ipapi_key: Option<&str>) -> Option<IpApi> {
-    {
-        let until = *GEO_COOLDOWN_UNTIL.lock().await;
-        if until.is_some_and(|t| Instant::now() < t) {
-            return None;
-        }
+    if geo_cooling_down().await {
+        return None;
     }
     let url = geo_url(ipapi_key);
     let r = client.get(url).send().await.ok()?;

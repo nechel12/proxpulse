@@ -8,6 +8,8 @@ type Notify = (key: string, params?: Record<string, string | number>) => void;
 type Deps = {
   isTauriRuntime: () => boolean;
   notify: Notify;
+  /** Dead proxies are part of the list: the file must not claim "alive". */
+  includeDead: boolean;
 };
 
 function browserDownload(name: string, text: string, mime = "text/plain;charset=utf-8") {
@@ -70,7 +72,8 @@ export async function exportList(
     return;
   }
   if (kind === "txt") {
-    await saveViaDialog("proxpulse-alive.txt", buildTxt(list), [{ name: "Text", extensions: ["txt"] }], deps);
+    const name = deps.includeDead ? "proxpulse-all.txt" : "proxpulse-alive.txt";
+    await saveViaDialog(name, buildTxt(list), [{ name: "Text", extensions: ["txt"] }], deps);
   } else if (kind === "json") {
     await saveViaDialog("proxpulse.json", buildJson(list), [{ name: "JSON", extensions: ["json"] }], deps);
   } else {

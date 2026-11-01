@@ -50,6 +50,7 @@ export function rowTitle(r: ProxyResult): string {
   if (r.tamper) parts.push(`tamper ${r.tamper}`);
   if (r.tls) parts.push(`tls ${r.tls}${r.tls_info ? ` (${r.tls_info})` : ""}`);
   else if (r.tls_info) parts.push(`tls ? (${r.tls_info})`);
+  if (r.skipped?.length) parts.push(`skipped ${r.skipped.join(", ")}`);
   if (r.error) parts.push(r.error);
   return parts.join(" | ");
 }

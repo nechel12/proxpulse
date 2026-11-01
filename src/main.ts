@@ -21,7 +21,7 @@ import { AutoSettingsStore } from "./auto-settings.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
-import { askConfirm, askText, screenVisible, setProgress } from "./ui.ts";
+import { askConfirm, askText, flashLabel, screenVisible, setProgress } from "./ui.ts";
 import { NetStatus } from "./net-status.ts";
 import { CHECK_LIMITS, runCheckList, type CheckSettings } from "./check-client.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
@@ -92,9 +92,16 @@ function applyI18n() {
     const k = (el as HTMLElement).dataset.i18nTitle as string;
     (el as HTMLElement).title = t(k);
   });
-  document.querySelectorAll(".lang button").forEach((b) => {
-    b.classList.toggle("active", (b as HTMLElement).dataset.lang === lang);
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+    const k = (el as HTMLElement).dataset.i18nAria as string;
+    el.setAttribute("aria-label", t(k));
   });
+  document.querySelectorAll(".lang button").forEach((b) => {
+    const active = (b as HTMLElement).dataset.lang === lang;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-pressed", String(active));
+  });
+  updateBrowserHint();
   $("status-line").textContent = t(lastStatus.key, lastStatus.params);
   render();
   renderPool();
@@ -404,7 +411,17 @@ function exportScope(): ProxyResult[] {
 }
 
 async function doExport(kind: ExportKind): Promise<void> {
-  await exportList(kind, exportScope(), { isTauriRuntime, notify: setStatusT });
+  await exportList(kind, exportScope(), { isTauriRuntime, notify: setStatusT, includeDead });
+}
+
+/** The dispatcher hint names the protocols the selected listener accepts. */
+function updateBrowserHint(): void {
+  const hint = document.getElementById("browser-hint");
+  const listener = (document.getElementById("srv-listener") as HTMLSelectElement | null)?.value;
+  if (!hint) return;
+  const key = listener === "http" ? "browser_hint_http" : listener === "socks5" ? "browser_hint_socks" : "browser_hint";
+  hint.dataset.i18n = key;
+  hint.textContent = t(key);
 }
 
 // ---------- dispatcher ----------
@@ -431,8 +448,10 @@ window.addEventListener("DOMContentLoaded", () => {
   // tabs
   document.querySelectorAll(".tab").forEach((tb) => {
     tb.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
-      tb.classList.add("active");
+      document.querySelectorAll(".tab").forEach((x) => {
+        x.classList.toggle("active", x === tb);
+        x.setAttribute("aria-selected", String(x === tb));
+      });
       const name = (tb as HTMLElement).dataset.tab;
       document.querySelectorAll(".screen").forEach((s) => s.classList.add("hidden"));
       const scr = document.getElementById(`screen-${name}`);
@@ -649,11 +668,13 @@ window.addEventListener("DOMContentLoaded", () => {
   dispatchMonitor.refreshAddr();
   ($("btn-pool-sync") as HTMLButtonElement).addEventListener("click", () => void doPoolSync("srv-status"));
   ($("btn-auto-pool-sync") as HTMLButtonElement).addEventListener("click", () => void doPoolSync("auto-status"));
-  ($("btn-srv-copy") as HTMLButtonElement).addEventListener("click", async () => {
+  ($("btn-srv-copy") as HTMLButtonElement).addEventListener("click", async (e) => {
     try {
       await navigator.clipboard.writeText(($("srv-addr") as HTMLElement).textContent ?? "");
+      flashLabel(e.currentTarget as HTMLElement, t("copied"));
     } catch { /* ignore */ }
   });
+  ($("srv-listener") as HTMLSelectElement).addEventListener("change", updateBrowserHint);
   ($("btn-srv-start") as HTMLButtonElement).addEventListener("click", async () => {
     const port = Math.max(1, Math.min(65535, Number(($("srv-port") as HTMLInputElement).value) || 1080));
     const mode = ($("srv-mode") as HTMLSelectElement).value;
@@ -707,8 +728,10 @@ window.addEventListener("DOMContentLoaded", () => {
   errorLog.load();
   errorLog.render();
   initInfoPanel({
+    t,
     getData: () => ({
       app: document.getElementById("app-ver")?.textContent,
+      platform: navigator.userAgent,
       lang,
       results: results.length,
       alive: results.filter((r) => r.alive).length,

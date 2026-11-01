@@ -25,28 +25,28 @@
         <div class="stat bad"><label data-i18n="stat_dead">Мёртвые</label><b id="st-dead">0</b></div>
         <div class="stat"><label data-i18n="stat_ping">Ср. пинг</label><b id="st-ping">—</b></div>
       </div>
-      <div class="lang">
-        <button data-lang="ru" class="active">RU</button>
-        <button data-lang="en">EN</button>
+      <div class="lang" role="group" aria-label="Language">
+        <button data-lang="ru" class="active" aria-pressed="true">RU</button>
+        <button data-lang="en" aria-pressed="false">EN</button>
       </div>
-      <button id="btn-tray" class="icon-btn" data-i18n-title="tray_hide">⇲</button>
+      <button id="btn-tray" class="icon-btn" data-i18n-title="tray_hide" data-i18n-aria="tray_hide">⇲</button>
       <div class="top-status">
         <span id="net-dot" class="dot idle"></span>
         <span id="net-text" data-i18n="net_idle">idle</span>
       </div>
     </header>
 
-    <nav class="tabs">
-      <button class="tab active" data-tab="check" data-i18n="tab_check">Проверка</button>
-      <button class="tab" data-tab="dispatch" data-i18n="tab_dispatch">Диспетчер</button>
-      <button class="tab" data-tab="auto" data-i18n="tab_auto">Авто</button>
-      <button class="tab" data-tab="info" data-i18n="tab_info">Инфо</button>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" role="tab" aria-selected="true" aria-controls="screen-check" data-tab="check" data-i18n="tab_check">Проверка</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="screen-dispatch" data-tab="dispatch" data-i18n="tab_dispatch">Диспетчер</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="screen-auto" data-tab="auto" data-i18n="tab_auto">Авто</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="screen-info" data-tab="info" data-i18n="tab_info">Инфо</button>
     </nav>
 
     <div class="progress-wrap"><div id="progress" class="progress"></div></div>
 
     <!-- ============ SCREEN: CHECK ============ -->
-    <main id="screen-check" class="screen">
+    <main id="screen-check" class="screen" role="tabpanel">
     <div class="layout">
       <section class="panel left">
         <div class="panel-head">
@@ -57,7 +57,7 @@
           id="proxy-input"
           spellcheck="false"
           data-i18n-ph="src_ph"
-          placeholder="Вставь прокси в любом формате"
+          placeholder="Вставьте прокси в любом формате"
         ></textarea>
 
         <div class="row2">
@@ -111,7 +111,7 @@
                 <button id="btn-ipapi-pro" class="btn ghost" data-i18n="ipapi_go_pro">Go Pro</button>
               </div>
               <label class="fld"><span data-i18n="ipapi_key">Ключ ip-api Pro</span><input id="ipapi-key" type="password" autocomplete="off" spellcheck="false" data-i18n-ph="ipapi_key_ph" placeholder="ключ (необязательно)" /></label>
-              <div class="hint" id="ipapi-hint" data-i18n="ipapi_hint">Free ip-api — только HTTP: прокси и сеть видят запросы и IP. Ключ Pro передаётся через проверяемые прокси и виден им — используйте отдельный ключ. Подробности — в README.</div>
+              <div class="hint" id="ipapi-hint" data-i18n="ipapi_hint">Бесплатный ip-api работает только по HTTP: прокси и сеть видят запросы. С ключом Pro запросы идут по HTTPS и ключ прокси не видит, но ip-api получает его с адресов всех проверяемых прокси — используйте отдельный ключ. Подробности — в README.</div>
             </div>
           </div>
 
@@ -174,7 +174,7 @@
               </div>
               <div class="checks end" id="precheck-row">
                 <label class="chk"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Пречек порта</span></label>
-                <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" data-i18n-title="precheck_timeout" /></label>
+                <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" data-i18n-title="precheck_timeout" data-i18n-aria="precheck_timeout" /></label>
               </div>
               <div class="hint" id="precheck-hint" data-i18n="precheck_hint">Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.</div>
             </div>
@@ -222,7 +222,7 @@
               <tr><th>#</th><th data-i18n="th_proxy">Прокси</th><th data-i18n="th_type">Тип</th><th data-i18n="th_status">Статус</th><th data-i18n="th_ping">Пинг</th><th data-i18n="th_stab">Джиттер/SR</th><th data-i18n="th_anon">Анон</th><th data-i18n="th_geo">Гео</th><th data-i18n="th_iptype">Тип IP</th><th>TLS</th><th data-i18n="th_info">Инфо</th></tr>
             </thead>
             <tbody id="tbody">
-              <tr class="empty"><td colspan="11" data-i18n="empty_idle">Пока пусто — вставь список слева и жми Старт.</td></tr>
+              <tr class="empty"><td colspan="11" data-i18n="empty_idle">Пока пусто — вставьте список слева и нажмите «Старт».</td></tr>
             </tbody>
           </table>
         </div>
@@ -231,7 +231,7 @@
     </main>
 
     <!-- ============ SCREEN: DISPATCH ============ -->
-    <main id="screen-dispatch" class="screen hidden">
+    <main id="screen-dispatch" class="screen hidden" role="tabpanel">
     <div class="layout">
       <section class="panel left">
         <div class="panel-head">
@@ -268,7 +268,7 @@
           </div>
           <div class="fld"><span data-i18n="stat_cur">Текущий апстрим</span><div id="srv-cur" class="mono-box">—</div></div>
           <div id="srv-status" class="status-line">—</div>
-          <div class="hint" data-i18n="browser_hint">Вставь в браузер как HTTP-прокси: 127.0.0.1 и порт выше.</div>
+          <div class="hint" id="browser-hint" data-i18n="browser_hint">Укажите в браузере HTTP- или SOCKS5-прокси: 127.0.0.1 и порт выше.</div>
           <div class="panel-head" style="margin-top:14px">
             <span class="ph-title" data-i18n="disp_auto_title">▸ Автопроверка</span>
           </div>
@@ -298,7 +298,7 @@
               <tr><th>#</th><th data-i18n="th_proxy">Прокси</th><th data-i18n="th_ping">Пинг</th><th></th></tr>
             </thead>
             <tbody id="pool-body">
-              <tr class="empty"><td colspan="4" data-i18n="pool_empty">Пусто — запусти проверку.</td></tr>
+              <tr class="empty"><td colspan="4" data-i18n="pool_empty">Пусто — запустите проверку.</td></tr>
             </tbody>
           </table>
         </div>
@@ -307,7 +307,7 @@
     </main>
 
     <!-- ============ SCREEN: AUTO ============ -->
-    <main id="screen-auto" class="screen hidden">
+    <main id="screen-auto" class="screen hidden" role="tabpanel">
     <div class="layout">
       <section class="panel left">
         <div class="panel-head">
@@ -371,7 +371,7 @@
               <tr><th>#</th><th data-i18n="th_proxy">Прокси</th><th data-i18n="th_ping">Пинг</th></tr>
             </thead>
             <tbody id="auto-pool-body">
-              <tr class="empty"><td colspan="3" data-i18n="pool_empty">Пусто — запусти проверку.</td></tr>
+              <tr class="empty"><td colspan="3" data-i18n="pool_empty">Пусто — запустите проверку.</td></tr>
             </tbody>
           </table>
         </div>
@@ -380,7 +380,7 @@
     </main>
 
     <!-- ============ SCREEN: INFO ============ -->
-    <main id="screen-info" class="screen hidden">
+    <main id="screen-info" class="screen hidden" role="tabpanel">
     <div class="layout-single">
       <section class="panel">
         <div class="panel-head">

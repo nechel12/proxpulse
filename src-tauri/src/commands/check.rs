@@ -147,6 +147,42 @@ pub(crate) fn dead_result(raw: String, proto: String, attempts: u32, err: String
         tls: None,
         tls_info: None,
         error: Some(err),
+        skipped: Vec::new(),
+    }
+}
+
+/// Messages on the check channel: one per finished proxy, then `done` once
+/// the channel is drained (the command does not return the list again).
+#[derive(Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum CheckEvent {
+    Result(Box<ProxyResult>),
+    Done,
+}
+
+/// Outcome of one deep check: `Ran(None)` = not requested or failed.
+pub(crate) enum Deep<T> {
+    Ran(Option<T>),
+    Skipped,
+}
+
+impl<T> Deep<T> {
+    /// The value, recording `name` when the stage was skipped.
+    pub(crate) fn value(self, name: &str, skipped: &mut Vec<String>) -> Option<T> {
+        match self {
+            Deep::Ran(v) => v,
+            Deep::Skipped => {
+                skipped.push(name.to_string());
+                None
+            }
+        }
+    }
+}
+
+/// Resolves once Stop is pressed, so a long phase can be abandoned at once.
+async fn wait_cancelled(flag: &AtomicBool) {
+    while !flag.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -329,6 +365,7 @@ async fn check_candidate_inner(
         tls: None,
         tls_info: None,
         error: None,
+        skipped: Vec::new(),
     };
 
     if let Some(b) = first_body {
@@ -369,51 +406,67 @@ async fn check_candidate_inner(
         let (ex_len, ex_hash) = (baseline.example_len, baseline.example_hash);
         let cert_fp = baseline.example_cert_fp.clone();
         let url_c = url.clone();
+        // Stages are skipped instead of queued when their limit is reached:
+        // waiting would eat the per-proxy budget and turn live proxies into
+        // timeouts. A skip is reported, so an empty column is explained.
         let (geo_r, anon_r, tamper_r, tls_r) = tokio::join!(
             async {
                 if !need_geo {
-                    return None;
+                    return Deep::Ran(None);
                 }
-                // Skip geo instead of waiting: waiting would eat the
-                // per-proxy check budget and turn live proxies into timeouts.
-                let _permit = geo_semaphore().try_acquire().ok()?;
-                fetch_geo(&client, flags.ipapi_key.as_deref()).await
+                if geo_cooling_down().await {
+                    return Deep::Skipped;
+                }
+                let Ok(_permit) = geo_semaphore().try_acquire() else {
+                    return Deep::Skipped;
+                };
+                Deep::Ran(fetch_geo(&client, flags.ipapi_key.as_deref()).await)
             },
             async {
                 if !want_anon {
-                    return None;
+                    return Deep::Ran(None);
                 }
-                let _permit = deep_semaphore(&ANON_SEM).try_acquire().ok()?;
-                detect_anonymity(&client, direct_ip.as_deref()).await
+                let Ok(_permit) = deep_semaphore(&ANON_SEM).try_acquire() else {
+                    return Deep::Skipped;
+                };
+                Deep::Ran(detect_anonymity(&client, direct_ip.as_deref()).await)
             },
             async {
                 if !want_tamper {
-                    return None;
+                    return Deep::Ran(None);
                 }
-                let _permit = deep_semaphore(&TAMPER_SEM).try_acquire().ok()?;
-                detect_tamper(&client, ex_len, ex_hash).await
+                let Ok(_permit) = deep_semaphore(&TAMPER_SEM).try_acquire() else {
+                    return Deep::Skipped;
+                };
+                Deep::Ran(detect_tamper(&client, ex_len, ex_hash).await)
             },
             async {
                 if !want_tls {
-                    return None;
+                    return Deep::Ran(None);
                 }
-                let _permit = deep_semaphore(&TLS_SEM).try_acquire().ok()?;
-                Some(tls_via_proxy(&url_c, timeout, cert_fp.as_deref()).await)
+                let Ok(_permit) = deep_semaphore(&TLS_SEM).try_acquire() else {
+                    return Deep::Skipped;
+                };
+                Deep::Ran(Some(
+                    tls_via_proxy(&url_c, timeout, cert_fp.as_deref()).await,
+                ))
             },
         );
-        if let Some(g) = geo_r {
+        let mut skipped = Vec::new();
+        if let Some(g) = geo_r.value("geo", &mut skipped) {
             apply_ipapi(&mut res, &g);
         }
-        if anon_r.is_some() {
-            res.anonymity = anon_r;
+        if let Some(anon) = anon_r.value("anon", &mut skipped) {
+            res.anonymity = Some(anon);
         }
-        if tamper_r.is_some() {
-            res.tamper = tamper_r;
+        if let Some(tamper) = tamper_r.value("tamper", &mut skipped) {
+            res.tamper = Some(tamper);
         }
-        if let Some((v, info)) = tls_r {
+        if let Some((v, info)) = tls_r.value("tls", &mut skipped) {
             res.tls = v;
             res.tls_info = info;
         }
+        res.skipped = skipped;
     }
     res
 }
@@ -513,7 +566,7 @@ pub(crate) async fn run_checks(
     cfg: CheckConfig,
     geo_cache: Vec<GeoCacheEntry>,
     cancel: Arc<AtomicBool>,
-    on_result: Option<&Channel<ProxyResult>>,
+    on_result: Option<&Channel<CheckEvent>>,
 ) -> Result<Vec<ProxyResult>, String> {
     let cfg = cfg.sanitized();
     let flags = cfg.flags();
@@ -567,18 +620,25 @@ pub(crate) async fn run_checks(
     } else {
         None
     };
-    let (baseline_res, judge_sha) = tokio::join!(
-        tokio::time::timeout(
-            Duration::from_secs(20),
-            fetch_baseline(flags.clone(), wants_direct_ip(&flags, &test_url))
-        ),
-        async {
-            match &judge_url {
-                Some(u) => fetch_direct_judge_sha(u, timeout).await,
-                None => None,
+    let baseline_phase = async {
+        tokio::join!(
+            tokio::time::timeout(
+                Duration::from_secs(20),
+                fetch_baseline(flags.clone(), wants_direct_ip(&flags, &test_url))
+            ),
+            async {
+                match &judge_url {
+                    Some(u) => fetch_direct_judge_sha(u, timeout).await,
+                    None => None,
+                }
             }
-        }
-    );
+        )
+    };
+    // The baseline can take up to 20 s; Stop must not wait for it.
+    let (baseline_res, judge_sha) = tokio::select! {
+        r = baseline_phase => r,
+        _ = wait_cancelled(&cancel) => return Ok(Vec::new()),
+    };
     let mut baseline_inner = baseline_res.unwrap_or(Baseline {
         direct_ip: None,
         example_len: None,
@@ -682,7 +742,7 @@ pub(crate) async fn run_checks(
                 Some(Ok((id, v))) => {
                     task_raw.remove(&id);
                     if let Some(ch) = on_result {
-                        let _ = ch.send(v.clone());
+                        let _ = ch.send(CheckEvent::Result(Box::new(v.clone())));
                     }
                     out.push(v);
                 }
@@ -728,7 +788,7 @@ pub(crate) async fn check_proxies(
     config: CheckConfig,
     geo_cache: Option<Vec<GeoCacheEntry>>,
     state: State<'_, CheckState>,
-    on_result: Channel<ProxyResult>,
+    on_result: Channel<CheckEvent>,
 ) -> Result<(), String> {
     let busy = state.busy.clone();
     if busy.swap(true, Ordering::SeqCst) {
@@ -745,15 +805,10 @@ pub(crate) async fn check_proxies(
         Some(&on_result),
     )
     .await?;
-    // The channel carries the authoritative result list; this marker tells
-    // the UI that the channel is drained. Returning the Vec as well duplicated
-    // the whole payload over IPC.
-    let _ = on_result.send(dead_result(
-        String::new(),
-        "__done__".to_string(),
-        0,
-        String::new(),
-    ));
+    // The channel carries the authoritative result list; `Done` tells the UI
+    // that it is drained. Returning the Vec as well duplicated the whole
+    // payload over IPC.
+    let _ = on_result.send(CheckEvent::Done);
     Ok(())
 }
 

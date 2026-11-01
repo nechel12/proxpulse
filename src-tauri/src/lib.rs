@@ -59,6 +59,10 @@ pub struct ProxyResult {
     pub tls: Option<String>,
     pub tls_info: Option<String>,
     pub error: Option<String>,
+    /// Deep checks skipped because their concurrency limit or the geo API
+    /// cooldown was hit ("geo", "anon", "tamper", "tls"): run again for them.
+    #[serde(default)]
+    pub skipped: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

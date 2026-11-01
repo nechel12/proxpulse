@@ -20,4 +20,9 @@ export type ProxyResult = {
   tls: string | null;
   tls_info: string | null;
   error: string | null;
+  /** Deep checks skipped at their concurrency limit: "geo", "anon", "tamper", "tls". */
+  skipped?: string[];
 };
+
+/** Messages on the check channel (`CheckEvent` in check.rs). */
+export type CheckEvent = (ProxyResult & { kind: "result" }) | { kind: "done" };
