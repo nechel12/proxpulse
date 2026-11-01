@@ -21,12 +21,20 @@ All notable changes to ProxPulse. The format follows
   `host:port:user:pass`) or in the dispatcher's "current upstream" field.
   Legacy cache entries are dropped on start.
 - Webhooks and URL import reject local and private targets (with DNS pinning)
-  and do not follow redirects that could leak proxy credentials.
+  and do not follow redirects that could leak proxy credentials. The guard
+  also covers `0.0.0.0/8` and private IPv4 addresses behind IPv4-compatible,
+  NAT64 and 6to4 IPv6 forms.
 - The release workflow gives build steps a read-only token and no longer
   leaves the checkout token in `.git/config`.
 
 ### Added
 
+- Releases include `SHA256SUMS.txt`.
+- Update download progress; on macOS and Linux the app restarts after an
+  update is installed.
+- A deep check skipped at its concurrency limit shows "limit" in the table,
+  with a hint, instead of an unexplained empty cell.
+- Diagnostics include the OS and the install type.
 - Scheduled checks and webhook delivery run in the Rust backend, so they keep
   working while the window is hidden in the tray.
 - The dispatcher pool is saved to disk (`pool.json`, owner-only on Unix) and
@@ -61,13 +69,22 @@ All notable changes to ProxPulse. The format follows
 - Manual and scheduled checks share one configuration and the same limits
   (timeout 1–30 s, up to 500 threads, 1–5 samples).
 - Start and Stop stay visible at the bottom of the settings column.
+- A scheduled check crowded out by a manual check is retried in a minute.
+- The Windows portable build is named `ProxPulse_<version>_x64-portable.exe`.
+- The Russian UI uses one polite tone; the dispatcher hint names the
+  protocols of the selected listener; the tray shows Russian time units.
 
 ### Fixed
 
 - Fastest and failover dispatcher modes behave differently; Stop closes open
   tunnels; CONNECT tunnel bytes are preserved; idempotent requests fail over
   before any response byte.
-- Stop aborts a running check immediately.
+- Stop aborts a running check immediately, including the initial baseline
+  phase (it used to wait up to 20 s).
+- Geo cache eviction keeps recently confirmed entries.
+- Copy buttons confirm the copy; a TXT export with dead proxies is no longer
+  named "alive"; the empty ping graph frame is hidden; keyboard focus is
+  visible and icon-only controls have screen-reader labels.
 - Parser: duplicates are detected after normalization, numeric passwords and
   IPv6 forms are handled, malformed input is rejected.
 - No panics when truncating non-ASCII error text.
