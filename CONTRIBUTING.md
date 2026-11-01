@@ -46,6 +46,10 @@ version; Tauri refuses to build otherwise. Update them together.
 Follow [SECURITY.md](SECURITY.md). Do not open a public issue with exploit
 details.
 
+## Releases
+
+See [RELEASING.md](RELEASING.md) and [CHANGELOG.md](CHANGELOG.md).
+
 ## Conduct
 
 Be respectful and constructive. By participating, you agree to the
