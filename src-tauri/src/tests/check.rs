@@ -1,7 +1,7 @@
 use crate::commands::check::{
     candidate_budget, dead_result, is_tls_target, wants_direct_ip, CheckFlags,
 };
-use crate::tls::{is_cert_error, tls_client_config};
+use crate::tls::{cert_fp_hex, is_cert_error, tls_client_config};
 use crate::*;
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
@@ -296,6 +296,18 @@ fn certificate_errors_are_classified() {
         ErrorKind::TimedOut,
         "tls handshake timeout"
     )));
+}
+
+#[test]
+fn certificate_fingerprint_is_lowercase_sha256_hex() {
+    assert_eq!(
+        cert_fp_hex(b""),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        cert_fp_hex(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
 }
 
 #[test]
