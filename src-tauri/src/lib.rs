@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State,
+    Emitter, Manager, State,
 };
 use tokio::sync::{Mutex, Semaphore};
 
@@ -30,6 +30,10 @@ use commands::dispatch::{
 };
 use commands::export::export_text_file;
 use commands::import::{fetch_url_text, parse_proxy_text};
+use commands::prefs::{
+    autostart_enabled, close_to_tray, get_app_prefs, load_prefs, notify, set_app_prefs,
+    set_autostart, start_hidden, start_saved_dispatcher, PrefsState, MINIMIZED_ARG,
+};
 use commands::tray::{refresh_tray_menu, update_tray_status, TrayState};
 use commands::webhook::{send_webhook, send_webhooks};
 
@@ -262,10 +266,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![MINIMIZED_ARG]),
+        ))
+        .plugin(tauri_plugin_notification::init())
         .manage(DispatchState::default())
         .manage(CheckState::default())
         .manage(TrayState::default())
         .manage(AutoState::default())
+        .manage(PrefsState::default())
         .invoke_handler(tauri::generate_handler![
             check_proxies,
             check_busy,
@@ -288,8 +298,23 @@ pub fn run() {
             app_version,
             check_app_update,
             install_app_update,
-            update_tray_status
+            update_tray_status,
+            get_app_prefs,
+            set_app_prefs,
+            autostart_enabled,
+            set_autostart,
+            notify
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && close_to_tray(window.app_handle()) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    // The UI tells the user once that the app keeps running.
+                    let _ = window.emit("app://hidden-to-tray", ());
+                }
+            }
+        })
         .setup(|app| {
             if let Some(icon) = app.default_window_icon().cloned() {
                 TrayIconBuilder::with_id("main")
@@ -358,10 +383,18 @@ pub fn run() {
             }
             // Restore the pool before the webview asks for it and before the
             // scheduler runs, so scheduled checks survive a restart.
+            let prefs = load_prefs(app.handle());
             {
                 let disp: State<DispatchState> = app.state();
                 tauri::async_runtime::block_on(load_pool(app.handle(), &disp.inner));
             }
+            // The window is created hidden; an autostart launch may keep it so.
+            if !start_hidden(app.handle(), &prefs) {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                }
+            }
+            tauri::async_runtime::spawn(start_saved_dispatcher(app.handle().clone()));
             // Scheduling and webhooks run in Rust, so hiding the window or
             // a throttled WebView does not stop scheduled checks.
             let auto_handle = app.handle().clone();

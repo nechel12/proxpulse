@@ -1,3 +1,4 @@
+use crate::commands::prefs::{remember_dispatcher, DispatcherPrefs};
 use crate::transport::{
     close_after_response, connect_to_http_proxy, connect_via, find_header_end, parse_upstream_url,
     prepare_forward_request, read_exact_t, strip_header, write_all_t, Upstream,
@@ -707,13 +708,18 @@ fn pool_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join(POOL_FILE))
 }
 
-/// Write the pool atomically (temp file + rename). The file holds proxy
-/// credentials, so on Unix it is readable by the owner only.
+/// Write the pool atomically. The file holds proxy credentials.
 pub(crate) fn write_pool_file(path: &Path, items: &[DispatchPoolItem]) -> std::io::Result<()> {
+    let json = serde_json::to_vec(items).map_err(std::io::Error::other)?;
+    write_private_file(path, &json)
+}
+
+/// Write a file atomically (temp file + rename); on Unix it is readable by
+/// the owner only.
+pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let json = serde_json::to_vec(items).map_err(std::io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
@@ -725,7 +731,7 @@ pub(crate) fn write_pool_file(path: &Path, items: &[DispatchPoolItem]) -> std::i
     {
         use std::io::Write;
         let mut f = opts.open(&tmp)?;
-        f.write_all(&json)?;
+        f.write_all(bytes)?;
         f.sync_all()?;
     }
     std::fs::rename(&tmp, path)
@@ -864,8 +870,23 @@ pub(crate) async fn stop_proxy_inner(inner: &Arc<DispatchInner>) {
     *inner.last_error.lock().await = None;
 }
 
+pub(crate) fn normalize_mode(mode: &str) -> String {
+    match mode {
+        "fastest" | "failover" => mode.to_string(),
+        _ => "round-robin".to_string(),
+    }
+}
+
+pub(crate) fn normalize_listener(listener: &str) -> String {
+    match listener {
+        "http" | "socks5" => listener.to_string(),
+        _ => "both".to_string(),
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn start_local_proxy(
+    app: tauri::AppHandle,
     port: u16,
     mode: String,
     listener: Option<String>,
@@ -874,16 +895,20 @@ pub(crate) async fn start_local_proxy(
     if port == 0 {
         return Err("bad port".to_string());
     }
-    let listener = listener.unwrap_or_else(|| "both".to_string());
-    let listener = match listener.as_str() {
-        "http" | "socks5" => listener,
-        _ => "both".to_string(),
-    };
-    let mode = match mode.as_str() {
-        "fastest" | "failover" => mode,
-        _ => "round-robin".to_string(),
-    };
-    start_proxy_inner(&state.inner, port, mode, listener).await
+    let listener = normalize_listener(listener.as_deref().unwrap_or("both"));
+    let mode = normalize_mode(&mode);
+    let addr = start_proxy_inner(&state.inner, port, mode.clone(), listener.clone()).await?;
+    // The dispatcher started at launch reuses the last configuration.
+    remember_dispatcher(
+        &app,
+        DispatcherPrefs {
+            port,
+            mode,
+            listener,
+        },
+    )
+    .await;
+    Ok(addr)
 }
 
 #[tauri::command]

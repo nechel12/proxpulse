@@ -4,5 +4,6 @@ pub(crate) mod check;
 pub(crate) mod dispatch;
 pub(crate) mod export;
 pub(crate) mod import;
+pub(crate) mod prefs;
 pub(crate) mod tray;
 pub(crate) mod webhook;
