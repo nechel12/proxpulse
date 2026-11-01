@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { askConfirm } from "./ui.ts";
+import { askChoice, askConfirm } from "./ui.ts";
 import { applyTheme, loadThemePref, parseThemePref, saveThemePref, watchSystemTheme, type ThemePref } from "./theme.ts";
 import {
   applySettings,
   clearSettings,
   collectSettings,
   parseSettingsFile,
+  type PoolEntry,
   type PrefsUpdate,
 } from "./settings-io.ts";
 
@@ -164,10 +165,15 @@ export class AppSettings {
   private async exportSettings(): Promise<void> {
     const { t, setStatusText } = this.deps;
     let prefs: PrefsUpdate = {};
+    let pool: PoolEntry[] = [];
     try {
       prefs = await invoke<BackendPrefs>("get_app_prefs");
+      pool = await invoke<PoolEntry[]>("get_dispatch_pool");
     } catch { /* browser preview or older backend */ }
-    const data = collectSettings(localStorage, prefs);
+    // The pool carries logins and passwords: include it only on request.
+    const withPool = pool.length > 0 &&
+      await askChoice(t("settings_pool_q", { n: pool.length }), t("settings_pool_yes"), t("settings_pool_no"));
+    const data = collectSettings(localStorage, prefs, new Date(), withPool ? pool : null);
     const day = data.exported.slice(0, 10);
     try {
       const path = await invoke<string | null>("export_text_file", {
@@ -185,15 +191,19 @@ export class AppSettings {
 
   private async importSettings(file: File): Promise<void> {
     const { t, setStatusText } = this.deps;
-    const parsed = file.size > 4 * 1024 * 1024 ? null : parseSettingsFile(await file.text());
+    const parsed = file.size > 16 * 1024 * 1024 ? null : parseSettingsFile(await file.text());
     if (!parsed) {
       setStatusText("data-status", () => t("settings_bad"));
       return;
     }
-    if (!(await askConfirm(t("settings_import_confirm")))) return;
+    const question = parsed.pool
+      ? t("settings_import_pool_confirm", { n: parsed.pool.length })
+      : t("settings_import_confirm");
+    if (!(await askConfirm(question))) return;
     applySettings(localStorage, parsed.storage);
     try {
       await invoke("set_app_prefs", { prefs: { ...DEFAULT_PREFS, ...parsed.prefs } });
+      if (parsed.pool) await invoke("set_dispatch_pool", { items: parsed.pool });
     } catch { /* browser preview or older backend */ }
     location.reload();
   }

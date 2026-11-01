@@ -65,4 +65,18 @@ describe("settings export and import", () => {
     expect(SETTINGS_KEYS).not.toContain("pp-geocache");
   });
 
+  it("carries the pool only when asked and validates its entries", () => {
+    const storage = memoryStorage();
+    expect(collectSettings(storage, {}).pool).toBeUndefined();
+    expect(parseSettingsFile(JSON.stringify(collectSettings(storage, {})))?.pool).toBeNull();
+
+    const pool = [{ raw: "u:p@1.2.3.4:80", url: "http://u:p@1.2.3.4:80", latency: 120, country: "DE" }];
+    const file = collectSettings(storage, {}, new Date(), pool);
+    expect(parseSettingsFile(JSON.stringify(file))?.pool).toEqual(pool);
+
+    const messy = { ...file, pool: [{ raw: "5.6.7.8:3128", latency: -1 }, { raw: 42 }, null, { raw: "" }] };
+    expect(parseSettingsFile(JSON.stringify(messy))?.pool).toEqual([
+      { raw: "5.6.7.8:3128", url: "5.6.7.8:3128", latency: null, country: null },
+    ]);
+  });
 });

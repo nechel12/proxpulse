@@ -21,6 +21,8 @@ export const SETTINGS_KEYS = [
 ] as const;
 
 const MAX_VALUE_CHARS = 1024 * 1024;
+/** Same cap as the pool in the app. */
+const MAX_POOL = 20_000;
 const FILE_VERSION = 1;
 
 /** Backend preferences carried in the file (see `prefs.rs`). */
@@ -31,6 +33,9 @@ export type PrefsUpdate = {
   dispatcher?: { port: number; mode: string; listener: string };
 };
 
+/** A dispatcher pool entry (`DispatchPoolItem` in dispatch.rs). */
+export type PoolEntry = { raw: string; url: string; latency: number | null; country: string | null };
+
 export type SettingsFile = {
   app: "ProxPulse";
   kind: "settings";
@@ -38,14 +43,26 @@ export type SettingsFile = {
   exported: string;
   storage: Record<string, string>;
   prefs: PrefsUpdate;
+  /** Only when the user chose to include it; holds credentials. */
+  pool?: PoolEntry[];
 };
 
-export type ParsedSettings = { storage: Record<string, string>; prefs: PrefsUpdate };
+export type ParsedSettings = {
+  storage: Record<string, string>;
+  prefs: PrefsUpdate;
+  /** null when the file has no pool; the current pool is then kept. */
+  pool: PoolEntry[] | null;
+};
 
 type ReadStorage = Pick<Storage, "getItem">;
 type WriteStorage = Pick<Storage, "setItem" | "removeItem">;
 
-export function collectSettings(storage: ReadStorage, prefs: PrefsUpdate, now = new Date()): SettingsFile {
+export function collectSettings(
+  storage: ReadStorage,
+  prefs: PrefsUpdate,
+  now = new Date(),
+  pool: PoolEntry[] | null = null,
+): SettingsFile {
   const values: Record<string, string> = {};
   for (const key of SETTINGS_KEYS) {
     const v = storage.getItem(key);
@@ -58,6 +75,7 @@ export function collectSettings(storage: ReadStorage, prefs: PrefsUpdate, now = 
     exported: now.toISOString(),
     storage: values,
     prefs,
+    ...(pool ? { pool } : {}),
   };
 }
 
@@ -75,6 +93,23 @@ function pickPrefs(raw: unknown): PrefsUpdate {
     typeof d.mode === "string" && typeof d.listener === "string"
   ) {
     out.dispatcher = { port: d.port as number, mode: d.mode, listener: d.listener };
+  }
+  return out;
+}
+
+function pickPool(raw: unknown): PoolEntry[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: PoolEntry[] = [];
+  for (const it of raw.slice(0, MAX_POOL)) {
+    if (!it || typeof it !== "object") continue;
+    const p = it as Record<string, unknown>;
+    if (typeof p.raw !== "string" || !p.raw || p.raw.length > 2048) continue;
+    out.push({
+      raw: p.raw,
+      url: typeof p.url === "string" && p.url ? p.url : p.raw,
+      latency: typeof p.latency === "number" && Number.isFinite(p.latency) && p.latency >= 0 ? Math.round(p.latency) : null,
+      country: typeof p.country === "string" && p.country ? p.country.slice(0, 64) : null,
+    });
   }
   return out;
 }
@@ -97,7 +132,7 @@ export function parseSettingsFile(text: string): ParsedSettings | null {
     const v = src[key];
     if (typeof v === "string" && v.length <= MAX_VALUE_CHARS) storage[key] = v;
   }
-  return { storage, prefs: pickPrefs(file.prefs) };
+  return { storage, prefs: pickPrefs(file.prefs), pool: pickPool(file.pool) };
 }
 
 /** Replace all settings: keys missing from the file return to defaults. */

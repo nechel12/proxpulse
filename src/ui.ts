@@ -28,6 +28,16 @@ export async function askConfirm(message: string): Promise<boolean> {
   }
 }
 
+/** A two-way question with named answers; true for the first one. */
+export async function askChoice(message: string, yes: string, no: string): Promise<boolean> {
+  try {
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    return await ask(message, { title: "ProxPulse", kind: "info", okLabel: yes, cancelLabel: no });
+  } catch {
+    return window.confirm(message);
+  }
+}
+
 export function askText(title: string, value = ""): Promise<string | null> {
   const overlay = document.getElementById("text-modal");
   const input = document.getElementById("text-modal-input") as HTMLInputElement | null;
