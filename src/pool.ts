@@ -1,7 +1,5 @@
 import { escapeHtml, maskProxy, pingClass } from "./format.ts";
-import { RENDER_STEP } from "./results.ts";
-
-export const POOL_RENDER_MAX = 1000;
+import { VirtualRows } from "./virtual-rows.ts";
 
 export type PoolItem = {
   raw: string;
@@ -15,7 +13,9 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 export class PoolView {
   items: PoolItem[] = [];
   hideCreds = false;
-  private limits = new Map<string, number>();
+  private views = new Map<string, VirtualRows<PoolItem>>();
+  private onDelete: (raw: string) => void = () => {};
+  private t: Translate = (k) => k;
 
   get count(): number {
     return this.items.length;
@@ -34,8 +34,10 @@ export class PoolView {
     if (at >= 0) this.items.splice(at, 1);
   }
 
-  resetLimit(tbodyId: string): void {
-    this.limits.set(tbodyId, RENDER_STEP);
+  /** A new filter or sort starts from the top of the table. */
+  resetScroll(tbodyId: string): void {
+    const wrap = document.getElementById(tbodyId)?.closest<HTMLElement>(".table-wrap");
+    if (wrap) wrap.scrollTop = 0;
   }
 
   /** Keep existing entries, add new ones and refresh latency. */
@@ -83,75 +85,71 @@ export class PoolView {
     if (visible("screen-auto")) this.renderInto("auto-pool-body", t, onDelete);
   }
 
-  private renderInto(
-    tbodyId: string,
-    t: Translate,
-    onDelete: (raw: string) => void,
-  ): void {
+  private view(tbodyId: string): VirtualRows<PoolItem> | null {
+    const existing = this.views.get(tbodyId);
+    if (existing) return existing;
+    const body = document.getElementById(tbodyId) as HTMLTableSectionElement | null;
+    const wrap = body?.closest<HTMLElement>(".table-wrap");
+    if (!body || !wrap) return null;
+    const withDelete = tbodyId === "pool-body";
+    const view = new VirtualRows<PoolItem>(wrap, body, withDelete ? 4 : 3, (p, n) => this.row(p, n, withDelete));
+    if (withDelete) {
+      body.addEventListener("click", (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-raw]");
+        if (b?.dataset.raw != null) this.onDelete(b.dataset.raw);
+      });
+    }
+    this.views.set(tbodyId, view);
+    return view;
+  }
+
+  private row(p: PoolItem, n: number, withDelete: boolean): HTMLTableRowElement {
+    const tr = document.createElement("tr");
+    const ping = p.latency == null ? "-" : `${p.latency} ms`;
+    const geo = p.country ? ` <span class="geo-tag">${escapeHtml(p.country)}</span>` : "";
+    tr.innerHTML = `<td>${n + 1}</td><td>${escapeHtml(this.hideCreds ? maskProxy(p.raw, p.url) : p.raw)}${geo}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
+    if (withDelete) {
+      const td = document.createElement("td");
+      const b = document.createElement("button");
+      b.className = "btn ghost";
+      b.textContent = "×";
+      b.title = this.t("pool_remove");
+      b.setAttribute("aria-label", this.t("pool_remove"));
+      b.dataset.raw = p.raw;
+      td.appendChild(b);
+      tr.appendChild(td);
+    }
+    return tr;
+  }
+
+  private renderInto(tbodyId: string, t: Translate, onDelete: (raw: string) => void): void {
+    this.t = t;
+    this.onDelete = onDelete;
     const pb = document.getElementById(tbodyId) as HTMLTableSectionElement | null;
-    if (!pb) return;
-    pb.innerHTML = "";
-    const cols = tbodyId === "pool-body" ? 4 : 3;
+    const view = this.view(tbodyId);
+    if (!pb || !view) return;
     const filter = (document.querySelector(`[data-pool-filter="${tbodyId}"]`) as HTMLInputElement | null)?.value.toLowerCase().trim() ?? "";
     const sort = (document.querySelector(`[data-pool-sort="${tbodyId}"]`) as HTMLSelectElement | null)?.value ?? "added";
-    let rows = this.items.map((p, i) => ({ ...p, i }));
+    let rows = this.items;
     if (filter) {
       rows = rows.filter((r) =>
         r.raw.toLowerCase().includes(filter) || (r.country ?? "").toLowerCase().includes(filter)
       );
     }
-    if (sort === "ping") rows.sort((a, b) => (a.latency ?? 1e12) - (b.latency ?? 1e12));
-    else if (sort === "country") rows.sort((a, b) => (a.country ?? "~~~").localeCompare(b.country ?? "~~~"));
+    if (sort === "ping") rows = [...rows].sort((a, b) => (a.latency ?? 1e12) - (b.latency ?? 1e12));
+    else if (sort === "country") rows = [...rows].sort((a, b) => (a.country ?? "~~~").localeCompare(b.country ?? "~~~"));
 
     if (rows.length === 0) {
+      view.set([]);
       const tr = document.createElement("tr");
       tr.className = "empty";
       const td = document.createElement("td");
-      td.colSpan = cols;
+      td.colSpan = tbodyId === "pool-body" ? 4 : 3;
       td.textContent = t(this.items.length === 0 ? "pool_empty" : "empty_filter");
       tr.appendChild(td);
-      pb.appendChild(tr);
+      pb.replaceChildren(tr);
       return;
     }
-    const limit = Math.min(this.limits.get(tbodyId) ?? RENDER_STEP, POOL_RENDER_MAX);
-    rows.slice(0, limit).forEach((p, n) => {
-      const tr = document.createElement("tr");
-      const ping = p.latency == null ? "-" : `${p.latency} ms`;
-      const geo = p.country ? ` <span class="geo-tag">${escapeHtml(p.country)}</span>` : "";
-      tr.innerHTML = `<td>${n + 1}</td><td>${escapeHtml(this.hideCreds ? maskProxy(p.raw, p.url) : p.raw)}${geo}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
-      if (tbodyId === "pool-body") {
-        const td = document.createElement("td");
-        const b = document.createElement("button");
-        b.className = "btn ghost";
-        b.textContent = "×";
-        b.title = t("pool_remove");
-        b.setAttribute("aria-label", t("pool_remove"));
-        b.addEventListener("click", () => onDelete(p.raw));
-        td.appendChild(b);
-        tr.appendChild(td);
-      }
-      pb.appendChild(tr);
-    });
-    if (rows.length > limit) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = cols;
-      td.style.textAlign = "center";
-      if (limit < POOL_RENDER_MAX) {
-        const b = document.createElement("button");
-        b.className = "btn ghost";
-        b.textContent = t("show_more", { n: rows.length - limit });
-        b.addEventListener("click", () => {
-          this.limits.set(tbodyId, Math.min(POOL_RENDER_MAX, limit + RENDER_STEP));
-          this.renderInto(tbodyId, t, onDelete);
-        });
-        td.appendChild(b);
-      } else {
-        td.className = "empty";
-        td.textContent = t("render_limit", { n: limit, total: rows.length });
-      }
-      tr.appendChild(td);
-      pb.appendChild(tr);
-    }
+    view.set(rows);
   }
 }

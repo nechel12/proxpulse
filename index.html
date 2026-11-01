@@ -210,12 +210,18 @@
           <button id="chk-dead" class="sqchk" aria-pressed="false" data-i18n-title="include_dead_t"><span class="sq"></span><span data-i18n="include_dead">мёртвые</span></button>
           <button id="btn-clear-out" class="btn ghost" data-i18n="btn_clear">Очистить</button>
         </div>
+        <div class="toolbar filter-row">
+          <select id="f-proto" class="pool-sort" data-i18n-aria="f_proto_t"><option value="">Протокол: все</option></select>
+          <select id="f-anon" class="pool-sort" data-i18n-aria="f_anon_t"><option value="">Анонимность: все</option></select>
+          <select id="f-country" class="pool-sort" data-i18n-aria="f_country_t"><option value="">Страна: все</option></select>
+          <button id="btn-recheck-dead" class="btn ghost" data-i18n="btn_recheck_dead" data-i18n-title="btn_recheck_dead_t">Перепроверить мёртвые</button>
+        </div>
 
         <div class="graph-wrap"><svg id="ping-graph" viewBox="0 0 100 34" preserveAspectRatio="none" data-i18n-title="graph_title"></svg></div>
-        <div class="table-wrap">
+        <div class="table-wrap" id="results-wrap" tabindex="0" data-i18n-aria="results_t">
           <table>
-            <thead>
-              <tr><th>#</th><th data-i18n="th_proxy">Прокси</th><th data-i18n="th_type">Тип</th><th data-i18n="th_status">Статус</th><th data-i18n="th_ping">Пинг</th><th data-i18n="th_stab">Джиттер/SR</th><th data-i18n="th_anon">Анон</th><th data-i18n="th_geo">Гео</th><th data-i18n="th_iptype">Тип IP</th><th>TLS</th><th data-i18n="th_info">Инфо</th></tr>
+            <thead id="results-head">
+              <tr><th>#</th><th aria-sort="none"><button class="th-btn" data-sort="proxy" data-i18n="th_proxy">Прокси</button></th><th aria-sort="none"><button class="th-btn" data-sort="proto" data-i18n="th_type">Тип</button></th><th aria-sort="none"><button class="th-btn" data-sort="status" data-i18n="th_status">Статус</button></th><th aria-sort="none"><button class="th-btn" data-sort="ping" data-i18n="th_ping">Пинг</button></th><th aria-sort="none"><button class="th-btn" data-sort="stab" data-i18n="th_stab">Джиттер/SR</button></th><th aria-sort="none"><button class="th-btn" data-sort="anon" data-i18n="th_anon">Анон</button></th><th aria-sort="none"><button class="th-btn" data-sort="geo" data-i18n="th_geo">Гео</button></th><th aria-sort="none"><button class="th-btn" data-sort="iptype" data-i18n="th_iptype">Тип IP</button></th><th aria-sort="none"><button class="th-btn" data-sort="tls">TLS</button></th><th aria-sort="none"><button class="th-btn" data-sort="info" data-i18n="th_info">Инфо</button></th></tr>
             </thead>
             <tbody id="tbody">
               <tr class="empty"><td colspan="11" data-i18n="empty_idle">Пока пусто — вставьте список слева и нажмите «Старт».</td></tr>
@@ -483,6 +489,13 @@
     <footer class="foot">
       <span id="foot-info"></span>
     </footer>
+
+    <div id="row-menu" class="menu ctx hidden" role="menu">
+      <button data-act="copy" role="menuitem">Копировать</button>
+      <button data-act="recheck" role="menuitem">Перепроверить</button>
+      <button data-act="pool" role="menuitem">Добавить в пул</button>
+      <button data-act="remove" role="menuitem">Убрать из списка</button>
+    </div>
 
     <div id="text-modal" class="modal-overlay hidden">
       <div class="modal-box">

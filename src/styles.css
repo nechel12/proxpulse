@@ -149,7 +149,7 @@ body {
 }
 
 .layout {
-  display: grid; grid-template-columns: 380px 1fr; gap: 14px;
+  display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 14px;
   padding: 14px 18px; height: calc(100vh - 196px);
 }
 .panel.left { overflow-y: auto; }
@@ -448,3 +448,24 @@ tr.empty td { text-align: center; color: var(--mut); padding: 30px; font-family:
 /* Scroll the whole tab, keep the rows readable on wide windows. */
 .settings-page { max-width: none; }
 .settings-page > * { max-width: 760px; }
+
+/* Results table: sortable headers, selection, virtual rows, row menu. */
+.filter-row { margin-top: -4px; }
+.filter-row select { max-width: 190px; }
+.filter-row #btn-recheck-dead { margin-left: auto; }
+.th-btn {
+  background: none; border: 0; padding: 0; color: inherit; font: inherit;
+  letter-spacing: inherit; cursor: pointer; white-space: nowrap;
+}
+.th-btn:hover { color: var(--txt); }
+th[aria-sort="ascending"] .th-btn, th[aria-sort="descending"] .th-btn { color: var(--red2); }
+th[aria-sort="ascending"] .th-btn::after { content: " ▲"; }
+th[aria-sort="descending"] .th-btn::after { content: " ▼"; }
+tbody td { white-space: nowrap; }
+tbody tr.spacer td { padding: 0; border: 0; }
+tbody tr.selected { background: var(--red-dim); }
+tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--red); }
+#results-wrap:focus { outline: none; }
+#results-wrap:focus-visible { outline: 2px solid var(--red2); outline-offset: -2px; }
+.menu.ctx { position: fixed; right: auto; z-index: 120; }
+.menu button:disabled { opacity: .45; cursor: default; background: transparent; }

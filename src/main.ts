@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { clip } from "./clip.ts";
-import { ResultsView } from "./results.ts";
+import { ResultsView, type RowAction } from "./results.ts";
+import { defaultOrder, mergeResults } from "./results-model.ts";
 import { PoolView, type PoolItem } from "./pool.ts";
 import { exportList, type ExportKind } from "./export-panel.ts";
 import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } from "./pinggraph.ts";
@@ -321,30 +322,54 @@ async function sendWebhook(manual: boolean): Promise<void> {
   await webhooks.send(manual, pool.items, t, setStatusText);
 }
 
-async function start() {
+/** Run `body` as the one manual check; Start stays disabled meanwhile. */
+async function withStart(body: () => Promise<void>): Promise<void> {
   if (running || starting) return;
   starting = true;
   ($("btn-start") as HTMLButtonElement).disabled = true;
   try {
-    await startInner();
+    await body();
   } finally {
     starting = false;
     if (!running) ($("btn-start") as HTMLButtonElement).disabled = false;
   }
 }
 
-async function startInner() {
-  if (running) return;
+async function start() {
+  await withStart(startInner);
+}
+
+/** Re-check some entries of the current results and update them in place. */
+async function recheck(list: string[]) {
+  if (list.length === 0) return;
+  await withStart(async () => {
+    if (!(await checkerFree())) return;
+    if (!/^https?:\/\//i.test(settings.effectiveTestUrl())) {
+      setStatusT("st_badurl");
+      return;
+    }
+    await runList(list, { recheck: true, truncated: false });
+  });
+}
+
+/** False (with a status) while a scheduled check holds the checker. */
+async function checkerFree(): Promise<boolean> {
+  if (running) return false;
   if (autoStatus.running) {
     setStatusT("auto_skip");
-    return;
+    return false;
   }
   try {
     if (await invoke<boolean>("check_busy")) {
       setStatusT("auto_skip");
-      return;
+      return false;
     }
   } catch { /* older backend */ }
+  return true;
+}
+
+async function startInner() {
+  if (!(await checkerFree())) return;
   const source = ($("proxy-input") as HTMLTextAreaElement).value;
   if (source.length > MAX_INPUT_CHARS) {
     setStatusT("st_input_too_big", { mb: MAX_FILE_MB });
@@ -369,11 +394,18 @@ async function startInner() {
   }
   const truncated = list.length > MAX_PROXIES;
   if (truncated) list = list.slice(0, MAX_PROXIES);
+  await runList(list, { recheck: false, truncated });
+}
 
+async function runList(list: string[], opts: { recheck: boolean; truncated: boolean }) {
   running = true;
   stopFlag = false;
-  results = [];
-  resultsView.reset();
+  // A re-check keeps the other entries and replaces the re-checked ones.
+  const base = opts.recheck ? results : null;
+  if (!base) {
+    results = [];
+    resultsView.reset();
+  }
   render();
   updateCounts();
   ($("btn-start") as HTMLButtonElement).disabled = true;
@@ -384,7 +416,7 @@ async function startInner() {
 
   let busy = false;
   try {
-    results = await runCheckList(list, readCheckSettings(), geoCache.fresh(), (done, total) => {
+    const fresh = await runCheckList(list, readCheckSettings(), geoCache.fresh(), (done, total) => {
       lastStatus = { key: "st_checking", params: { done, total } };
       $("status-line").textContent = t("st_checking", lastStatus.params);
       const secs = Math.floor((performance.now() - t0) / 1000);
@@ -393,8 +425,9 @@ async function startInner() {
       updateCounts();
       setProgress(done, total);
     }, (live) => {
-      results = live;
+      results = base ? mergeResults(base, live) : live;
     });
+    results = base ? defaultOrder(mergeResults(base, fresh)) : fresh;
   } catch (e) {
     if (String(e).includes("another check is running")) busy = true;
     /* otherwise keep partial results delivered through the channel */
@@ -404,28 +437,63 @@ async function startInner() {
     ($("btn-stop") as HTMLButtonElement).disabled = !autoStatus.running;
   }
   if (busy) {
+    if (base) results = base;
     setStatusT("auto_skip");
     setNet("idle", "net_idle");
+    render();
     return;
   }
-  geoCache.learn(results);
+  const listed = new Set(list);
+  const checked = base ? results.filter((r) => listed.has(r.proxy)) : results;
+  geoCache.learn(checked);
   render();
   updateCounts();
-  setProgress(stopFlag ? results.length : list.length, list.length);
+  setProgress(stopFlag ? checked.length : list.length, list.length);
 
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
-  const alive = results.filter((r) => r.alive).length;
-  if (stopFlag) setStatusT("st_stopped", { alive, total: results.length });
-  else if (truncated) setStatusT("st_done_trunc", { secs, alive, total: results.length, n: MAX_PROXIES });
-  else setStatusT("st_done", { secs, alive, total: results.length });
+  const alive = checked.filter((r) => r.alive).length;
+  if (stopFlag) setStatusT("st_stopped", { alive, total: checked.length });
+  else if (base) setStatusT("st_rechecked", { secs, alive, total: checked.length });
+  else if (opts.truncated) setStatusT("st_done_trunc", { secs, alive, total: checked.length, n: MAX_PROXIES });
+  else setStatusT("st_done", { secs, alive, total: checked.length });
   setNet("done", stopFlag ? "net_stopped" : "net_done");
 
   // merge alive into dispatcher pool (existing entries kept)
-  mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
+  mergePool(checked.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
   renderPool();
   updateCounts();
   await syncPool(false);
-  pushPingPoint(results);
+  // A re-check of a few entries would distort the per-run ping history.
+  if (!base) pushPingPoint(results);
+}
+
+/** Actions from the results context menu and keyboard. */
+async function rowAction(action: RowAction, rows: ProxyResult[]): Promise<void> {
+  if (rows.length === 0) return;
+  const keys = new Set(rows.map((r) => r.proxy));
+  if (action === "copy") {
+    try {
+      // Copies keep credentials, like exports.
+      await navigator.clipboard.writeText(rows.map((r) => r.proxy).join("\n"));
+      setStatusT("st_copied", { n: rows.length });
+    } catch { /* clipboard unavailable */ }
+  } else if (action === "recheck") {
+    await recheck(rows.map((r) => r.proxy));
+  } else if (action === "pool") {
+    const alive = rows.filter((r) => r.alive);
+    mergePool(alive.map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
+    renderPool();
+    updateCounts();
+    const n = await syncPool(false);
+    setStatusT(n < 0 ? "pool_sync_err" : "pool_added", { n: alive.length });
+  } else if (action === "remove") {
+    if (running) return;
+    results = results.filter((r) => !keys.has(r.proxy));
+    resultsView.clearSelection();
+    render();
+    updateCounts();
+    setStatusT("st_removed", { n: keys.size });
+  }
 }
 
 // ---------- export ----------
@@ -512,7 +580,15 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     void invoke("cancel_check").catch(() => { /* backend may already be idle */ });
   });
+  resultsView.init({
+    onChange: () => render(),
+    onAction: (action, rows) => void rowAction(action, rows),
+    canRecheck: () => !running && !starting && !autoStatus.running,
+  });
   $("search").addEventListener("input", () => { resultsView.reset(); render(); });
+  $("btn-recheck-dead").addEventListener("click", () => {
+    void recheck(results.filter((r) => !r.alive).map((r) => r.proxy));
+  });
   document.querySelectorAll(".chip").forEach((c) => {
     c.addEventListener("click", () => {
       document.querySelectorAll(".chip").forEach((x) => x.classList.remove("active"));
@@ -799,14 +875,14 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll<HTMLInputElement>("[data-pool-filter]").forEach((el) => {
     el.addEventListener("input", () => {
       const id = el.dataset.poolFilter;
-      if (id) pool.resetLimit(id);
+      if (id) pool.resetScroll(id);
       renderPool();
     });
   });
   document.querySelectorAll<HTMLSelectElement>("[data-pool-sort]").forEach((el) => {
     el.addEventListener("change", () => {
       const id = el.dataset.poolSort;
-      if (id) pool.resetLimit(id);
+      if (id) pool.resetScroll(id);
       renderPool();
     });
   });
