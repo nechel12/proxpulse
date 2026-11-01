@@ -1,10 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
+import { flashLabel } from "./ui.ts";
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 type Deps = {
+  t: Translate;
   getData: () => Record<string, unknown>;
 };
 
-export function initInfoPanel({ getData }: Deps): void {
+export function initInfoPanel({ t, getData }: Deps): void {
   void invoke<string>("app_version")
     .then((v) => {
       const app = document.getElementById("app-ver");
@@ -16,9 +20,13 @@ export function initInfoPanel({ getData }: Deps): void {
     })
     .catch(() => { /* ignore */ });
 
-  document.getElementById("btn-copy-diag")?.addEventListener("click", async () => {
+  document.getElementById("btn-copy-diag")?.addEventListener("click", async (e) => {
+    const button = e.currentTarget as HTMLElement;
+    // Bug reports ask for the OS and the install type; include both.
+    const install = await invoke<string>("install_kind").catch(() => null);
     try {
-      await navigator.clipboard.writeText(JSON.stringify(getData(), null, 2));
+      await navigator.clipboard.writeText(JSON.stringify({ ...getData(), install }, null, 2));
+      flashLabel(button, t("copied"));
     } catch { /* ignore */ }
   });
 

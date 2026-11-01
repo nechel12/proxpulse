@@ -37,6 +37,8 @@ export function renderPingGraph(hist: PingPoint[], lang: "ru" | "en"): void {
   const svg = document.getElementById("ping-graph") as unknown as SVGSVGElement | null;
   if (!svg) return;
   const pts = hist.filter((p) => p.avg != null);
+  // An empty frame above the table looks broken; show it once there is a line.
+  svg.parentElement?.classList.toggle("hidden", pts.length < 2);
   if (pts.length < 2) {
     svg.innerHTML = "";
     return;

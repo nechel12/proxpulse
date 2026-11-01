@@ -9,6 +9,15 @@ export function setProgress(done: number, total: number): void {
   if (el) el.style.width = `${p}%`;
 }
 
+/** Briefly replace a button label to confirm an action (e.g. "Copied"). */
+export function flashLabel(el: HTMLElement, text: string, ms = 1500): void {
+  const original = el.textContent;
+  el.textContent = text;
+  window.setTimeout(() => {
+    if (el.textContent === text) el.textContent = original;
+  }, ms);
+}
+
 /** Native confirmation dialog; falls back to `window.confirm` outside Tauri. */
 export async function askConfirm(message: string): Promise<boolean> {
   try {

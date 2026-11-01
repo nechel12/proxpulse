@@ -41,8 +41,21 @@ fn fmt_countdown(s: Option<u64>, ru: bool) -> String {
                 "off".to_string()
             }
         }
-        Some(x) if x >= 3600 => format!("{}h {:02}m", x / 3600, (x % 3600) / 60),
-        Some(x) if x >= 60 => format!("{}m", x / 60),
+        Some(x) if x >= 3600 => {
+            let (h, m) = (x / 3600, (x % 3600) / 60);
+            if ru {
+                format!("{h} ч {m:02} мин")
+            } else {
+                format!("{h}h {m:02}m")
+            }
+        }
+        Some(x) if x >= 60 => {
+            if ru {
+                format!("{} мин", x / 60)
+            } else {
+                format!("{}m", x / 60)
+            }
+        }
         Some(_) => {
             if ru {
                 "скоро".to_string()
@@ -200,7 +213,9 @@ mod tests {
         assert_eq!(fmt_countdown(None, false), "off");
         assert_eq!(fmt_countdown(Some(59), true), "скоро");
         assert_eq!(fmt_countdown(Some(59), false), "soon");
-        assert_eq!(fmt_countdown(Some(60), true), "1m");
+        assert_eq!(fmt_countdown(Some(60), true), "1 мин");
+        assert_eq!(fmt_countdown(Some(60), false), "1m");
+        assert_eq!(fmt_countdown(Some(3660), true), "1 ч 01 мин");
         assert_eq!(fmt_countdown(Some(3660), false), "1h 01m");
     }
 }
