@@ -6,6 +6,8 @@ All notable changes to ProxPulse. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-01
+
 ### Security
 
 - Anonymity and content-integrity checks use plain HTTP. Over `https://` a
@@ -152,7 +154,8 @@ All notable changes to ProxPulse. The format follows
 
 - First tagged version: Windows installer and portable build.
 
-[Unreleased]: https://github.com/nechel12/proxpulse/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/nechel12/proxpulse/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/nechel12/proxpulse/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/nechel12/proxpulse/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/nechel12/proxpulse/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/nechel12/proxpulse/compare/v0.4.1...v0.4.2

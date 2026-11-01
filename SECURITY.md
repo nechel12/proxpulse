@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest release (0.4.x) and `main` on a
+Security fixes are provided for the latest release (0.5.x) and `main` on a
 best-effort basis. Older versions are not supported; the built-in updater
 moves NSIS, AppImage and macOS installs to the latest release.
 
