@@ -55,6 +55,19 @@ describe("GeoCacheStore", () => {
     expect(entries[0].country).toBe("Testland");
   });
 
+  it("keeps entries that were seen again when evicting", () => {
+    const store = new GeoCacheStore();
+    const at = (n: number) => ({ ...result, proxy: `10.0.${Math.floor(n / 250)}.${n % 250}:80`, url: `http://10.0.${Math.floor(n / 250)}.${n % 250}:80` });
+    store.learn(Array.from({ length: 2000 }, (_, n) => at(n)));
+    // The oldest entry is confirmed again, then one more pushes the size over.
+    store.learn([at(0)]);
+    store.learn([at(2000)]);
+    const keys = store.fresh().map((e) => e.proxy);
+    expect(keys).toHaveLength(2000);
+    expect(keys).toContain("http://10.0.0.0:80");
+    expect(keys).not.toContain("http://10.0.0.1:80");
+  });
+
   it("ignores dead results", () => {
     const store = new GeoCacheStore();
     store.learn([{ ...result, alive: false }]);

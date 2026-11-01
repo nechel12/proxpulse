@@ -94,7 +94,11 @@ export class GeoCacheStore {
         asn: r.asn,
         ip_type: r.ip_type,
       };
-      this.cache.set(key, mergeGeoEntry(this.cache.get(key), next));
+      const merged = mergeGeoEntry(this.cache.get(key), next);
+      // Re-insert so the Map order is "least recently confirmed first" and
+      // eviction drops stale entries, not the ones just seen again.
+      this.cache.delete(key);
+      this.cache.set(key, merged);
       changed = true;
     }
     if (changed) {
