@@ -73,6 +73,10 @@ All notable changes to ProxPulse. The format follows
 - The Windows portable build is named `ProxPulse_<version>_x64-portable.exe`.
 - The Russian UI uses one polite tone; the dispatcher hint names the
   protocols of the selected listener; the tray shows Russian time units.
+- Documentation follows ProxPulse Judge: `README.md` is English and
+  `README.ru.md` Russian, with install and verdict tables, troubleshooting and
+  limitations; `SECURITY.md` defines scope and the security model, and
+  `RELEASING.md` describes the release process.
 
 ### Fixed
 
