@@ -41,6 +41,9 @@ Linux AppImage. MSI, `.deb` and `.rpm` are installed and updated manually
 (installer or package manager). Portable builds are updated by replacing the
 file. The file to download for each platform is described in the release notes.
 
+> **Windows:** builds are not Authenticode-signed, so SmartScreen may show
+> "Windows protected your PC" — click "More info" → "Run anyway".
+
 > **macOS:** builds are not signed with an Apple certificate. On first launch,
 > open the app from the context menu → Open, or run `xattr -cr ProxPulse.app`.
 > The author does not have access to a Mac: macOS builds are verified by
@@ -166,9 +169,10 @@ Judge mode replaces the deep checks with its own response.
 > the check settings; ip-api requests (both the main test URL and the deep
 > geo lookup) will then use HTTPS.
 >
-> ip-api requests are made **through the checked proxy**, so the proxy sees
-> both the key and the traffic. Use a dedicated key for this app; ip-api IP
-> restrictions will not work when requests go through proxies. The key is
+> ip-api requests are made **through the checked proxy**. Over HTTPS the
+> proxy sees neither the key nor the response, but ip-api receives the key
+> from the addresses of all checked proxies. Use a dedicated key for this
+> app; IP restrictions on the key will not work through proxies. The key is
 > stored locally in `localStorage` (like webhook URLs). Do not use the free
 > tier for commercial use — that is an ip-api restriction.
 
@@ -299,6 +303,8 @@ are rejected, and redirects are not followed.
   menu provides show/hide, dispatcher on/off with the current port, time until
   the next auto-check, webhook state and quit. Left-clicking the icon shows or
   hides the window.
+- Closing the window quits the app, including the dispatcher and auto-checks.
+  To keep them running in the background, minimize to the tray with ⇲.
 
 ## Privacy and local data
 
