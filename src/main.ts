@@ -979,6 +979,30 @@ window.addEventListener("DOMContentLoaded", () => {
     .catch(() => { /* older backend */ });
   void dispatchMonitor.poll(t, setStatusText);
 
+  // Keyboard shortcuts: Ctrl+Enter starts, Esc stops, Ctrl+F filters.
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented || !$("text-modal").classList.contains("hidden")) return;
+    const mod = e.ctrlKey || e.metaKey;
+    const onCheck = screenVisible("screen-check");
+    if (mod && e.key === "Enter" && onCheck) {
+      e.preventDefault();
+      const b = $("btn-start") as HTMLButtonElement;
+      if (!b.disabled) b.click();
+    } else if (e.key === "Escape" && onCheck && (running || autoStatus.running)) {
+      e.preventDefault();
+      const b = $("btn-stop") as HTMLButtonElement;
+      if (!b.disabled) b.click();
+    } else if (mod && e.code === "KeyF") {
+      const field = onCheck
+        ? $<HTMLInputElement>("search")
+        : document.querySelector<HTMLInputElement>(".screen:not(.hidden) .pool-filter");
+      if (!field) return;
+      e.preventDefault();
+      field.focus();
+      field.select();
+    }
+  });
+
   applyI18n();
   armTimers();
   if (appSettings.updateOnStart && isTauriRuntime()) {

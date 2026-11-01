@@ -72,11 +72,9 @@ export function initSourcePanel(deps: Deps): void {
     }
   });
 
-  document.getElementById("file-input")?.addEventListener("change", async (e) => {
-    const files = (e.target as HTMLInputElement).files;
-    if (!files || files.length === 0) return;
+  const importFiles = async (files: File[]) => {
     const parts: string[] = [];
-    for (const f of Array.from(files)) {
+    for (const f of files) {
       if (f.size > deps.maxFileBytes) {
         deps.setStatus("file_too_big", { name: f.name, mb: deps.maxFileMb });
         continue;
@@ -94,6 +92,35 @@ export function initSourcePanel(deps: Deps): void {
       append(parts);
       deps.setStatus("file_loaded", { n: parts.length, f: files.length });
     }
-    (e.target as HTMLInputElement).value = "";
+  };
+
+  document.getElementById("file-input")?.addEventListener("change", async (e) => {
+    const field = e.target as HTMLInputElement;
+    const files = Array.from(field.files ?? []);
+    field.value = "";
+    if (files.length > 0) await importFiles(files);
+  });
+
+  // Files dropped on the source panel are imported like "Import"; a file
+  // dropped anywhere else must not make the WebView navigate to it.
+  const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
+  const zone = input.closest<HTMLElement>(".panel") ?? input;
+  document.addEventListener("dragover", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const inside = zone.contains(e.target as Node);
+    zone.classList.toggle("drop-target", inside);
+    if (e.dataTransfer) e.dataTransfer.dropEffect = inside ? "copy" : "none";
+  });
+  document.addEventListener("dragleave", (e) => {
+    if (!e.relatedTarget) zone.classList.remove("drop-target");
+  });
+  document.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    zone.classList.remove("drop-target");
+    if (!zone.contains(e.target as Node)) return;
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length > 0) void importFiles(files);
   });
 }

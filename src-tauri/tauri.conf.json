@@ -19,6 +19,7 @@
         "minWidth": 1000,
         "minHeight": 700,
         "visible": false,
+        "dragDropEnabled": false,
         "theme": "Dark"
       }
     ],

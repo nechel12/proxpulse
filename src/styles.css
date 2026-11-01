@@ -469,3 +469,7 @@ tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--red); }
 #results-wrap:focus-visible { outline: 2px solid var(--red2); outline-offset: -2px; }
 .menu.ctx { position: fixed; right: auto; z-index: 120; }
 .menu button:disabled { opacity: .45; cursor: default; background: transparent; }
+.panel.drop-target {
+  border-color: var(--red);
+  box-shadow: 0 0 0 1px var(--red), 0 0 24px rgba(255, 30, 45, .25);
+}
