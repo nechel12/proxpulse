@@ -25,10 +25,6 @@
         <div class="stat bad"><label data-i18n="stat_dead">Мёртвые</label><b id="st-dead">0</b></div>
         <div class="stat"><label data-i18n="stat_ping">Ср. пинг</label><b id="st-ping">—</b></div>
       </div>
-      <div class="lang" role="group" aria-label="Language">
-        <button data-lang="ru" class="active" aria-pressed="true">RU</button>
-        <button data-lang="en" aria-pressed="false">EN</button>
-      </div>
       <button id="btn-tray" class="icon-btn" data-i18n-title="tray_hide" data-i18n-aria="tray_hide">⇲</button>
       <div class="top-status">
         <span id="net-dot" class="dot idle"></span>
@@ -40,7 +36,7 @@
       <button class="tab active" role="tab" aria-selected="true" aria-controls="screen-check" data-tab="check" data-i18n="tab_check">Проверка</button>
       <button class="tab" role="tab" aria-selected="false" aria-controls="screen-dispatch" data-tab="dispatch" data-i18n="tab_dispatch">Диспетчер</button>
       <button class="tab" role="tab" aria-selected="false" aria-controls="screen-auto" data-tab="auto" data-i18n="tab_auto">Авто</button>
-      <button class="tab" role="tab" aria-selected="false" aria-controls="screen-info" data-tab="info" data-i18n="tab_info">Инфо</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="screen-settings" data-tab="settings" data-i18n="tab_settings">Настройки</button>
     </nav>
 
     <div class="progress-wrap"><div id="progress" class="progress"></div></div>
@@ -71,7 +67,7 @@
         <div class="hint" style="margin-top:6px" data-i18n="import_hint">Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.</div>
 
         <div class="panel-head" style="margin-top:14px">
-          <span class="ph-title" data-i18n="set_title">▸ Настройки</span>
+          <span class="ph-title" data-i18n="set_title">▸ Параметры проверки</span>
         </div>
 
         <div class="preset-row">
@@ -379,43 +375,108 @@
     </div>
     </main>
 
-    <!-- ============ SCREEN: INFO ============ -->
-    <main id="screen-info" class="screen hidden" role="tabpanel">
-    <div class="layout-single">
-      <section class="panel">
-        <div class="panel-head">
-          <span class="ph-title" data-i18n="info_title">▸ О приложении</span>
-        </div>
-        <div class="brand" style="margin-bottom:12px">
-          <div class="brand-mark">◈</div>
-          <div>
-            <div class="brand-name">PROX<span>PULSE</span></div>
-            <div class="brand-sub" id="brand-ver-info">proxy checker // v…</div>
+    <!-- ============ SCREEN: SETTINGS ============ -->
+    <main id="screen-settings" class="screen hidden" role="tabpanel">
+    <div class="layout-single settings-page">
+      <h2 class="set-head" data-i18n="sg_general">Общие</h2>
+      <div class="set-list">
+        <div class="set-row">
+          <span class="set-name" data-i18n="pref_lang">Язык</span>
+          <div class="lang" role="group" aria-label="Language">
+            <button data-lang="ru" class="active" aria-pressed="true">RU</button>
+            <button data-lang="en" aria-pressed="false">EN</button>
           </div>
         </div>
-        <p class="hint" data-i18n="info_about">Быстрый чекер прокси: проверка живости, гео, анонимности и TLS, локальный диспетчер и авторассылка пула на вебхук.</p>
-        <p class="hint">Tauri 2 · Rust (tokio, reqwest, rustls) · Vite + TypeScript</p>
-        <div class="gh-card" id="gh-card" title="github.com/nechel12/proxpulse">
-          <span class="gh-logo">⬢</span>
-          <span class="gh-text"><b>nechel12/proxpulse</b><i>GitHub →</i></span>
+        <div class="set-row">
+          <label class="set-name" for="pref-theme" data-i18n="pref_theme">Тема</label>
+          <select id="pref-theme" class="set-select">
+            <option value="dark" data-i18n="theme_dark">Тёмная</option>
+            <option value="light" data-i18n="theme_light">Светлая</option>
+            <option value="system" data-i18n="theme_system">Как в системе</option>
+          </select>
         </div>
-        <div class="gh-card" id="gh-card-judge" title="github.com/nechel12/proxpulse-judge">
-          <span class="gh-logo">⬢</span>
-          <span class="gh-text"><b>nechel12/proxpulse-judge</b><i>GitHub →</i></span>
+        <div class="set-row">
+          <span class="set-text"><span class="set-name" id="pref-hide-creds-l" data-i18n="pref_hide_creds">Скрывать логины и пароли</span><span class="set-desc" data-i18n="pref_hide_creds_d">В таблицах; экспорт и копирование не меняются</span></span>
+          <button id="pref-hide-creds" class="switch" role="switch" aria-checked="false" aria-labelledby="pref-hide-creds-l"></button>
         </div>
-        <div class="panel-head" style="margin-top:14px">
-          <span class="ph-title" data-i18n="diag_title">▸ Диагностика</span>
+      </div>
+
+      <h2 class="set-head" data-i18n="sg_startup">Запуск и трей</h2>
+      <div class="set-list">
+        <div class="set-row">
+          <label class="set-name" for="pref-close" data-i18n="pref_close">При закрытии окна</label>
+          <select id="pref-close" class="set-select">
+            <option value="quit" data-i18n="close_quit">Выйти</option>
+            <option value="tray" data-i18n="close_tray">Свернуть в трей</option>
+          </select>
         </div>
-        <div class="hint"><span data-i18n="diag_ver">Версия</span>: <b id="app-ver">—</b></div>
-        <div class="row2">
-          <button id="btn-check-upd" class="btn ghost" data-i18n="diag_upd">Проверить обновления</button>
-          <button id="btn-install-upd" class="btn ghost hidden" data-i18n="upd_install">Установить</button>
-          <button id="btn-open-rel" class="btn ghost hidden" data-i18n="upd_open">Открыть релиз</button>
+        <div class="set-row">
+          <span class="set-name" id="pref-autostart-l" data-i18n="pref_autostart">Запускать вместе с системой</span>
+          <button id="pref-autostart" class="switch" role="switch" aria-checked="false" aria-labelledby="pref-autostart-l"></button>
+        </div>
+        <div class="set-row sub" id="pref-minimized-row">
+          <span class="set-name" id="pref-minimized-l" data-i18n="pref_minimized">Сразу в трей</span>
+          <button id="pref-minimized" class="switch" role="switch" aria-checked="true" aria-labelledby="pref-minimized-l"></button>
+        </div>
+        <div class="set-row">
+          <span class="set-text"><span class="set-name" id="pref-dispatch-l" data-i18n="pref_dispatch">Запускать диспетчер</span><span class="set-desc" data-i18n="pref_dispatch_d">С последними портом и режимом, если пул не пуст</span></span>
+          <button id="pref-dispatch" class="switch" role="switch" aria-checked="false" aria-labelledby="pref-dispatch-l"></button>
+        </div>
+      </div>
+      <div id="startup-status" class="status-line set-status"></div>
+
+      <h2 class="set-head" data-i18n="sg_updates">Обновления и уведомления</h2>
+      <div class="set-list">
+        <div class="set-row">
+          <span class="set-text"><span class="set-name"><span data-i18n="diag_ver">Версия</span> <b id="app-ver">—</b></span><span id="upd-status" class="set-desc"></span></span>
+          <div class="set-ctrl">
+            <button id="btn-check-upd" class="btn ghost" data-i18n="diag_upd">Проверить</button>
+            <button id="btn-install-upd" class="btn ghost hidden" data-i18n="upd_install">Установить</button>
+            <button id="btn-open-rel" class="btn ghost hidden" data-i18n="upd_open">Открыть релиз</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <span class="set-name" id="pref-upd-auto-l" data-i18n="pref_upd_auto">Проверять обновления при запуске</span>
+          <button id="pref-upd-auto" class="switch" role="switch" aria-checked="true" aria-labelledby="pref-upd-auto-l"></button>
+        </div>
+        <div class="set-row">
+          <span class="set-text"><span class="set-name" id="pref-notify-l" data-i18n="pref_notify">Системные уведомления</span><span class="set-desc" data-i18n="pref_notify_d">Когда окно скрыто: вебхук не отправлен, пул опустел, вышло обновление</span></span>
+          <button id="pref-notify" class="switch" role="switch" aria-checked="true" aria-labelledby="pref-notify-l"></button>
+        </div>
+      </div>
+
+      <h2 class="set-head" data-i18n="sg_data">Данные</h2>
+      <div class="set-list">
+        <div class="set-row">
+          <span class="set-text"><span class="set-name" data-i18n="pref_backup">Настройки приложения</span><span class="set-desc" data-i18n="pref_backup_d">Файл содержит адреса вебхуков и ключ ip-api</span></span>
+          <div class="set-ctrl">
+            <button id="btn-settings-export" class="btn ghost" data-i18n="btn_settings_export">Экспорт</button>
+            <label class="btn ghost file"><span data-i18n="btn_settings_import">Импорт</span><input id="settings-file" type="file" accept=".json,application/json" hidden /></label>
+            <button id="btn-settings-reset" class="btn ghost" data-i18n="btn_settings_reset">Сбросить</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <span class="set-text"><span class="set-name" data-i18n="diag_title">Диагностика</span><span class="set-desc" data-i18n="diag_d">Версия, система и последние ошибки — для отчёта об ошибке</span></span>
           <button id="btn-copy-diag" class="btn ghost" data-i18n="diag_copy">Копировать</button>
         </div>
-        <div id="upd-status" class="status-line"></div>
-        <div id="err-list" class="mono-box scroll-box">—</div>
-      </section>
+        <details class="set-row set-details">
+          <summary><span data-i18n="err_title">Журнал ошибок</span> <span id="err-count" class="count">0</span></summary>
+          <div id="err-list" class="mono-box scroll-box">—</div>
+        </details>
+      </div>
+      <div id="data-status" class="status-line set-status"></div>
+
+      <h2 class="set-head" data-i18n="sg_projects">Проекты</h2>
+      <div class="set-list">
+        <button class="set-row link" id="gh-card" type="button">
+          <span class="set-name">ProxPulse</span>
+          <span class="set-link">github.com/nechel12/proxpulse ↗</span>
+        </button>
+        <button class="set-row link" id="gh-card-judge" type="button">
+          <span class="set-name">ProxPulse Judge</span>
+          <span class="set-link">github.com/nechel12/proxpulse-judge ↗</span>
+        </button>
+      </div>
     </div>
     </main>
 

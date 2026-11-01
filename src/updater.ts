@@ -9,6 +9,8 @@ export type UpdaterDeps = {
   setStatusText: StatusSetter;
   logErr: (msg: string) => void;
   isTauriRuntime: () => boolean;
+  /** Called when a newer version is found. */
+  onFound?: (version: string) => void;
 };
 
 type UpdateInfo = {
@@ -18,7 +20,12 @@ type UpdateInfo = {
   notes: string | null;
 };
 
-export function initUpdater({ t, setStatusText, logErr, isTauriRuntime }: UpdaterDeps): void {
+export type Updater = {
+  /** Check without showing progress or errors; used at launch. */
+  checkQuietly: () => Promise<void>;
+};
+
+export function initUpdater({ t, setStatusText, logErr, isTauriRuntime, onFound }: UpdaterDeps): Updater {
   let releaseUrl = "";
   let pendingVersion = "";
   let installKindPromise: Promise<string> | null = null;
@@ -34,19 +41,19 @@ export function initUpdater({ t, setStatusText, logErr, isTauriRuntime }: Update
   const check = document.getElementById("btn-check-upd") as HTMLButtonElement | null;
   const install = document.getElementById("btn-install-upd") as HTMLButtonElement | null;
   const open = document.getElementById("btn-open-rel") as HTMLButtonElement | null;
-  if (!check || !install || !open) return;
+  if (!check || !install || !open) return { checkQuietly: async () => {} };
 
-  check.addEventListener("click", async () => {
+  const runCheck = async (quiet: boolean) => {
     open.classList.add("hidden");
     install.classList.add("hidden");
     pendingVersion = "";
-    setStatusText("upd-status", () => "...");
+    if (!quiet) setStatusText("upd-status", () => "...");
     try {
       const u = await invoke<UpdateInfo>("check_app_update");
       const appVer = document.getElementById("app-ver");
       if (appVer) appVer.textContent = u.current;
       if (!u.available || !u.version) {
-        setStatusText("upd-status", () => t("upd_latest", { v: u.current }));
+        if (!quiet) setStatusText("upd-status", () => t("upd_latest", { v: u.current }));
         return;
       }
       const version = u.version;
@@ -60,11 +67,14 @@ export function initUpdater({ t, setStatusText, logErr, isTauriRuntime }: Update
         setStatusText("upd-status", () => t("upd_manual", { v: version }));
       }
       open.classList.remove("hidden");
+      onFound?.(version);
     } catch (e) {
       logErr("update-check: " + String(e).slice(0, 200));
-      setStatusText("upd-status", () => t("upd_fail"));
+      if (!quiet) setStatusText("upd-status", () => t("upd_fail"));
     }
-  });
+  };
+
+  check.addEventListener("click", () => void runCheck(false));
 
   install.addEventListener("click", async () => {
     if (!pendingVersion || install.disabled) return;
@@ -107,4 +117,6 @@ export function initUpdater({ t, setStatusText, logErr, isTauriRuntime }: Update
       window.open(releaseUrl, "_blank");
     }
   });
+
+  return { checkQuietly: () => runCheck(true) };
 }

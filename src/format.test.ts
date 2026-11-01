@@ -3,6 +3,7 @@ import {
   anonShort,
   escapeHtml,
   geoShort,
+  maskProxy,
   pingClass,
   poolCountry,
   rowTitle,
@@ -77,5 +78,22 @@ describe("format helpers", () => {
 describe("escapeHtml", () => {
   it("escapes markup characters", () => {
     expect(escapeHtml(`<a href="x">&'"</a>`)).toBe("&lt;a href=&quot;x&quot;&gt;&amp;&#39;&quot;&lt;/a&gt;");
+  });
+});
+
+describe("maskProxy", () => {
+  it("hides the userinfo of the normalized URL", () => {
+    expect(maskProxy("1.2.3.4:8080:user:pass", "http://user:pass@1.2.3.4:8080")).toBe("http://•••@1.2.3.4:8080");
+    expect(maskProxy("socks5://u:p@[2001:db8::1]:1080", "socks5://u:p@[2001:db8::1]:1080")).toBe("socks5://•••@[2001:db8::1]:1080");
+  });
+
+  it("keeps proxies without credentials as entered", () => {
+    expect(maskProxy("1.2.3.4:8080", "http://1.2.3.4:8080")).toBe("1.2.3.4:8080");
+  });
+
+  it("falls back to the raw line without a URL", () => {
+    expect(maskProxy("user:pass@1.2.3.4:8080")).toBe("•••@1.2.3.4:8080");
+    expect(maskProxy("http://user:pass@1.2.3.4:8080", null)).toBe("http://•••@1.2.3.4:8080");
+    expect(maskProxy("1.2.3.4:8080")).toBe("1.2.3.4:8080");
   });
 });

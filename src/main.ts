@@ -21,11 +21,18 @@ import { AutoSettingsStore } from "./auto-settings.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
+import { AppSettings, readFlag, writeFlag } from "./app-settings.ts";
+import { applyTheme, loadThemePref } from "./theme.ts";
+import { Notifier } from "./notify.ts";
+import { formatWebhookResults } from "./webhooks.ts";
 import { askConfirm, askText, flashLabel, screenVisible, setProgress } from "./ui.ts";
 import { NetStatus } from "./net-status.ts";
 import { CHECK_LIMITS, runCheckList, type CheckSettings } from "./check-client.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
 import type { ProxyResult } from "./types.ts";
+
+// Apply the theme before the first paint of the app.
+applyTheme(loadThemePref());
 
 // ================= i18n =================
 
@@ -57,6 +64,23 @@ const pool = new PoolView();
 const dispatchMonitor = new DispatchMonitor();
 const profiles = new ProfilePanel();
 const settings = new SettingsPanel({ t, schedule: () => scheduleAutoConfig() });
+const appSettings = new AppSettings({
+  t,
+  setStatusText,
+  logErr,
+  isTauriRuntime,
+  onHideCreds: () => {
+    resultsView.hideCreds = appSettings.hideCreds;
+    pool.hideCreds = appSettings.hideCreds;
+    render();
+    renderPool();
+  },
+});
+const notifier = new Notifier({
+  enabled: () => appSettings.notifications,
+  isTauriRuntime,
+  logErr,
+});
 
 function setStatusT(key: string, params?: Record<string, string | number>) {
   lastStatus = { key, params };
@@ -453,6 +477,7 @@ window.addEventListener("DOMContentLoaded", () => {
         x.setAttribute("aria-selected", String(x === tb));
       });
       const name = (tb as HTMLElement).dataset.tab;
+      if (name === "settings") tb.classList.remove("has-update");
       document.querySelectorAll(".screen").forEach((s) => s.classList.add("hidden"));
       const scr = document.getElementById(`screen-${name}`);
       scr?.classList.remove("hidden");
@@ -740,7 +765,32 @@ window.addEventListener("DOMContentLoaded", () => {
       errors: errorLog.recent(20),
     }),
   });
-  initUpdater({ t, setStatusText, logErr, isTauriRuntime });
+  const updater = initUpdater({
+    t,
+    setStatusText,
+    logErr,
+    isTauriRuntime,
+    onFound: (version) => {
+      if (!screenVisible("screen-settings")) {
+        document.querySelector('.tab[data-tab="settings"]')?.classList.add("has-update");
+      }
+      // One notification per version, not one per launch.
+      let seen: string | null = null;
+      try {
+        seen = localStorage.getItem("pp-upd-seen");
+      } catch { /* ignore */ }
+      if (seen === version) return;
+      void notifier.send(t("notif_upd_t", { v: version }), t("notif_upd_b")).then((sent) => {
+        if (!sent) return;
+        try {
+          localStorage.setItem("pp-upd-seen", version);
+        } catch { /* ignore */ }
+      });
+    },
+  });
+  appSettings.init();
+  resultsView.hideCreds = appSettings.hideCreds;
+  pool.hideCreds = appSettings.hideCreds;
 
   // auto timers + webhook
   document.getElementById("auto-min")?.addEventListener("change", armTimers);
@@ -810,8 +860,23 @@ window.addEventListener("DOMContentLoaded", () => {
     scheduleAutoConfig();
   });
   void listen<AutoStatusEvent>("auto://status", (e) => autoStatus.handle(e.payload)).catch(() => {});
-  void listen<AutoPoolEvent>("auto://pool", (e) => applyAutoPool(e.payload, (items) => pool.set(items), () => { renderPool(); updateCounts(); })).catch(() => {});
-  void listen<AutoWebhookEvent>("auto://webhook", (e) => showAutoWebhook(e.payload, t, setStatusText)).catch(() => {});
+  void listen<AutoPoolEvent>("auto://pool", (e) => {
+    const before = pool.count;
+    applyAutoPool(e.payload, (items) => pool.set(items), () => { renderPool(); updateCounts(); });
+    if (before > 0 && pool.count === 0) void notifier.send(t("notif_pool_t"), t("notif_pool_b"));
+  }).catch(() => {});
+  void listen<AutoWebhookEvent>("auto://webhook", (e) => {
+    showAutoWebhook(e.payload, t, setStatusText);
+    const failed = e.payload.results.filter((r) => !r.ok);
+    if (failed.length === 0) notifier.latch.clear("webhook");
+    else if (notifier.latch.raise("webhook")) void notifier.send(t("notif_webhook_t"), formatWebhookResults(failed, t));
+  }).catch(() => {});
+  void listen("app://hidden-to-tray", () => {
+    if (readFlag("pp-tray-hint", false)) return;
+    void notifier.send(t("notif_tray_t"), t("notif_tray_b")).then((sent) => {
+      if (sent) writeFlag("pp-tray-hint", true);
+    });
+  }).catch(() => {});
   void invoke<boolean>("check_busy")
     .then((busy) => {
       if (!busy) return;
@@ -840,4 +905,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
   applyI18n();
   armTimers();
+  if (appSettings.updateOnStart && isTauriRuntime()) {
+    // Let the window settle; the result shows on the Settings tab.
+    window.setTimeout(() => void updater.checkQuietly(), 3000);
+  }
 });

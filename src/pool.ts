@@ -1,4 +1,4 @@
-import { escapeHtml, pingClass } from "./format.ts";
+import { escapeHtml, maskProxy, pingClass } from "./format.ts";
 import { RENDER_STEP } from "./results.ts";
 
 export const POOL_RENDER_MAX = 1000;
@@ -14,6 +14,7 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 
 export class PoolView {
   items: PoolItem[] = [];
+  hideCreds = false;
   private limits = new Map<string, number>();
 
   get count(): number {
@@ -117,7 +118,7 @@ export class PoolView {
       const tr = document.createElement("tr");
       const ping = p.latency == null ? "-" : `${p.latency} ms`;
       const geo = p.country ? ` <span class="geo-tag">${escapeHtml(p.country)}</span>` : "";
-      tr.innerHTML = `<td>${n + 1}</td><td>${escapeHtml(p.raw)}${geo}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
+      tr.innerHTML = `<td>${n + 1}</td><td>${escapeHtml(this.hideCreds ? maskProxy(p.raw, p.url) : p.raw)}${geo}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
       if (tbodyId === "pool-body") {
         const td = document.createElement("td");
         const b = document.createElement("button");

@@ -62,3 +62,17 @@ export function poolCountry(r: ProxyResult): string | null {
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 }
+/**
+ * Display form of a proxy with the login and password hidden. The normalized
+ * URL shows where the credentials are; column formats such as
+ * `host:port:user:pass` carry them without an `@`.
+ */
+export function maskProxy(raw: string, url?: string | null): string {
+  const m = /^([a-z][a-z0-9+.-]*:\/\/)[^@\s/]*@(.+)$/i.exec(url ?? "");
+  if (m) return `${m[1]}•••@${m[2]}`;
+  if (url) return raw;
+  const at = raw.lastIndexOf("@");
+  if (at < 0) return raw;
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(raw)?.[0] ?? "";
+  return `${scheme}•••@${raw.slice(at + 1)}`;
+}

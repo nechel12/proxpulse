@@ -3,6 +3,7 @@ import {
   anonShort,
   escapeHtml,
   geoShort,
+  maskProxy,
   pingClass,
   rowTitle,
   stabilityShort,
@@ -17,6 +18,7 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 
 export class ResultsView {
   limit = RENDER_STEP;
+  hideCreds = false;
 
   reset(): void {
     this.limit = RENDER_STEP;
@@ -73,7 +75,7 @@ export class ResultsView {
           ? `<span class="dim" title="${escapeHtml(t("skipped_hint"))}">${escapeHtml(t("skipped_short"))}</span>`
           : escapeHtml(txt);
       tr.innerHTML =
-        `<td>${i + 1}</td><td>${escapeHtml(r.proxy)}</td><td>${escapeHtml(r.proto)}</td>` +
+        `<td>${i + 1}</td><td>${escapeHtml(this.hideCreds ? maskProxy(r.proxy, r.url) : r.proxy)}</td><td>${escapeHtml(r.proto)}</td>` +
         `<td>${pill}</td><td class="${pingClass(r.latency_ms)}">${ping}</td>` +
         `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.cls}">${cell("anon", an.txt)}</td>` +
         `<td class="cell-geo" title="${infoTitle}">${cell("geo", geoShort(r))}</td>` +

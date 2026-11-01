@@ -19,6 +19,7 @@ export class DispatchMonitor {
   running = false;
   private lastError: string | null = null;
   private timer: number | undefined;
+  private filled = false;
 
   refreshAddr(): void {
     const port = (document.getElementById("srv-port") as HTMLInputElement | null)?.value || "1080";
@@ -53,7 +54,10 @@ export class DispatchMonitor {
       this.lastError = s.last_error;
       this.renderPill(t);
 
-      if (s.running) {
+      // The first poll also shows the saved configuration of a stopped
+      // dispatcher; later ones must not overwrite what the user types.
+      if (s.running || !this.filled) {
+        this.filled = true;
         const port = document.getElementById("srv-port") as HTMLInputElement | null;
         if (port) port.value = String(s.port);
         const mode = document.getElementById("srv-mode") as HTMLSelectElement | null;
@@ -68,11 +72,15 @@ export class DispatchMonitor {
           const error = s.last_error;
           const addr = `127.0.0.1:${s.port}`;
           setStatus("srv-status", () => error ?? t("srv_on", { addr }));
+        } else if (s.last_error) {
+          const short = s.last_error.slice(0, 120);
+          setStatus("srv-status", () => t("srv_err", { e: short }));
         } else {
           setStatus("srv-status", () => t("srv_off"));
         }
       } else if (st && st.textContent === "-" && !s.running) {
-        setStatus("srv-status", () => t("srv_off"));
+        const error = s.last_error?.slice(0, 120);
+        setStatus("srv-status", () => (error ? t("srv_err", { e: error }) : t("srv_off")));
       }
     } catch { /* ignore */ }
   }

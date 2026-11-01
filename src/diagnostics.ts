@@ -34,6 +34,8 @@ export class ErrorLog {
 
   render(): void {
     if (typeof document === "undefined") return;
+    const count = document.getElementById("err-count");
+    if (count) count.textContent = String(this.items.length);
     const el = document.getElementById("err-list");
     if (!el) return;
     el.textContent = this.items.length === 0

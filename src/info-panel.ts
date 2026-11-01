@@ -15,8 +15,6 @@ export function initInfoPanel({ t, getData }: Deps): void {
       if (app) app.textContent = v;
       const brand = document.getElementById("brand-ver");
       if (brand) brand.textContent = `proxy checker // v${v}`;
-      const info = document.getElementById("brand-ver-info");
-      if (info) info.textContent = `proxy checker // v${v}`;
     })
     .catch(() => { /* ignore */ });
 
