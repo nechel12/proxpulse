@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 type StatusSetter = (id: string, render: () => string) => void;
@@ -73,8 +74,22 @@ export function initUpdater({ t, setStatusText, logErr, isTauriRuntime }: Update
       if (!ok) return;
       install.disabled = true;
       setStatusText("upd-status", () => t("upd_installing"));
-      await invoke("install_app_update", { expectedVersion: pendingVersion });
-      setStatusText("upd-status", () => t("upd_restart"));
+      const stop = await listen<{ downloaded: number; total: number | null }>("update://progress", (e) => {
+        const { downloaded, total } = e.payload;
+        setStatusText("upd-status", () =>
+          total
+            ? t("upd_progress", { p: Math.min(100, Math.round((downloaded / total) * 100)) })
+            : t("upd_progress_mb", { mb: (downloaded / 1048576).toFixed(1) }),
+        );
+      }).catch(() => null);
+      try {
+        // On success the app restarts (or the Windows installer takes over),
+        // so this normally does not return.
+        await invoke("install_app_update", { expectedVersion: pendingVersion });
+        setStatusText("upd-status", () => t("upd_restart"));
+      } finally {
+        stop?.();
+      }
     } catch (e) {
       logErr("update-install: " + String(e).slice(0, 200));
       setStatusText("upd-status", () => t("upd_fail"));

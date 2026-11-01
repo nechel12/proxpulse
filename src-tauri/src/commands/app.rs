@@ -1,5 +1,6 @@
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 #[cfg(windows)]
@@ -122,10 +123,33 @@ pub(crate) async fn install_app_update(
     if update.version != expected_version {
         return Err("update version changed; check again".to_string());
     }
+    let progress_app = app.clone();
+    let mut downloaded: u64 = 0;
+    let mut last_emit = Instant::now();
     update
-        .download_and_install(|_, _| {}, || {})
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                if last_emit.elapsed() >= Duration::from_millis(200) || total == Some(downloaded) {
+                    last_emit = Instant::now();
+                    let _ = progress_app
+                        .emit("update://progress", UpdateProgress { downloaded, total });
+                }
+            },
+            || {},
+        )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // The Windows installer closes and relaunches the app itself. Elsewhere
+    // the new version runs only after a restart, which the confirmation
+    // dialog already announced.
+    app.restart()
+}
+
+#[derive(Clone, Serialize)]
+struct UpdateProgress {
+    downloaded: u64,
+    total: Option<u64>,
 }
 
 #[tauri::command]

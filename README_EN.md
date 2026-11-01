@@ -293,8 +293,8 @@ are rejected, and redirects are not followed.
 
 - GitHub links: ProxPulse and ProxPulse Judge.
 - **Diagnostics**: app version, update check via GitHub Releases, install
-  (on Windows the installer closes the app; on macOS/Linux restart manually),
-  report copy (version, counters, recent errors).
+  with download progress (the app restarts after installing), report copy
+  (version, OS, install type, counters, recent errors).
 - The ⇲ button in the header minimizes the window to the system tray. The tray
   menu provides show/hide, dispatcher on/off with the current port, time until
   the next auto-check, webhook state and quit. Left-clicking the icon shows or
