@@ -1,6 +1,6 @@
 #!/bin/sh
-# Удаляет атрибуцию Claude из сообщения коммита.
-# Включение: git config core.hooksPath .githooks
+# Strips Claude attribution from the commit message.
+# Enable with: git config core.hooksPath .githooks
 
 file=$1
 tmp="$file.$$"
