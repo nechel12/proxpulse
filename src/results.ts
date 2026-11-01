@@ -65,13 +65,20 @@ export class ResultsView {
       ].join(" ");
       const info = r.alive ? `${escapeHtml(r.ip ?? "ok")} ${marks}` : escapeHtml(r.error ?? "fail");
       const infoTitle = escapeHtml(rowTitle(r));
+      // An empty cell for a stage skipped at its limit gets an explanation
+      // instead of looking like "no data".
+      const skipped = new Set(r.skipped ?? []);
+      const cell = (stage: string, txt: string) =>
+        r.alive && txt === "—" && skipped.has(stage)
+          ? `<span class="dim" title="${escapeHtml(t("skipped_hint"))}">${escapeHtml(t("skipped_short"))}</span>`
+          : escapeHtml(txt);
       tr.innerHTML =
         `<td>${i + 1}</td><td>${escapeHtml(r.proxy)}</td><td>${escapeHtml(r.proto)}</td>` +
         `<td>${pill}</td><td class="${pingClass(r.latency_ms)}">${ping}</td>` +
-        `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.cls}">${escapeHtml(an.txt)}</td>` +
-        `<td class="cell-geo" title="${infoTitle}">${escapeHtml(geoShort(r))}</td>` +
+        `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.cls}">${cell("anon", an.txt)}</td>` +
+        `<td class="cell-geo" title="${infoTitle}">${cell("geo", geoShort(r))}</td>` +
         `<td>${escapeHtml(r.ip_type ?? "-")}</td>` +
-        `<td class="${tls.cls}" title="${infoTitle}">${escapeHtml(tls.txt)}</td>` +
+        `<td class="${tls.cls}" title="${infoTitle}">${cell("tls", tls.txt)}</td>` +
         `<td class="cell-err" title="${infoTitle}">${info}</td>`;
       tb.appendChild(tr);
     });

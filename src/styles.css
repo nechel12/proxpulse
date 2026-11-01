@@ -269,6 +269,7 @@ tr.empty td { text-align: center; color: var(--mut); padding: 30px; font-family:
 .pill.dead { background: rgba(255,45,63,.12); color: var(--bad); border: 1px solid rgba(255,45,63,.4); }
 .ping-fast { color: var(--ok); } .ping-mid { color: var(--warn); } .ping-slow { color: var(--bad); }
 .anon-elite { color: var(--ok); } .anon-anon { color: var(--warn); } .anon-trans { color: var(--bad); }
+.dim { color: var(--mut); cursor: help; }
 .cell-geo { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell-err { color: var(--mut); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

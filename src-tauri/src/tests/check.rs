@@ -299,12 +299,23 @@ fn certificate_errors_are_classified() {
 }
 
 #[test]
+fn skipped_deep_checks_are_recorded() {
+    use crate::commands::check::Deep;
+    let mut skipped = Vec::new();
+    assert_eq!(Deep::Ran(Some(1)).value("geo", &mut skipped), Some(1));
+    assert_eq!(Deep::<u8>::Ran(None).value("anon", &mut skipped), None);
+    assert_eq!(Deep::<u8>::Skipped.value("tls", &mut skipped), None);
+    assert_eq!(skipped, vec!["tls"], "only a skipped stage is reported");
+}
+
+#[test]
 fn check_events_are_tagged() {
     use crate::commands::check::CheckEvent;
     let r = dead_result("1.2.3.4:80".into(), "HTTP".into(), 1, "timeout".into());
     let v = serde_json::to_value(CheckEvent::Result(Box::new(r))).unwrap();
     assert_eq!(v["kind"], "result");
     assert_eq!(v["proxy"], "1.2.3.4:80");
+    assert_eq!(v["skipped"], serde_json::json!([]));
     assert_eq!(
         serde_json::to_value(CheckEvent::Done).unwrap(),
         serde_json::json!({ "kind": "done" })

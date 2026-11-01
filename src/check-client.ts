@@ -50,6 +50,7 @@ export function deadStub(proxy: string, msg: string): ProxyResult {
     tls: null,
     tls_info: null,
     error: clip(msg, 120),
+    skipped: [],
   };
 }
 

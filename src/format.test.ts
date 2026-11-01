@@ -67,6 +67,11 @@ describe("format helpers", () => {
     expect(title).toContain("tls unverified (handshake failed)");
     expect(title).toContain("IP 1.2.3.4");
   });
+
+  it("lists deep checks skipped at their limit", () => {
+    expect(rowTitle({ ...base, skipped: ["geo", "tls"] })).toContain("skipped geo, tls");
+    expect(rowTitle({ ...base, skipped: [] })).not.toContain("skipped");
+  });
 });
 
 describe("escapeHtml", () => {
