@@ -113,8 +113,9 @@ fn emit_auto_status(
 
 /// A proxy that fails this many scheduled checks in a row leaves the pool.
 pub(crate) const AUTO_DROP_AFTER: u32 = 2;
-/// Retry delay after a cycle that could not reach the check server directly.
-const OFFLINE_RETRY_SECS: u64 = 60;
+/// Retry delay after a cycle that could not run usefully: the check server
+/// was unreachable directly, or a manual check was in progress.
+const RETRY_SOON_SECS: u64 = 60;
 
 type PoolEntry = (String, Option<u64>, Option<String>);
 
@@ -130,6 +131,8 @@ pub(crate) struct AutoMerge {
 enum AutoOutcome {
     Finished,
     Offline,
+    /// A manual check held the checker; the pool was not checked.
+    Busy,
 }
 
 /// Scheduled checks only keep the pool fresh: liveness, ping and country.
@@ -266,7 +269,7 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
     let check: State<'_, CheckState> = app.state();
     if check.busy.swap(true, Ordering::SeqCst) {
         emit_auto_status(app, "skipped", 0, input_total, None, None);
-        return AutoOutcome::Finished;
+        return AutoOutcome::Busy;
     }
     let _busy_guard = BusyGuard(check.busy.clone());
     check.cancel.store(false, Ordering::SeqCst);
@@ -352,13 +355,13 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
     }
 }
 
-/// Next run time after a cycle: an offline cycle is retried soon instead of
-/// waiting a whole interval with possibly stale results.
+/// Next run time after a cycle: an offline or crowded-out cycle is retried
+/// soon instead of waiting a whole interval with stale results.
 fn next_run(enabled: bool, interval_min: u64, outcome: AutoOutcome, now: u64) -> u64 {
     if !enabled {
         0
-    } else if outcome == AutoOutcome::Offline {
-        now + OFFLINE_RETRY_SECS
+    } else if matches!(outcome, AutoOutcome::Offline | AutoOutcome::Busy) {
+        now + RETRY_SOON_SECS
     } else {
         now + interval_min.clamp(1, 1440) * 60
     }
@@ -546,11 +549,15 @@ mod tests {
     }
 
     #[test]
-    fn offline_cycle_is_retried_soon() {
+    fn offline_or_busy_cycle_is_retried_soon() {
         assert_eq!(next_run(false, 30, AutoOutcome::Offline, 1000), 0);
         assert_eq!(
             next_run(true, 30, AutoOutcome::Offline, 1000),
-            1000 + OFFLINE_RETRY_SECS
+            1000 + RETRY_SOON_SECS
+        );
+        assert_eq!(
+            next_run(true, 30, AutoOutcome::Busy, 1000),
+            1000 + RETRY_SOON_SECS
         );
         assert_eq!(next_run(true, 30, AutoOutcome::Finished, 1000), 1000 + 1800);
     }
