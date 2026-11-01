@@ -48,7 +48,7 @@ GitHub release with `latest.json` for the built-in updater.
      sha256sum --ignore-missing -c SHA256SUMS.txt
      ```
 
-   - An install of the previous version finds the update (Info → Check for
+   - An install of the previous version finds the update (Settings → Check for
      updates), installs it and restarts on the new version.
 
 The signing key is a minisign key; its public half is embedded in

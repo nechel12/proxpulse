@@ -21,7 +21,7 @@ the alive pool, re-checks the pool on a schedule and posts it to webhooks.
 Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**. All
 network work, parsing and scheduling run in the Rust backend; the UI is a thin
 TypeScript layer. Russian and English UI, picked from the system language on
-first launch.
+first launch; dark and light themes.
 
 > Status: pre-1.0. Settings, export formats and webhook payloads may change in
 > minor releases; changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -33,9 +33,10 @@ first launch.
 - [Install](#install) · [Quick start](#quick-start)
 - Checking: [Input formats](#input-formats) · [Check target](#check-target) ·
   [Check settings](#check-settings) · [Deep checks](#deep-checks) ·
-  [How verdicts are decided](#how-verdicts-are-decided) · [Export](#export)
+  [How verdicts are decided](#how-verdicts-are-decided) · [Results table](#results-table) ·
+  [Export](#export)
 - [Dispatcher](#dispatcher) · [Scheduled checks and webhooks](#scheduled-checks-and-webhooks) ·
-  [Tray, updates and diagnostics](#tray-updates-and-diagnostics)
+  [Settings, tray and updates](#settings-tray-and-updates)
 - [Privacy and local data](#privacy-and-local-data) ·
   [Troubleshooting](#troubleshooting) · [Limitations](#limitations) ·
   [Security](#security)
@@ -67,15 +68,15 @@ Builds for every platform are attached to each
 > through the context menu → **Open** on first launch, or with
 > `xattr -cr ProxPulse.app`. The author has no Mac: macOS builds are verified by
 > compilation only and are not guaranteed to work. Problem reports should
-> include the diagnostics from the Info tab.
+> include the diagnostics from the Settings tab.
 
 ## Quick start
 
-1. Paste a proxy list in any format into **Source**, or import files or a URL.
-   The counter shows how many proxies a check will test.
+1. Paste a proxy list in any format into **Source**, drop files on it, or
+   import files or a URL. The counter shows how many proxies a check will test.
 2. Pick a preset — **Standard** checks liveness plus every deep check,
-   **Fast** liveness only — and press **Start**. Results stream in as proxies
-   finish; **Stop** aborts at once.
+   **Fast** liveness only — and press **Start** (Ctrl+Enter). Results stream
+   in as proxies finish; **Stop** (Esc) aborts at once.
 3. Export the alive proxies (**Export** → `.txt`, `.json`, `.csv` or **Copy**),
    or turn on the dispatcher and point a browser at `127.0.0.1:1080` as an
    HTTP or SOCKS5 proxy.
@@ -196,6 +197,17 @@ flowchart TD
     C -- no --> E[elite]
 ```
 
+### Results table
+
+The table shows every result, however long the list: only the rows in view
+are drawn. A click on a column header sorts by it (ascending, descending,
+off); the text filter (Ctrl+F) and the **Protocol**, **Anonymity** and
+**Country** menus narrow the list. A click selects a row, Ctrl+click and
+Shift+click select several, Ctrl+A selects all shown. Right-click opens
+actions for the selection: copy (with credentials), re-check, add the alive
+ones to the pool, remove from the list (also Delete). **Re-check dead** checks
+only the dead proxies again and updates their rows in place.
+
 ### Export
 
 **Export** saves `.txt` (normalized proxy URLs), `.json` (full results) or
@@ -245,17 +257,34 @@ redirects are not followed, and a non-2xx answer is shown as an error.
 The scheduler and webhooks run in the backend, so they keep working while the
 window is in the tray.
 
-## Tray, updates and diagnostics
+## Settings, tray and updates
 
-- **⇲** hides the window to the tray. The tray menu shows or hides the window,
-  toggles the dispatcher and shows the next scheduled check and the webhook
-  state. Closing the window quits the app, including the dispatcher and
-  scheduled checks.
-- **Info → Check for updates** uses GitHub Releases; installation shows
-  download progress and restarts the app. MSI, portable, `.deb` and `.rpm`
-  builds point to the release page instead.
-- **Info → Copy** puts a diagnostics report (version, OS, install type,
-  counters, recent errors) on the clipboard for bug reports.
+The **Settings** tab holds the app-wide options:
+
+- **General**: language, theme (dark, light or the system one), and hiding
+  logins and passwords in the tables; exports and copies keep them.
+- **Startup and tray**: what closing the window does (quit, or hide to the
+  tray); starting with the system, optionally straight to the tray; starting
+  the dispatcher at launch with the last port, mode and listener when the
+  pool is not empty.
+- **Updates and notifications**: the version and **Check for updates**, a
+  quiet check at launch, and system notifications while the window is hidden:
+  a scheduled webhook delivery failed, the pool became empty, an update is
+  out.
+- **Data**: export, import and reset of the settings as a JSON file (it holds
+  webhook URLs and the ip-api key, and the pool with its credentials only when
+  you choose so on export); **Copy** puts a diagnostics
+  report (version, OS, install type, counters, recent errors) on the clipboard
+  for bug reports; the error log.
+
+**⇲** hides the window to the tray. The tray menu shows or hides the window,
+toggles the dispatcher and shows the next scheduled check and the webhook
+state. Unless closing is set to hide to the tray, closing the window quits the
+app, including the dispatcher and scheduled checks.
+
+Updates come from GitHub Releases; installation shows download progress and
+restarts the app. MSI, portable, `.deb` and `.rpm` builds point to the
+release page instead.
 
 ## Privacy and local data
 
@@ -263,21 +292,26 @@ Network requests leave the machine for: the selected check target; ip-api,
 httpbin.org and example.com when deep checks are on; direct (no proxy)
 baselines — your IP and the example.com reference — and a connectivity check
 when a scheduled check finds no alive proxy; the selected judge; GitHub
-Releases (update check); configured webhooks; URL imports.
+Releases (update check, also at launch unless turned off); configured
+webhooks; URL imports.
 
 Proxy credentials go to the proxy itself (HTTP `Proxy-Authorization` or SOCKS
 authentication), into exports, and to webhooks only with **Send credentials**.
 
 Stored locally:
 
-- In the WebView `localStorage`: language, settings and presets, webhook URLs
-  (may contain tokens), the ip-api Pro key, the geo cache (credential-free
-  keys), ping history, recent errors.
+- In the WebView `localStorage`: language, theme, settings and presets,
+  webhook URLs (may contain tokens), the ip-api Pro key, the geo cache
+  (credential-free keys), ping history, recent errors.
 - In `pool.json` in the app data directory (`%APPDATA%\com.nechel12.proxpulse`,
   `~/.local/share/com.nechel12.proxpulse`,
   `~/Library/Application Support/com.nechel12.proxpulse`): the pool **with
   usernames and passwords**, owner-only on Linux and macOS. **Clear pool**
-  clears it.
+  clears it. `prefs.json` next to it holds the startup options and the last
+  dispatcher port, mode and listener.
+- Starting with the system adds a login item: the `Run` registry key on
+  Windows, a LaunchAgent on macOS, a `.desktop` file in `~/.config/autostart`
+  on Linux. Turning the option off removes it.
 
 ## Troubleshooting
 
@@ -290,7 +324,8 @@ Stored locally:
 | The source counter shows `!` | The input exceeds 10 MB, or parsing failed (the status line shows the error). |
 | A line is not counted | It does not normalize to a proxy (bad port, bare IPv6, missing host) or is the same proxy as an earlier line. |
 | Auto status: "Check server unreachable directly" | No network, or the check target is blocked without a proxy. The pool is kept and the check is retried in a minute. |
-| Scheduled checks stop when the window is closed | Closing quits the app; **⇲** keeps it running in the tray. |
+| Scheduled checks stop when the window is closed | Closing quits the app by default: **Settings → When the window is closed → Hide to tray**, or **⇲**, keeps it running. |
+| No system notifications | They are shown only while the window is hidden or in the background, and the OS may block them for ProxPulse. |
 | The dispatcher starts on 1081, 1082, … | The requested port is busy; the next free one is used and shown. |
 | The browser gets `502 All upstreams failed` | Every tried upstream failed; the dispatcher status shows the last error. Re-checking the pool or switching to failover helps. |
 | `Webhook error: http 4xx/5xx` | The receiver rejected the POST. Local and private hosts are blocked, and redirects are not followed. |
@@ -371,10 +406,13 @@ src/main.ts                         # UI wiring
 src/check-client.ts                 # check runs over a Tauri channel
 src/source-panel.ts, parse-runner.ts # list input, import, backend parsing
 src/settings-panel.ts, profiles*.ts # check settings and presets
-src/results.ts, format.ts           # results table and formatting
+src/results*.ts, virtual-rows.ts    # results table: sorting, filters, selection, virtual rows
+src/format.ts                       # cell formatting
 src/export*.ts, csv.ts              # TXT/JSON/CSV export
 src/pool.ts, dispatch-monitor.ts    # pool view and dispatcher status
 src/auto-*.ts, webhooks.ts          # schedule, its status and webhooks
+src/app-settings.ts, settings-io.ts # Settings tab, settings export/import
+src/theme.ts, notify.ts             # theme and system notifications
 src/updater.ts, info-panel.ts       # updates and diagnostics
 src/geocache.ts, geo-store.ts       # geo cache
 src/i18n.ts                         # RU/EN strings
@@ -403,7 +441,7 @@ src-tauri/src/tests/*.rs            # backend tests
 Bug reports and pull requests are welcome. The development workflow is
 described in [CONTRIBUTING.md](CONTRIBUTING.md); participation implies
 agreement with the [Code of Conduct](CODE_OF_CONDUCT.md). Bug reports should
-include the version, OS and the diagnostics from the Info tab — the issue form
+include the version, OS and the diagnostics from the Settings tab — the issue form
 asks for them. Security issues go through [SECURITY.md](SECURITY.md), not a
 public issue. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 

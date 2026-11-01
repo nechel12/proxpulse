@@ -13,7 +13,7 @@ Please use GitHub's private vulnerability reporting:
 1. Open the repository's **Security** tab.
 2. Choose **Report a vulnerability**
    (`https://github.com/nechel12/proxpulse/security/advisories/new`).
-3. Include the ProxPulse version, the OS and install type (Info tab →
+3. Include the ProxPulse version, the OS and install type (Settings tab →
    Diagnostics), a reproduction, and the impact.
 
 Do not open a public issue or include working proxies, proxy credentials,
@@ -39,7 +39,7 @@ In scope:
 - The local dispatcher: request parsing, upstream handling, header and
   credential forwarding.
 - Handling of proxy credentials, webhook URLs and the ip-api key: exports,
-  webhook payloads, logs, the diagnostics report.
+  webhook payloads, logs, the diagnostics report, the settings file.
 - The WebView: CSP, Tauri capabilities and commands, injection through proxy
   or server data.
 - The updater, release signing, and the CI/release workflows.

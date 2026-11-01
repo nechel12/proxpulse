@@ -29,6 +29,20 @@ All notable changes to ProxPulse. The format follows
 
 ### Added
 
+- A Settings tab with app-wide options: theme (dark, light, system); hiding
+  logins and passwords in the tables; closing the window to the tray;
+  starting with the system, optionally in the tray; starting the dispatcher
+  at launch with its last configuration; a quiet update check at launch;
+  system notifications while the window is hidden (failed scheduled webhook,
+  emptied pool, new version); export, import and reset of the settings,
+  optionally with the proxy pool.
+- Results table: sorting by any column, Protocol, Anonymity and Country
+  filters, row selection (click, Ctrl, Shift, Ctrl+A) and a context menu to
+  copy, re-check, add to the pool or remove rows; **Re-check dead** updates
+  only the dead entries.
+- Keyboard shortcuts: Ctrl+Enter starts a check, Esc stops it, Ctrl+F focuses
+  the filter. Files can be dropped on the source panel.
+- A dispatcher that fails to start shows the error instead of "off".
 - Releases include `SHA256SUMS.txt`.
 - Update download progress; on macOS and Linux the app restarts after an
   update is installed.
@@ -49,6 +63,9 @@ All notable changes to ProxPulse. The format follows
 
 ### Changed
 
+- The Info tab is replaced by Settings: the language switch moved there from
+  the header, and the about card became rows linking to the projects. The
+  check settings panel is titled "Check settings".
 - One parser: proxy lists are extracted by the backend, and every entry must
   pass the same normalization a check uses. The live count in the source
   panel now equals the number of proxies a check will test; entries that
@@ -97,8 +114,10 @@ All notable changes to ProxPulse. The format follows
 
 ### Performance
 
-- Large lists are parsed off the UI thread, rendered rows are capped, HTTP clients
-  and the TLS configuration are reused, and deep checks are rate-capped.
+- The results and pool tables draw only the rows in view instead of capping
+  the list at 1000 rows.
+- Large lists are parsed off the UI thread, HTTP clients and the TLS
+  configuration are reused, and deep checks are rate-capped.
 
 ## [0.4.4] — 2026-10-23
 
