@@ -35,7 +35,7 @@ version; Tauri refuses to build otherwise. Update them together.
 - Add or update tests for behavior changes: Rust tests live in
   `src-tauri/src/tests/` and next to the module, frontend tests in
   `src/*.test.ts`.
-- Update `README.md` and `README_EN.md` for user-visible changes, and add an
+- Update `README.md` and `README.ru.md` for user-visible changes, and add an
   entry under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
 - New UI strings go into both dictionaries in `src/i18n.ts`.
 - Do not commit secrets, real proxy lists or credentials, `dist/`, or build

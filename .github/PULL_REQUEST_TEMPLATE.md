@@ -13,7 +13,7 @@
 ## Checklist
 
 - [ ] Tests added or updated for behavior changes.
-- [ ] `README.md`, `README_EN.md` and `CHANGELOG.md` updated for user-visible changes.
+- [ ] `README.md`, `README.ru.md` and `CHANGELOG.md` updated for user-visible changes.
 - [ ] New UI strings added to both dictionaries in `src/i18n.ts`.
 - [ ] No secrets, real proxy lists, credentials, or build artifacts committed.
 - [ ] Security issues are reported via `SECURITY.md`, not this PR.

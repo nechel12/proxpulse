@@ -1,67 +1,337 @@
 # ProxPulse
 
-[![GitHub release](https://img.shields.io/github/v/release/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/releases) [![Downloads](https://img.shields.io/github/downloads/nechel12/proxpulse/total)](https://github.com/nechel12/proxpulse/releases) [![CI](https://github.com/nechel12/proxpulse/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nechel12/proxpulse/actions/workflows/ci.yml) ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-555) [![MSRV](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust&logoColor=white)](src-tauri/Cargo.toml) [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app/) [![Last commit](https://img.shields.io/github/last-commit/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/commits/main) [![Security policy](https://img.shields.io/badge/security-policy-green)](SECURITY.md) [![License](https://img.shields.io/github/license/nechel12/proxpulse)](LICENSE)
+**English** | [Русский](README.ru.md)
 
-*[English version](README_EN.md)*
+[![CI](https://github.com/nechel12/proxpulse/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nechel12/proxpulse/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/releases)
+[![Downloads](https://img.shields.io/github/downloads/nechel12/proxpulse/total)](https://github.com/nechel12/proxpulse/releases)
+[![License](https://img.shields.io/github/license/nechel12/proxpulse)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-555)](#install)
+[![MSRV](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust&logoColor=white)](src-tauri/Cargo.toml)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app/)
+[![Security policy](https://img.shields.io/badge/security-policy-green)](SECURITY.md)
+[![Last commit](https://img.shields.io/github/last-commit/nechel12/proxpulse)](https://github.com/nechel12/proxpulse/commits/main)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
-ProxPulse — десктопный чекер прокси с обновлением результатов в реальном
-времени: проверка доступности, задержки, геолокации, анонимности,
-целостности трафика и TLS, локальный прокси-диспетчер, автоматические
-проверки по таймеру и отправка рабочих прокси на вебхуки.
+Desktop proxy checker for Windows, Linux and macOS. It checks HTTP, HTTPS,
+SOCKS4 and SOCKS5 proxies for liveness, latency, geolocation, anonymity,
+content and TLS integrity, runs a local rotating HTTP/SOCKS5 dispatcher over
+the alive pool, re-checks the pool on a schedule and posts it to webhooks.
 
-Стек: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**.
-Тёмная тема с красными акцентами; интерфейс на русском и английском языках
-(при первом запуске выбирается по языку системы).
+Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**. All
+network work, parsing and scheduling run in the Rust backend; the UI is a thin
+TypeScript layer. Russian and English UI, picked from the system language on
+first launch.
 
-## Возможности
+> Status: pre-1.0. Settings, export formats and webhook payloads may change in
+> minor releases; changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-- Проверка доступности, задержки, джиттера и доли успешных запросов.
-- Геолокация, тип IP, анонимность, целостность контента и TLS.
-- HTTP, HTTPS (TLS до прокси), SOCKS5/SOCKS5h и SOCKS4/SOCKS4a.
-- Локальный HTTP/SOCKS5-диспетчер: ротация, выбор быстрейшего и замена при падении.
-- Автопроверки, пресеты настроек, экспорт TXT/JSON/CSV и вебхуки.
-- Импорт из файлов и по URL, дедупликация, тёмная тема, RU/EN.
-- Проверка обновлений и системный трей.
+![ProxPulse main window](docs/screenshots/main-en.png)
 
-## Скриншоты
+## Contents
 
-![Главный экран ProxPulse](docs/screenshots/main-ru.png)
+- [Install](#install) · [Quick start](#quick-start)
+- Checking: [Input formats](#input-formats) · [Check target](#check-target) ·
+  [Check settings](#check-settings) · [Deep checks](#deep-checks) ·
+  [How verdicts are decided](#how-verdicts-are-decided) · [Export](#export)
+- [Dispatcher](#dispatcher) · [Scheduled checks and webhooks](#scheduled-checks-and-webhooks) ·
+  [Tray, updates and diagnostics](#tray-updates-and-diagnostics)
+- [Privacy and local data](#privacy-and-local-data) ·
+  [Troubleshooting](#troubleshooting) · [Limitations](#limitations) ·
+  [Security](#security)
+- [Build from source](#build-from-source) · [Project structure](#project-structure) ·
+  [Contributing](#contributing)
 
-Английский интерфейс — в [README_EN.md](README_EN.md).
+## Install
 
-## Установка
+Builds for every platform are attached to each
+[GitHub release](https://github.com/nechel12/proxpulse/releases):
 
-Готовые сборки доступны в разделе [Releases](https://github.com/nechel12/proxpulse/releases):
+| Platform | File | Updates |
+|---|---|---|
+| Windows x64 | `…_x64-setup.exe` — NSIS installer (recommended) | built-in |
+| | `…_x64_en-US.msi` — MSI installer | manual |
+| | `…-portable.exe` — no install | replace the file |
+| Linux x64 | `…_amd64.AppImage` | built-in |
+| | `…_amd64.deb`, `…x86_64.rpm` | package manager |
+| macOS | `…_aarch64.dmg` (Apple Silicon), `…_x64.dmg` (Intel) | built-in |
 
-- **Windows (x64):** установщик `-setup.exe` или `.msi`, портативный `-portable.exe`;
-- **Linux (x64):** `.AppImage`, `.deb`, `.rpm`;
-- **macOS:** `.dmg` для Apple Silicon и Intel.
+`SHA256SUMS.txt` lists the checksum of every file (from the next release on);
+`latest.json` and `.sig` files serve the built-in updater.
 
-Встроенное автообновление работает для Windows NSIS (`-setup.exe`),
-macOS и Linux AppImage. MSI, `.deb` и `.rpm` устанавливаются и обновляются
-вручную (через установщик или пакетный менеджер). Портативные сборки
-обновляются заменой файла. Выбор файла для каждой платформы описан в
-примечаниях к релизу; контрольные суммы всех файлов — в `SHA256SUMS.txt`.
+> [!NOTE]
+> **Windows:** builds are not Authenticode-signed, so SmartScreen may show
+> "Windows protected your PC": **More info → Run anyway**.
+>
+> **macOS:** builds are not signed with an Apple certificate. The app is opened
+> through the context menu → **Open** on first launch, or with
+> `xattr -cr ProxPulse.app`. The author has no Mac: macOS builds are verified by
+> compilation only and are not guaranteed to work. Problem reports should
+> include the diagnostics from the Info tab.
 
-> **Windows:** сборки не подписаны сертификатом Authenticode, поэтому
-> SmartScreen может показать «Windows защитила ваш компьютер» — нажмите
-> «Подробнее» → «Выполнить в любом случае».
+## Quick start
 
-> **macOS:** сборки не подписаны сертификатом Apple. При первом запуске
-> откройте приложение через контекстное меню → «Открыть» или выполните
-> `xattr -cr ProxPulse.app`. Автор не имеет доступа к Mac: macOS-сборки
-> проверены только успешной компиляцией, запуск не тестировался,
-> работоспособность не гарантируется. При проблемах приложите диагностику
-> из вкладки «Инфо».
+1. Paste a proxy list in any format into **Source**, or import files or a URL.
+   The counter shows how many proxies a check will test.
+2. Pick a preset — **Standard** checks liveness plus every deep check,
+   **Fast** liveness only — and press **Start**. Results stream in as proxies
+   finish; **Stop** aborts at once.
+3. Export the alive proxies (**Export** → `.txt`, `.json`, `.csv` or **Copy**),
+   or turn on the dispatcher and point a browser at `127.0.0.1:1080` as an
+   HTTP or SOCKS5 proxy.
+4. Optionally, the **Auto** tab re-checks the pool every N minutes and posts it
+   to webhooks.
 
-## Сборка из исходников
+## Checking
 
-Требования: [Node.js 22.12+](https://nodejs.org/), [Rust](https://rustup.rs/)
-(stable, не ниже 1.90) и WebView2 (в Windows 10/11 уже установлен). Для
-сборки под Linux нужны системные пакеты WebKitGTK и другие зависимости.
+### Input formats
+
+The format is detected per line; scheme case does not matter:
+
+- `127.0.0.1:8080`, `proxy.example.com:8080`, `[2001:db8::1]:8080`
+- `user:pass@127.0.0.1:8080`
+- `http://…`, `https://…` (TLS to the proxy), `socks5://…`, `socks5h://…`,
+  `socks://…`, `socks4://…`, `socks4a://…`
+- `127.0.0.1:8080:user:pass` and `user:pass:127.0.0.1:8080`
+- `127.0.0.1:8080:socks5` (protocol as a suffix)
+- CSV, tabs or spaces: `127.0.0.1,8080,user,pass`, `socks5,127.0.0.1,8080`
+- JSON: an object, an array or a log with `host`/`ip`, `port`, `username`,
+  `password`, `type` fields
+- Numbered or bulleted lists (`1) …`, `- …`, `[x] …`), `# …` and `// …`
+  comments, `ip:port` inside prose
+
+Text files of any kind (TXT, CSV, JSON, LOG) and URLs (up to 2 MB, public
+hosts only) are imported with the same parser. Every entry must normalize to a
+proxy the checker can use, and one proxy written two ways counts once, so the
+counter equals the number of proxies a check tests.
+
+> [!NOTE]
+> IPv6 addresses need square brackets (`[2001:db8::1]:8080`); the bare form is
+> ambiguous and is not accepted. `socks4` cannot carry IPv6 or host names:
+> `socks5` or `socks4a` is used for them.
+
+### Check target
+
+The **public server** mode requests a ready-made endpoint or a custom URL
+through every proxy: `google`/`cloudflare` `generate_204` (fastest),
+`api.ipify.org` and `httpbin.org/ip` (show the exit IP), `http://ip-api.com/json`
+(exit IP and geo in one request), `example.com`, or **Custom URL…**. The URL
+that will actually be requested is shown under the list.
+
+The **ProxPulse Judge** mode uses a [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge)
+instance: the built-in public one at `https://proxycheck.lmtunnel.com` or a
+custom server. **Fast** requests `/generate_204`; **Full** requests `/judge`,
+which returns geo, IP type, anonymity and a content hash in one response and
+replaces the deep checks.
+
+> [!IMPORTANT]
+> **An HTTPS judge cannot detect anonymity or integrity.** A request to an
+> `https://` URL travels inside a TLS tunnel, where the proxy can neither add
+> headers nor alter the response, so every proxy would look `elite`. Anonymity
+> and integrity therefore stay empty with an HTTPS judge, and it does not
+> receive your real IP (`direct_ip`). A self-hosted judge reached over `http://` detects
+> both; it receives `direct_ip` to recognize proxies that forward it.
+
+> [!NOTE]
+> **ip-api: free tier and Pro.** The free endpoint is HTTP-only and limited to
+> 45 requests per minute. With **ip-api Pro** and a key, requests use HTTPS:
+> checked proxies cannot see the key, but ip-api receives it from the addresses
+> of all of them, so a dedicated key is recommended and IP restrictions on the
+> key do not work. The free tier is not for commercial use.
+
+### Check settings
+
+| Setting | Default | Meaning |
+|---|---|---|
+| Timeout | 5000 ms | limit for one request through the proxy (1000–30000) |
+| Threads | 50 | proxies checked in parallel (1–500) |
+| Samples | 1 | requests per proxy for ping, jitter and success rate (1–5); each opens a new connection, so ping includes connecting to the proxy |
+| No-scheme type | HTTP | protocol for entries without a scheme; **HTTP + SOCKS5** tries both |
+| Port precheck | on, 1500 ms | fast TCP connect that drops dead hosts before the full check |
+
+Presets: **Fast** (liveness only), **Standard** (all deep checks),
+**Deep** (ip-api, 3 samples), **Judge** (built-in judge, full mode). Editing
+any setting turns the selection into a custom configuration; **+ Save**
+stores it as a named preset.
+
+### Deep checks
+
+Deep checks run after a proxy is found alive and are off in Judge mode:
+
+- **Geo and IP type** — country, city, ISP, organization, ASN and
+  mobile/datacenter/residential, via ip-api.
+- **Anonymity** — the headers `http://httpbin.org/headers?show_env=1` receives
+  through the proxy, compared with your direct IP.
+- **Integrity** — the `http://example.com` body compared with a direct request.
+- **TLS** — the certificate fingerprint of `example.com:443` compared with a
+  direct connection.
+
+Anonymity and integrity use **plain HTTP**: only then does the proxy see the
+request and get a chance to add headers or change the response. Proxies that
+allow only CONNECT to port 443 cannot be classified this way.
+
+At most 8 geo lookups and 64 of each other deep check run at once, and geo
+pauses for a minute after ip-api answers 429. A check that hits a limit is
+skipped instead of waiting and marked **limit**. The geo cache (2000 entries,
+6-hour TTL) avoids repeated lookups for unchanged exit IPs.
+
+### How verdicts are decided
+
+| Column | Value | Meaning |
+|---|---|---|
+| Anon | `elite` | No proxy headers and no trace of your direct IP. |
+| | `anon` | The proxy reveals itself (`Via`, its own `X-Forwarded-For` entries, `Forwarded`, `X-Real-IP`, `Proxy-*`) but not your IP. |
+| | `transp` | Your direct IP appears in a forwarded header: the proxy leaks it. |
+| TLS | `ok` / `mod` / `n/v` | The certificate matches / differs or is rejected / the handshake failed for another reason. |
+| Info | `?mod`, `?tls` | The page through the proxy differs from the direct one / the TLS certificate differs. The row tooltip lists every result. |
+| Anon, Geo, TLS | `—` | Not checked: off, unsupported by the proxy, or an HTTPS judge. |
+| Anon, Geo, TLS | `limit` | Skipped at a concurrency limit; running the check again fills it. |
+
+```mermaid
+flowchart TD
+    A["GET http://httpbin.org/headers through the proxy"] --> B{"Your direct IP in<br/>any header value?"}
+    B -- yes --> T[transparent]
+    B -- no --> C{"Proxy entries in X-Forwarded-For, or Via /<br/>Forwarded / X-Real-IP / Proxy-* headers?"}
+    C -- yes --> N[anonymous]
+    C -- no --> E[elite]
+```
+
+### Export
+
+**Export** saves `.txt` (normalized proxy URLs), `.json` (full results) or
+`.csv` (table with the original line and URL) through the system dialog, or
+copies the list. The **dead** toggle includes unavailable proxies. A sparkline
+under the toolbar shows the average ping of alive proxies across checks.
+
+## Dispatcher
+
+The **Dispatcher** tab serves a local proxy on `127.0.0.1:1080` (or the next
+free port) and routes traffic through the alive pool. One port accepts HTTP
+and SOCKS5 (detected from the first byte), or only the selected protocol.
+
+| Mode | Behavior |
+|---|---|
+| Rotation | starts at the next upstream for every connection; up to five attempts |
+| Fastest | always the lowest-latency upstream; a single attempt |
+| Failover | the lowest-latency upstream first, then the next ones; up to five attempts |
+
+- An HTTPS tunnel (CONNECT) stays on one upstream until it closes; each plain
+  HTTP request gets its own connection (`Connection: close`).
+- SOCKS5 upstreams resolve site names themselves, so local DNS does not see
+  visited domains (`socks4` cannot and resolves locally).
+- The pool fills from every check (existing entries are kept), can be
+  filtered, sorted, synced and cleared, and is saved to disk between launches.
+- Request and error counters, the current upstream and the last error are
+  shown live.
+
+## Scheduled checks and webhooks
+
+The **Auto** tab re-checks the shared pool every N minutes:
+
+- Scheduled checks are light: liveness, ping and country; geo is requested
+  only for entries without a country.
+- A proxy leaves the pool after two failed checks in a row; **Max ping**
+  removes slower ones (`0` — no limit).
+- When no proxy answers and the check server is unreachable directly (offline,
+  waking from sleep), the pool is left unchanged and the check is retried in a
+  minute; a check crowded out by a manual one is retried the same way.
+- Scheduled checks never stop the dispatcher.
+
+With **Send after each auto-check**, the pool is POSTed to up to 10 webhooks
+as TXT, JSON or CSV. Credentials are stripped unless **Send credentials** is
+on, which requires an `https://` webhook. Webhooks must be public hosts;
+redirects are not followed, and a non-2xx answer is shown as an error.
+
+The scheduler and webhooks run in the backend, so they keep working while the
+window is in the tray.
+
+## Tray, updates and diagnostics
+
+- **⇲** hides the window to the tray. The tray menu shows or hides the window,
+  toggles the dispatcher and shows the next scheduled check and the webhook
+  state. Closing the window quits the app, including the dispatcher and
+  scheduled checks.
+- **Info → Check for updates** uses GitHub Releases; installation shows
+  download progress and restarts the app. MSI, portable, `.deb` and `.rpm`
+  builds point to the release page instead.
+- **Info → Copy** puts a diagnostics report (version, OS, install type,
+  counters, recent errors) on the clipboard for bug reports.
+
+## Privacy and local data
+
+Network requests leave the machine for: the selected check target; ip-api,
+httpbin.org and example.com when deep checks are on; direct (no proxy)
+baselines — your IP and the example.com reference — and a connectivity check
+when a scheduled check finds no alive proxy; the selected judge; GitHub
+Releases (update check); configured webhooks; URL imports.
+
+Proxy credentials go to the proxy itself (HTTP `Proxy-Authorization` or SOCKS
+authentication), into exports, and to webhooks only with **Send credentials**.
+
+Stored locally:
+
+- In the WebView `localStorage`: language, settings and presets, webhook URLs
+  (may contain tokens), the ip-api Pro key, the geo cache (credential-free
+  keys), ping history, recent errors.
+- In `pool.json` in the app data directory (`%APPDATA%\com.nechel12.proxpulse`,
+  `~/.local/share/com.nechel12.proxpulse`,
+  `~/Library/Application Support/com.nechel12.proxpulse`): the pool **with
+  usernames and passwords**, owner-only on Linux and macOS. **Clear pool**
+  clears it.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Anon is `—` and the integrity result is missing in Judge mode | The judge is reached over HTTPS, where a proxy cannot add headers or change the body. A self-hosted judge over `http://` is required for these results. |
+| Anon is `—` for working proxies | The proxy allows only CONNECT to port 443, so the plain-HTTP probes fail. Expected for HTTPS-only proxies. |
+| **limit** in Geo, Anon or TLS | The concurrency limit or the ip-api 429 cooldown was hit. Fewer threads or a second run fill the gaps. |
+| Many alive proxies without geo on free ip-api | The free tier allows 45 requests per minute. ip-api Pro or the judge removes the limit; the geo cache helps on repeated runs. |
+| The source counter shows `!` | The input exceeds 10 MB, or parsing failed (the status line shows the error). |
+| A line is not counted | It does not normalize to a proxy (bad port, bare IPv6, missing host) or is the same proxy as an earlier line. |
+| Auto status: "Check server unreachable directly" | No network, or the check target is blocked without a proxy. The pool is kept and the check is retried in a minute. |
+| Scheduled checks stop when the window is closed | Closing quits the app; **⇲** keeps it running in the tray. |
+| The dispatcher starts on 1081, 1082, … | The requested port is busy; the next free one is used and shown. |
+| The browser gets `502 All upstreams failed` | Every tried upstream failed; the dispatcher status shows the last error. Re-checking the pool or switching to failover helps. |
+| `Webhook error: http 4xx/5xx` | The receiver rejected the POST. Local and private hosts are blocked, and redirects are not followed. |
+| macOS: "the app is damaged" | The build is unsigned: `xattr -cr ProxPulse.app`, then open it again. |
+
+## Limitations
+
+- Anonymity, integrity and IP type are heuristics: a proxy can withhold or
+  forge headers.
+- Header and content checks need plain HTTP: HTTPS-only proxies and an HTTPS
+  judge yield no verdict.
+- The TLS check compares the `example.com` leaf certificate with a direct
+  connection; a legitimately different valid certificate (another CDN edge, a
+  rotation) is reported as `mod`.
+- ip-api and httpbin.org are shared public services with rate limits and
+  outages; for regular use a self-hosted judge is more reliable.
+- The dispatcher listens on `127.0.0.1` without authentication: any local
+  process can use the pool.
+- Webhook URLs, the ip-api key and the pool are stored unencrypted.
+- Builds are not code-signed; macOS builds are compile-checked only.
+
+## Security
+
+Vulnerability reporting is described in [SECURITY.md](SECURITY.md); working
+proxies, credentials and webhook URLs must not be posted in public issues.
+
+ProxPulse is a diagnostic tool, not a security boundary. Proxies are untrusted
+input: response sizes are capped, user-supplied URLs (webhooks, URL import)
+are restricted to public hosts with DNS pinning (webhooks follow no redirects,
+URL imports re-check every redirect), and credentials are sent to webhooks
+only over HTTPS on request. Updates are
+verified against the signing key embedded in the app.
+
+## Build from source
+
+Requirements: [Node.js](https://nodejs.org/) 22.12+, [Rust](https://rustup.rs/)
+1.90+, WebView2 on Windows (preinstalled on Windows 10/11), WebKitGTK and the
+packages below on Linux.
 
 <details>
-<summary>Системные зависимости Linux (Debian/Ubuntu)</summary>
+<summary>Linux build dependencies (Debian/Ubuntu)</summary>
 
 ```sh
 sudo apt update
@@ -72,343 +342,99 @@ sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
 </details>
 
 ```sh
-npm install           # или npm ci для установки строго по package-lock.json
-npm run tauri dev     # режим разработки
-npm run tauri build   # релизная сборка; нужен TAURI_SIGNING_PRIVATE_KEY
-npm run build:unsigned # локальная сборка без updater-артефактов и ключа
+npm ci
+npm run tauri dev        # development with hot reload
+npm run build:unsigned   # local release build without the updater key
 ```
 
-Релизная сборка подписывает updater-артефакты ключом из CI
-(`TAURI_SIGNING_PRIVATE_KEY`). Для локальной сборки без доступа к ключу
-используйте `npm run build:unsigned`: он отключает `createUpdaterArtifacts`
-и не пытается подписывать установщик. Такую сборку нельзя использовать для
-публикации обновлений — только для локального запуска/проверки.
+`npm run tauri build` signs updater artifacts and needs
+`TAURI_SIGNING_PRIVATE_KEY`, which only the release workflow has; builds from
+`build:unsigned` are for local use and are never published as updates.
 
-Проверки:
+Checks (the same ones CI runs, plus an MSRV build, a Windows bundle smoke
+test and `cargo audit`):
 
 ```sh
-npm run build         # tsc + vite build
-npm test              # vitest: пресеты, CSV, экспорт, i18n, гео-кэш, форматирование
-npm run lint          # ESLint
+npm run build && npm test && npm run lint && npm run check:versions
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-npm run check:versions
+cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-CI (`.github/workflows/ci.yml`) запускает эти проверки при push в `main`
-и при создании pull request, а также собирает release-бинарник без
-установщика (`npm run build:unsigned -- --no-bundle`), чтобы поймать
-несовпадения версий Tauri-пакетов и ошибки сборки.
+Releases follow [RELEASING.md](RELEASING.md).
 
-## Проверка (вкладка «Проверка»)
-
-Вставьте список в поле слева (по одному прокси на строку) и нажмите
-**Старт**. Результаты появляются по мере завершения проверок. Кнопка
-**Стоп** прерывает текущую проверку.
-
-### Поддерживаемые форматы
-
-Формат определяется автоматически; регистр схемы не важен:
-
-- `127.0.0.1:8080`, `proxy.example.com:8080`, `[2001:db8::1]:8080`
-- `user:pass@127.0.0.1:8080`
-- `http://…`, `https://…`
-- `socks5://…`, `socks5h://…`, `socks://…`
-- `socks4://…`, `socks4a://…`
-- `127.0.0.1:8080:user:pass` и обратный порядок `user:pass:127.0.0.1:8080`
-- `127.0.0.1:8080:socks5` (протокол суффиксом)
-- CSV, табы и пробелы: `127.0.0.1,8080,user,pass`
-- JSON: объект, массив или лог с полями `host`, `port`, `username`, `password`
-- Нумерованные списки (`1) …`, `- …`) и комментарии `# …`, `// …`
-
-Дубликаты удаляются автоматически. Список можно импортировать из любого
-текстового файла (TXT, CSV, JSON, LOG) или по URL: встроенный клиент
-загружает до 2 МБ и обрабатывает данные тем же парсером.
-
-> IPv6-адрес указывайте в квадратных скобках: `[2001:db8::1]:8080`.
-> Форма без скобок неоднозначна и не поддерживается.
-
-> `socks4` не поддерживает IPv6-литералы. Для IPv6 используйте `socks5`
-> или `socks4a`; в `socks4a` IPv6 передаётся как доменное имя (best effort,
-> поддержка зависит от прокси).
-
-### Сервер проверки
-
-Сервер выбирается в настройках проверки и бывает двух видов.
-
-**Публичный сервер** — готовый эндпоинт или свой URL:
-
-- `google generate_204`, `cloudflare generate_204` — быстрые, без тела;
-- `api.ipify.org`, `httpbin.org/ip` — показывают IP выхода;
-- `http://ip-api.com/json` — IP и геолокация одним запросом (free-tier только HTTP);
-- `example.com` — обычная страница;
-- **«Свой URL…»** — отдельный пункт списка: поле ввода появляется только при
-  его выборе и не перекрывает остальные варианты. Под списком показан
-  фактический URL, который уйдёт в проверку.
-
-**ProxPulse Judge** — собственный бэкенд для проверок. По умолчанию
-используется встроенный публичный инстанс `https://proxycheck.lmtunnel.com`;
-пункт «Свой сервер…» открывает поле для другого инстанса. Режимы: **Быстрая** (`/generate_204`) и **Полная**
-(`/judge` — геолокация, анонимность и тип IP в одном ответе, а также проверка
-целостности по хешу контента). В режиме Judge глубокие проверки не
-выполняются: их заменяет ответ Judge.
-
-> **Judge по HTTPS не определяет анонимность и целостность.** Запрос к
-> `https://` идёт внутри TLS-туннеля (CONNECT или SOCKS): прокси не видит его,
-> не может добавить `Via`/`X-Forwarded-For` или изменить ответ, поэтому любой
-> прокси выглядел бы `elite` и `ok`. В этом случае колонки «Анон» и
-> «Целостность» остаются пустыми (`—`), гео и тип IP по-прежнему заполняются.
-> Чтобы определять анонимность, укажите свой Judge по `http://`.
->
-> Judge по HTTP получает в параметре `direct_ip` ваш реальный IP: так он
-> замечает прокси, которые его пересылают. Judge по HTTPS этот параметр не
-> получает — определить утечку он всё равно не может.
-
-> **ip-api: бесплатный тариф и Pro.** Бесплатный ip-api работает только по
-> HTTP: запросы и ваш IP видны прокси и сети, ответ может быть изменён по
-> пути. Это осознанный компромисс; ответственность за использование
-> бесплатного HTTP-эндпоинта лежит на пользователе. Pro-тариф открывает
-> HTTPS и использует API-ключ (`https://pro.ip-api.com/...?key=...`,
-> страница Pro: <https://members.ip-api.com/>). Включите «ip-api Pro» и
-> укажите ключ в настройках проверки — тогда ip-api-запросы (и основной
-> тестовый URL, и глубокий гео-запрос) пойдут по HTTPS.
->
-> Запросы к ip-api выполняются **через проверяемый прокси**. По HTTPS прокси
-> не видит ни ключ, ни ответ, но ip-api получает ключ с адресов всех
-> проверяемых прокси. Используйте отдельный ключ для этого приложения;
-> IP-ограничения ключа при работе через прокси не помогут.
-> Ключ хранится локально в `localStorage` (как и URL вебхуков) и попадает
-> в экспорт только если вы сами его туда добавите. Не используйте
-> бесплатный тариф для коммерческих задач — это ограничение ip-api.
-
-### Настройки проверки
-
-| Параметр | По умолчанию | Описание |
-|---|---|---|
-| Таймаут | 5000 мс | лимит одного HTTP-запроса (1000–30000) |
-| Потоки | 50 | параллельных проверок (1–500) |
-| Замеры | 1 | повторов на прокси для пинга, джиттера и доли успешных запросов (1–5); каждый замер открывает новое соединение, поэтому пинг включает подключение к прокси |
-| Тип без схемы | HTTP | что подставлять, если схема не указана; режим HTTP + SOCKS5 проверяет оба варианта |
-| Предварительная проверка порта | включена, 1500 мс | быстрый TCP-коннект: неработающие прокси отсеиваются до полной проверки |
-
-Настройки объединены в пресеты: «Быстрая» (только живость), «Стандарт»
-(все глубокие проверки), «Глубокая» (ip-api и 3 замера) и «Judge»
-(встроенный Judge, полный режим). Пресет применяется одним кликом; ручная
-правка любого параметра снимает выделение. Свои пресеты сохраняются кнопкой
-«+ Сохранить» и удаляются крестиком. Таймаут, потоки, замеры, тип без схемы
-и пречек находятся в раскрывающемся блоке «Параметры».
-
-### Глубокие проверки (не используются в режиме Judge)
-
-- **Геолокация и тип IP** — ip-api: страна, город, ISP, ORG, ASN,
-  mobile/datacenter/residential.
-- **Анонимность** — `elite` / `anonymous` / `transparent`: эвристика по
-  заголовкам, которые видит `http://httpbin.org/headers?show_env=1`, и
-  сравнение с прямым IP.
-- **Целостность контента** — сравнение тела `http://example.com` с прямым
-  соединением (`ok` / `modified`).
-
-Анонимность и целостность проверяются **по обычному HTTP**: только так прокси
-видит запрос и может добавить свои заголовки или подменить ответ. Через
-`https://` прокси лишь туннелирует трафик, и такие проверки ничего бы не
-показали. Прокси, разрешающие только CONNECT на порт 443, эти проверки не
-проходят — колонка остаётся пустой.
-- **Целостность TLS** — сравнение SHA256 сертификата example.com с прямым
-  соединением (`ok` / `modified`).
-
-Каждая глубокая проверка выполняет дополнительные запросы через прокси,
-поэтому их можно отключать. В режиме Judge они не нужны: Judge возвращает
-данные самостоятельно.
-
-> **Ограничения публичных API.** ip-api (бесплатный тариф) ограничивает
-> число запросов в минуту, httpbin.org тоже периодически throttled. Чтобы
-> не заваливать ip-api при 500 потоках, одновременных гео-запросов не
-> больше 8; анонимность, целостность и TLS также ограничены по
-> параллельности. При перегрузке соответствующая глубокая проверка для
-> части прокси пропускается (запустите проверку ещё раз). Гео-кэш (до 2000 записей, TTL 6 часов) уменьшает
-> повторные запросы, но не заменяет собственный сервис. Для стабильной работы используйте
-> самохостируемый [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge).
-
-Глубокие проверки — эвристики. Если baseline-запрос не удался, анонимность
-может остаться пустой. TLS-проверка помечает `mod`, если сертификат был
-отклонён, и `n/v` (`unverified`), если рукопожатие не прошло по другой
-причине (например, прокси блокирует example.com:443).
-
-### Экспорт
-
-Меню **Экспорт**: `.txt` (нормализованные прокси, включая схему), `.json`
-(полные результаты), `.csv` (таблица с исходной строкой и `url`),
-**Скопировать**. Переключатель **«мёртвые»** определяет, включать ли
-неработающие прокси в экспорт. Сохранение выполняется через
-системный диалог.
-
-Под таблицей отображается спарклайн среднего пинга рабочих прокси по
-проверкам; история хранится локально.
-
-## Диспетчер (вкладка «Диспетчер»)
-
-Запускает локальный прокси на **127.0.0.1:1080** (порт по умолчанию) и
-направляет трафик через рабочие прокси из проверки. Один порт принимает
-**HTTP и SOCKS5** (протокол определяется по первому байту) или только
-выбранный протокол. Если порт занят, выбирается следующий свободный
-(+1, +2, …); фактический порт отображается в поле.
-
-- Режимы: **ротация**, **самый быстрый**, **замена при падении** (failover).
-  «Самый быстрый» делает одну попытку через лучший upstream; failover
-  перебирает до пяти; ротация выбирает upstream при установлении соединения.
-  HTTPS-туннель (CONNECT) идёт через один upstream до закрытия. Каждый
-  обычный HTTP-запрос получает `Connection: close` и своё соединение: только
-  так запрос к другому сайту не уйдёт в чужой туннель без авторизации.
-- Для SOCKS5-апстримов (`socks5://` и `socks5h://`) имя сайта резолвит сам
-  прокси, локальный DNS не видит посещаемые домены. `socks4://` не умеет
-  передавать имена — для него резолв локальный, используйте `socks4a://`.
-- Пул пополняется слиянием (старые записи сохраняются); кнопки
-  «Синхронизировать» и «Очистить пул» (с подтверждением); фильтр и сортировка
-  по пингу или стране.
-- **Макс. пинг** (задаётся на вкладке «Авто»): прокси медленнее лимита не
-  попадают в пул (`0` — без лимита).
-- Счётчики запросов и ошибок, текущий вышестоящий прокси, последняя ошибка.
-- Пул перепроверяется по расписанию из вкладки «Авто»; её статус виден и здесь.
-- Пул сохраняется на диск и восстанавливается после перезапуска приложения.
-
-## Авто (вкладка «Авто»)
-
-Одно расписание перепроверяет общий пул каждые N минут. Автопроверка
-облегчённая: живость, пинг и страна; гео запрашивается только для прокси
-без страны, а анонимность, целостность и TLS не проверяются (их результаты
-пулу не нужны). Прокси удаляется после двух неудачных автопроверок подряд.
-Если не ответил ни один прокси, приложение проверяет прямой доступ к серверу
-проверки: без него (нет сети, выход из сна) пул не меняется, а повтор
-выполняется через минуту. Автопроверка не выключает диспетчер, даже если пул
-опустел.
-
-С включённой опцией **«Отправлять после автопроверки»** пул после каждой
-проверки уходит POST-запросами на настроенные вебхуки (до 10, формат
-TXT/JSON/CSV). Кнопки «Проверить сейчас» и «Отправить сейчас» запускают
-действия вручную.
-
-Планировщик и отправка вебхуков работают в Rust-бэкенде, поэтому
-автопроверки продолжаются при свёрнутом в трей окне. Состояние вкл/выкл и
-интервал сохраняются; после перезапуска расписание восстанавливается из
-текущих настроек. Настройки двух прежних таймеров (диспетчер и авто)
-при первом запуске объединяются в одно расписание.
-
-По умолчанию логин/пароль прокси вырезаются из URL перед отправкой на
-вебхук. Опция **«Отправлять логин/пароль»** включает передачу credentials,
-но требует HTTPS; с `http://`-вебхуком отправка с credentials блокируется.
-
-Ответ вебхука с кодом не из диапазона 2xx показывается как ошибка.
-Вебхук должен указывать на публичный http(s)-хост: локальные и приватные
-адреса блокируются, редиректы не выполняются.
-
-## Инфо, трей и диагностика (вкладка «Инфо»)
-
-- Ссылки на GitHub: ProxPulse и ProxPulse Judge.
-- **Диагностика**: версия приложения, проверка обновлений через GitHub
-  Releases, установка с индикатором загрузки (после установки приложение
-  перезапускается), копирование отчёта (версия, ОС, тип установки,
-  счётчики, последние ошибки).
-- Кнопка ⇲ в шапке сворачивает окно в системный трей. В меню трея:
-  показать/скрыть окно, включить/выключить диспетчер с текущим портом,
-  время до следующей автопроверки, состояние вебхука, выход. Нажатие ЛКМ
-  по иконке показывает или скрывает окно.
-- Закрытие окна завершает приложение вместе с диспетчером и автопроверками.
-  Чтобы они работали в фоне, сверните окно в трей кнопкой ⇲.
-
-## Приватность и локальные данные
-
-При проверке наружу отправляются: запросы к выбранному тестовому URL;
-при включённых глубоких проверках — запросы к ip-api, httpbin и example.com;
-прямые запросы без прокси для эталонных значений (свой IP и эталон
-example.com) и для проверки связи, если в автопроверке не ответил ни один
-прокси; запросы к выбранному инстансу Judge; проверка релизов на
-GitHub; POST на настроенные вебхуки; загрузка списка по URL.
-
-Пароли прокси передаются самому прокси в рамках его протокола авторизации
-(HTTP `Proxy-Authorization` или SOCKS authentication). Они также попадают
-в экспорт (TXT/JSON/CSV/буфер обмена) и **только при явно включённой опции**
-— в вебхук. По умолчанию вебхук получает URL без credentials.
-
-Локально в браузере хранятся: язык, лимит пинга, URL вебхуков (могут
-содержать токены), ключ ip-api Pro (если задан), кэш геоданных (до 2000
-записей, ключи без credentials), последние ошибки, история пинга, текущие
-настройки проверки, состояние автопроверок и пресеты настроек. Очистка
-`localStorage` удаляет эти данные.
-
-Пул диспетчера хранится в файле `pool.json` в каталоге данных приложения
-(Windows: `%APPDATA%\com.nechel12.proxpulse`, Linux:
-`~/.local/share/com.nechel12.proxpulse`, macOS:
-`~/Library/Application Support/com.nechel12.proxpulse`). Файл содержит прокси
-**вместе с логинами и паролями**; в Linux и macOS он доступен только
-владельцу. Кнопка «Очистить» в пуле очищает и файл.
-
-## Безопасность
-
-Не публикуйте в issue рабочие прокси, пароли и другие секреты. Для сообщений
-об уязвимостях используйте приватный канал GitHub Security Advisories:
-[сообщить об уязвимости](https://github.com/nechel12/proxpulse/security/advisories/new).
-Подробнее — в [SECURITY.md](SECURITY.md).
-
-## Структура проекта
+## Project structure
 
 ```text
-index.html                         # разметка экранов
-src/main.ts                        # точка сборки UI и обработчики
-src/check-client.ts                # прогон проверок через Tauri Channel
-src/source-panel.ts                # ввод и импорт списка
-src/settings-panel.ts              # настройки проверки и ip-api Pro
-src/profiles.ts, profiles-panel.ts # пресеты настроек
-src/pool.ts                        # пул живых прокси
-src/results.ts, format.ts          # таблица результатов и форматирование
-src/csv.ts, export.ts              # экранирование и TXT/JSON/CSV-экспорт
-src/export-panel.ts                # диалог сохранения и копирование
-src/auto-settings.ts               # настройки автопроверок
-src/auto-status.ts, auto-events.ts # статус и события автопроверок
-src/webhooks.ts                    # панель вебхуков
-src/dispatch-monitor.ts            # монитор локального диспетчера
-src/updater.ts, info-panel.ts      # обновления и информация
-src/parse-runner.ts                # разбор списка через бэкенд
-src/geocache.ts, geo-store.ts      # кэш геоданных
-src/i18n.ts                        # словари RU/EN
-src/*.test.ts                      # тесты чистых модулей (vitest)
-src/styles.css                     # тёмная тема
-src-tauri/src/lib.rs               # точка входа бэкенда
-src-tauri/src/commands/*.rs        # команды Tauri (check, dispatch, auto, tray, ...)
-src-tauri/src/http.rs              # HTTP-клиенты, лимиты тел, гео
-src-tauri/src/extract.rs           # извлечение прокси из текста (единственный парсер)
-src-tauri/src/proxy.rs             # нормализация прокси
-src-tauri/src/transport.rs         # SOCKS/HTTP CONNECT и TLS до прокси
-src-tauri/src/tls.rs               # TLS-конфиг и отпечатки сертификатов
-src-tauri/src/netguard.rs          # SSRF-гард для пользовательских URL
-src-tauri/src/tests/*.rs           # тесты бэкенда
-src-tauri/src/main.rs              # точка входа приложения
-src-tauri/tauri.conf.json          # конфигурация Tauri
-src-tauri/Cargo.toml               # зависимости Rust
-eslint.config.js                   # ESLint
-.github/workflows/ci.yml           # тесты, clippy и проверка версий
-.github/workflows/release.yml      # релизные сборки и автообновление
-scripts/check-versions.mjs         # синхронизация версий
+index.html                          # screen markup
+src/main.ts                         # UI wiring
+src/check-client.ts                 # check runs over a Tauri channel
+src/source-panel.ts, parse-runner.ts # list input, import, backend parsing
+src/settings-panel.ts, profiles*.ts # check settings and presets
+src/results.ts, format.ts           # results table and formatting
+src/export*.ts, csv.ts              # TXT/JSON/CSV export
+src/pool.ts, dispatch-monitor.ts    # pool view and dispatcher status
+src/auto-*.ts, webhooks.ts          # schedule, its status and webhooks
+src/updater.ts, info-panel.ts       # updates and diagnostics
+src/geocache.ts, geo-store.ts       # geo cache
+src/i18n.ts                         # RU/EN strings
+src/*.test.ts                       # frontend tests (vitest)
+src-tauri/src/lib.rs                # backend entry, tray, shared types
+src-tauri/src/commands/*.rs         # Tauri commands: check, dispatch, auto, webhook, …
+src-tauri/src/extract.rs            # proxy extraction from text (the only parser)
+src-tauri/src/proxy.rs              # proxy normalization
+src-tauri/src/http.rs               # HTTP clients, body limits, deep-check probes
+src-tauri/src/transport.rs          # SOCKS/HTTP CONNECT and TLS to proxies
+src-tauri/src/tls.rs                # TLS config and certificate fingerprints
+src-tauri/src/netguard.rs           # guard for user-supplied URLs
+src-tauri/src/tests/*.rs            # backend tests
+.github/workflows/ci.yml            # checks on every push and PR
+.github/workflows/release.yml       # tagged release builds
 ```
 
-## Связанные проекты
+## Related projects
 
-- [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge) — самостоятельно
-  размещаемый бэкенд для проверок (Rust/axum, Docker). Публичный инстанс
-  используется в режиме Judge по умолчанию.
+- [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge) — self-hosted
+  check backend (Rust/axum, Docker): exit IP, anonymity, local geo/ASN and a
+  tamper check in one request. Its public instance is the default judge here.
 
-## Как помочь
+## Contributing
 
-Сообщения об ошибках и пул-реквесты приветствуются. В отчёте об ошибке
-укажите версию приложения, операционную систему и диагностику из вкладки
-«Инфо» — шаблон issue подскажет поля. Перед отправкой PR выполните все
-проверки из раздела «Сборка из исходников»; подробности — в
-[CONTRIBUTING.md](CONTRIBUTING.md), история изменений — в
-[CHANGELOG.md](CHANGELOG.md), правила общения — в
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Bug reports and pull requests are welcome. The development workflow is
+described in [CONTRIBUTING.md](CONTRIBUTING.md); participation implies
+agreement with the [Code of Conduct](CODE_OF_CONDUCT.md). Bug reports should
+include the version, OS and the diagnostics from the Info tab — the issue form
+asks for them. Security issues go through [SECURITY.md](SECURITY.md), not a
+public issue. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-Трекер задач: [Issues](https://github.com/nechel12/proxpulse/issues).
+## License
 
-## Лицензия
+The code is licensed under Apache-2.0; the license text is in
+[LICENSE](LICENSE). Third-party services used by the checks (ip-api,
+httpbin.org, example.com, public judge instances) have their own terms.
 
-Apache-2.0. См. [LICENSE](LICENSE).
+---
+
+## Support the project
+
+ProxPulse is free and open source. If it saves time, further development can
+be supported here:
+
+<p align="center">
+  <a href="https://boosty.to/nechel12/donate">
+    <img src="https://img.shields.io/badge/Boosty-Donate-F15F2C?style=for-the-badge&logo=boosty&logoColor=white" alt="Donate via Boosty">
+  </a>
+</p>
+
+### Crypto
+
+| Network | Address |
+|:--------|:--------|
+| **TRON** | `TMM2Cdm4tJx1nKRRq5RCBcdwfn9cHuJZy9` |
+| **TON** | `UQBlVvOfTleWn4pkY384mYWiGyhdHBryoC_N1Si1OSWAxPKl` |
+| **Bitcoin** | `bc1qagjtnutjya2rss3u3ls8ur7qk0u7zutc6t6fwc` |
+| **BNB Smart Chain** | `0x423aF840f67355371bf32480744A84069dfab5ff` |
+
+> [!WARNING]
+> Only the asset matching the specified network may be sent. Transfers to
+> another network cannot be recovered.
