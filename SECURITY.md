@@ -2,37 +2,78 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest release and the `main` branch.
-Older versions may not receive fixes.
+Security fixes are provided for the latest release (0.4.x) and `main` on a
+best-effort basis. Older versions are not supported; the built-in updater
+moves NSIS, AppImage and macOS installs to the latest release.
 
 ## Reporting a vulnerability
 
 Please use GitHub's private vulnerability reporting:
 
-https://github.com/nechel12/proxpulse/security/advisories/new
+1. Open the repository's **Security** tab.
+2. Choose **Report a vulnerability**
+   (`https://github.com/nechel12/proxpulse/security/advisories/new`).
+3. Include the ProxPulse version, the OS and install type (Info tab →
+   Diagnostics), a reproduction, and the impact.
 
-Do not open a public issue for security-sensitive reports.
+Do not open a public issue or include working proxies, proxy credentials,
+webhook URLs, API keys, or personal data; redact them from logs and
+screenshots. If private reporting is unavailable, open a minimal public issue
+asking the maintainer for a private channel without disclosing details.
 
-Please include:
+## What to expect
 
-- the ProxPulse version and operating system;
-- steps to reproduce the issue;
-- expected and actual behavior;
-- impact and any relevant logs.
-
-Do not include real proxy credentials, passwords, or other secrets. Redact them
-from logs and screenshots before submitting a report.
+- Acknowledgement within 7 days, best effort.
+- Triage and a fix/mitigation plan; timelines depend on severity.
+- No bug bounty.
+- Credit in the advisory if desired.
 
 ## Scope
 
-This policy covers the ProxPulse desktop application, its updater, and the
-local proxy dispatcher. Vulnerabilities in third-party dependencies should be
-reported upstream; if they affect ProxPulse, a private report is still welcome.
+In scope:
 
-## Webhooks
+- Parsing of proxy lists, imported files and URL imports; handling of
+  responses from checked proxies.
+- The guard for user-supplied URLs (webhooks, URL import): local and private
+  targets, DNS rebinding, redirects.
+- The local dispatcher: request parsing, upstream handling, header and
+  credential forwarding.
+- Handling of proxy credentials, webhook URLs and the ip-api key: exports,
+  webhook payloads, logs, the diagnostics report.
+- The WebView: CSP, Tauri capabilities and commands, injection through proxy
+  or server data.
+- The updater, release signing, and the CI/release workflows.
 
-Webhook URLs may contain secrets (tokens). Proxy credentials are stripped from
-webhook payloads by default; the "send credentials" option requires HTTPS.
-Treat webhook URLs as secrets and do not include them in reports.
+Out of scope:
 
-Reports are reviewed on a best-effort basis. There is no bug bounty program.
+- Accuracy of verdicts: anonymity, integrity and IP type are heuristics, and a
+  proxy can withhold or forge headers.
+- Behavior of the checked proxies and of third-party services (ip-api,
+  httpbin.org, example.com). Issues with a judge server belong to
+  [proxpulse-judge](https://github.com/nechel12/proxpulse-judge/security).
+- Attackers who already control the user's account: data in the WebView
+  storage and `pool.json` is stored unencrypted, and the dispatcher on
+  `127.0.0.1` accepts any local process, both by design and documented.
+- Missing code signing (SmartScreen, Gatekeeper warnings).
+- Social engineering, physical access, and denial of service against the
+  user's own machine.
+
+## Security model
+
+ProxPulse is a desktop tool that trusts its local user. Checked proxies, their
+responses, imported lists and judge responses are untrusted input: response
+bodies are size-capped and rendered escaped. User-supplied URLs may reach only
+public hosts, with DNS pinned per request: webhooks do not follow redirects,
+and every redirect of a URL import is checked like the original URL, so
+neither can be pointed at local services. Proxy credentials are sent to
+webhooks only when explicitly enabled and only over HTTPS. The dispatcher
+listens on loopback only. Updates are verified with the minisign public key
+embedded in the app, and release tags are protected against being moved or
+deleted.
+
+## Safe harbor
+
+Good-faith research on your own machine, proxies and judge instances is
+welcome. Do not test against the shared public judge instances or third-party
+services in a way that affects other users, and do not access data or systems
+you do not own. Follow applicable law.
