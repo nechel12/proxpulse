@@ -171,6 +171,11 @@ Anonymity and integrity use **plain HTTP**: only then does the proxy see the
 request and get a chance to add headers or change the response. Proxies that
 allow only CONNECT to port 443 cannot be classified this way.
 
+**Site access** requests the chosen sites (Google, YouTube, Telegram,
+Discord, ChatGPT or your own hosts and URLs, up to 8) through every alive
+proxy, also in Judge mode. Any HTTP answer counts as reachable; the **Sites**
+column shows how many opened and the tooltip lists each with its time.
+
 At most 8 geo lookups and 64 of each other deep check run at once, and geo
 pauses for a minute after ip-api answers 429. A check that hits a limit is
 skipped instead of waiting and marked **limit**. The geo cache (2000 entries,
@@ -204,15 +209,30 @@ are drawn. A click on a column header sorts by it (ascending, descending,
 off); the text filter (Ctrl+F) and the **Protocol**, **Anonymity** and
 **Country** menus narrow the list. A click selects a row, Ctrl+click and
 Shift+click select several, Ctrl+A selects all shown. Right-click opens
-actions for the selection: copy (with credentials), re-check, add the alive
-ones to the pool, remove from the list (also Delete). **Re-check dead** checks
-only the dead proxies again and updates their rows in place.
+actions for the selection: copy (with credentials), re-check, speed test, add
+the alive ones to the pool, remove from the list (also Delete). **Re-check
+dead** checks only the dead proxies again and updates their rows in place.
+
+- **Grouping** keeps the fastest proxy per exit IP or per ASN; proxies sharing
+  an exit IP are marked with ×N in the Info column.
+- **Speed test** downloads 1–25 MB (set under the check parameters) from
+  `speed.cloudflare.com` through up to three proxies at a time and shows
+  Mbit/s, with the connect, TLS and first-byte times in the tooltip.
+- **Uptime** is the share of checks, manual and scheduled, in which the proxy
+  was alive; the tooltip adds the check count, the last time it was alive and
+  its average ping. The pool can be sorted by reliability, which trusts few
+  checks less.
 
 ### Export
 
 **Export** saves `.txt` (normalized proxy URLs), `.json` (full results) or
 `.csv` (table with the original line and URL) through the system dialog, or
-copies the list. The **dead** toggle includes unavailable proxies. A sparkline
+copies the list. Configs for proxy clients are exported too, fastest first:
+Clash (`url-test` group; no SOCKS4), sing-box (`urltest` outbound), a
+Proxifier profile whose default rule uses the fastest proxy (no HTTPS
+proxies), and a PAC file (up to 50 proxies, then `DIRECT`; PAC cannot carry
+logins). **By template** writes one line per proxy from placeholders such as
+`{scheme}://{user}:{pass}@{host}:{port}`. The **dead** toggle includes unavailable proxies. A sparkline
 under the toolbar shows the average ping of alive proxies across checks.
 
 ## Dispatcher
@@ -236,6 +256,18 @@ and SOCKS5 (detected from the first byte), or only the selected protocol.
 - Request and error counters, the current upstream and the last error are
   shown live.
 
+**Filter, sessions and login** apply at once and are kept for the next
+start:
+
+- **Upstream countries** — only proxies from these countries (codes or names
+  as shown in the pool); empty — all.
+- **Sticky session** — one upstream per site for N minutes, so logins and
+  carts do not jump between exit IPs.
+- An upstream that fails to connect is paused for a minute (the **Paused**
+  counter) unless no other is left.
+- **Login** — local clients must authenticate: HTTP `Proxy-Authorization:
+  Basic` (the browser asks) or SOCKS5 username/password.
+
 ## Scheduled checks and webhooks
 
 The **Auto** tab re-checks the shared pool every N minutes:
@@ -248,11 +280,21 @@ The **Auto** tab re-checks the shared pool every N minutes:
   waking from sleep), the pool is left unchanged and the check is retried in a
   minute; a check crowded out by a manual one is retried the same way.
 - Scheduled checks never stop the dispatcher.
+- **Subscriptions** — up to 10 proxy list URLs are downloaded before every
+  scheduled check; proxies not in the pool yet are checked with it, and the
+  alive ones join it. The status shows how many each list had and how many
+  were new.
 
 With **Send after each auto-check**, the pool is POSTed to up to 10 webhooks
-as TXT, JSON or CSV. Credentials are stripped unless **Send credentials** is
-on, which requires an `https://` webhook. Webhooks must be public hosts;
-redirects are not followed, and a non-2xx answer is shown as an error.
+as TXT, JSON, CSV, a Telegram or Discord message, or a custom template
+(`{count}`, `{time}`, `{proxies}`, `{proxies_json}`, `{added}`, `{removed}`
+and more; a template starting with `{` or `[` is sent as JSON). **Changes
+only** sends just the added and removed proxies, and nothing when the pool did
+not change. A scheduled delivery that hits a network error, 429 or 5xx is
+retried after 5 and 20 seconds. Credentials are stripped unless **Send
+credentials** is on, which requires an `https://` webhook. Webhooks must be
+public hosts; redirects are not followed, and a non-2xx answer is shown as an
+error.
 
 The scheduler and webhooks run in the backend, so they keep working while the
 window is in the tray.
@@ -269,13 +311,13 @@ The **Settings** tab holds the app-wide options:
   pool is not empty.
 - **Updates and notifications**: the version and **Check for updates**, a
   quiet check at launch, and system notifications while the window is hidden:
-  a scheduled webhook delivery failed, the pool became empty, an update is
-  out.
+  a scheduled webhook delivery failed, the pool fell below a threshold,
+  scheduled checks found no network, an update is out.
 - **Data**: export, import and reset of the settings as a JSON file (it holds
-  webhook URLs and the ip-api key, and the pool with its credentials only when
-  you choose so on export); **Copy** puts a diagnostics
+  webhook URLs, the ip-api key and the dispatcher login, and the pool with its
+  credentials only when you choose so on export); **Copy** puts a diagnostics
   report (version, OS, install type, counters, recent errors) on the clipboard
-  for bug reports; the error log.
+  for bug reports; the error log; clearing the proxy history.
 
 **⇲** hides the window to the tray. The tray menu shows or hides the window,
 toggles the dispatcher and shows the next scheduled check and the webhook
@@ -293,7 +335,8 @@ httpbin.org and example.com when deep checks are on; direct (no proxy)
 baselines — your IP and the example.com reference — and a connectivity check
 when a scheduled check finds no alive proxy; the selected judge; GitHub
 Releases (update check, also at launch unless turned off); configured
-webhooks; URL imports.
+webhooks; URL imports and subscriptions; the chosen sites through each alive
+proxy; `speed.cloudflare.com` through the proxies of a speed test.
 
 Proxy credentials go to the proxy itself (HTTP `Proxy-Authorization` or SOCKS
 authentication), into exports, and to webhooks only with **Send credentials**.
@@ -307,8 +350,9 @@ Stored locally:
   `~/.local/share/com.nechel12.proxpulse`,
   `~/Library/Application Support/com.nechel12.proxpulse`): the pool **with
   usernames and passwords**, owner-only on Linux and macOS. **Clear pool**
-  clears it. `prefs.json` next to it holds the startup options and the last
-  dispatcher port, mode and listener.
+  clears it. `prefs.json` next to it holds the startup options and the
+  dispatcher settings, including its login password, and `history.json` the
+  per-proxy history (URLs without credentials).
 - Starting with the system adds a login item: the `Run` registry key on
   Windows, a LaunchAgent on macOS, a `.desktop` file in `~/.config/autostart`
   on Linux. Turning the option off removes it.
@@ -414,6 +458,9 @@ src/auto-*.ts, webhooks.ts          # schedule, its status and webhooks
 src/app-settings.ts, settings-io.ts # Settings tab, settings export/import
 src/theme.ts, notify.ts             # theme and system notifications
 src/updater.ts, info-panel.ts       # updates and diagnostics
+src/export-configs.ts               # Clash, sing-box, Proxifier, PAC, templates
+src/sites.ts, speed-client.ts       # site access and speed test
+src/history.ts, subscriptions.ts    # per-proxy history, list subscriptions
 src/geocache.ts, geo-store.ts       # geo cache
 src/i18n.ts                         # RU/EN strings
 src/*.test.ts                       # frontend tests (vitest)

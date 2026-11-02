@@ -6,6 +6,30 @@ All notable changes to ProxPulse. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Exports for proxy clients: Clash (YAML), sing-box (JSON), a Proxifier
+  profile and a PAC file, and export by a custom line template.
+- Site access: chosen sites (Google, YouTube, Telegram, Discord, ChatGPT or
+  your own) are requested through every alive proxy, with a Sites column and
+  filter.
+- Speed test from the results context menu: download speed through the proxy
+  with the connect, TLS and first-byte times.
+- Per-proxy history (`history.json`): an Uptime column with the last time a
+  proxy was alive, and a pool sort by reliability. The history can be cleared
+  in Settings.
+- Grouping by exit IP or ASN keeps one proxy per group; proxies sharing an exit
+  IP are marked with ×N.
+- Subscriptions: proxy list URLs downloaded before every scheduled check; new
+  alive proxies join the pool.
+- Webhooks: Telegram and Discord formats, a custom body template, change-only
+  delivery after scheduled checks, and two retries for scheduled deliveries.
+- Dispatcher: an upstream country filter, sticky sessions per site, a
+  one-minute pause for upstreams that fail to connect, and an optional login
+  for local clients (HTTP Basic and SOCKS5 username/password).
+- Notifications when a scheduled check leaves fewer proxies than a threshold,
+  and once when scheduled checks find no network.
+
 ## [0.5.0] — 2026-11-01
 
 ### Security

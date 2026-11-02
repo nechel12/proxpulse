@@ -37,7 +37,7 @@ In scope:
 - The guard for user-supplied URLs (webhooks, URL import): local and private
   targets, DNS rebinding, redirects.
 - The local dispatcher: request parsing, upstream handling, header and
-  credential forwarding.
+  credential forwarding, the optional login for local clients.
 - Handling of proxy credentials, webhook URLs and the ip-api key: exports,
   webhook payloads, logs, the diagnostics report, the settings file.
 - The WebView: CSP, Tauri capabilities and commands, injection through proxy
@@ -52,8 +52,9 @@ Out of scope:
   httpbin.org, example.com). Issues with a judge server belong to
   [proxpulse-judge](https://github.com/nechel12/proxpulse-judge/security).
 - Attackers who already control the user's account: data in the WebView
-  storage and `pool.json` is stored unencrypted, and the dispatcher on
-  `127.0.0.1` accepts any local process, both by design and documented.
+  storage, `pool.json`, `prefs.json` and `history.json` is stored
+  unencrypted, and the dispatcher on `127.0.0.1` accepts any local process
+  unless a login is set, both by design and documented.
 - Missing code signing (SmartScreen, Gatekeeper warnings).
 - Social engineering, physical access, and denial of service against the
   user's own machine.
