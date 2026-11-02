@@ -3,6 +3,7 @@ import { deadStub } from "./check-client.ts";
 import {
   NO_FILTERS,
   defaultOrder,
+  exitIpCounts,
   filterOptions,
   filterResults,
   mergeResults,
@@ -86,5 +87,21 @@ describe("visibleRange", () => {
     expect(visibleRange(29_990, 300, 30, 1000, 5)).toEqual([994, 1000]);
     expect(visibleRange(0, 0, 30, 3, 5)).toEqual([0, 3]);
     expect(visibleRange(0, 300, 30, 0, 5)).toEqual([0, 0]);
+  });
+});
+
+describe("exit IP and ASN grouping", () => {
+  const a = alive("1.0.0.1:80", { ip: "9.9.9.9", asn: "AS100 Host", latency_ms: 300 });
+  const b = alive("1.0.0.2:80", { ip: "9.9.9.9", asn: "AS100 Host", latency_ms: 100 });
+  const c = alive("1.0.0.3:80", { ip: "8.8.8.8", asn: "AS100 Host", latency_ms: 200 });
+  const rows = [a, b, c, dead];
+
+  it("keeps the fastest alive proxy per group in the original order", () => {
+    expect(filterResults(rows, { ...NO_FILTERS, dedupe: "ip" })).toEqual([b, c]);
+    expect(filterResults(rows, { ...NO_FILTERS, dedupe: "asn" })).toEqual([b]);
+  });
+
+  it("counts alive proxies per exit IP", () => {
+    expect(exitIpCounts(rows)).toEqual(new Map([["9.9.9.9", 2], ["8.8.8.8", 1]]));
   });
 });

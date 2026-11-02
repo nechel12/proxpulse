@@ -15,9 +15,13 @@ export type ResultFilters = {
   /** "elite", "anonymous", "transparent", "unknown" or "" for any. */
   anon: string;
   country: string;
+  /** Keep only the fastest alive proxy per exit IP or per ASN. */
+  dedupe: Dedupe;
 };
 
-export const NO_FILTERS: ResultFilters = { status: "all", query: "", proto: "", anon: "", country: "" };
+export type Dedupe = "" | "ip" | "asn";
+
+export const NO_FILTERS: ResultFilters = { status: "all", query: "", proto: "", anon: "", country: "", dedupe: "" };
 
 export function countryOf(r: ProxyResult): string {
   return r.country ?? r.country_code ?? "";
@@ -25,7 +29,7 @@ export function countryOf(r: ProxyResult): string {
 
 export function filterResults(results: ProxyResult[], f: ResultFilters): ProxyResult[] {
   const q = f.query.toLowerCase().trim();
-  return results.filter((r) => {
+  const rows = results.filter((r) => {
     if (f.status === "alive" && !r.alive) return false;
     if (f.status === "dead" && r.alive) return false;
     if (f.proto && r.proto !== f.proto) return false;
@@ -37,6 +41,34 @@ export function filterResults(results: ProxyResult[], f: ResultFilters): ProxyRe
     }
     return true;
   });
+  return f.dedupe ? onePerGroup(rows, f.dedupe) : rows;
+}
+
+function groupKey(r: ProxyResult, by: Exclude<Dedupe, "">): string | null {
+  if (!r.alive) return null;
+  return (by === "ip" ? r.ip : r.asn?.split(/\s/)[0]) || null;
+}
+
+/** The fastest alive proxy of each exit IP or ASN, in the original order. */
+export function onePerGroup(rows: ProxyResult[], by: Exclude<Dedupe, "">): ProxyResult[] {
+  const best = new Map<string, ProxyResult>();
+  for (const r of rows) {
+    const key = groupKey(r, by);
+    if (!key) continue;
+    const cur = best.get(key);
+    if (!cur || (r.latency_ms ?? 1e12) < (cur.latency_ms ?? 1e12)) best.set(key, r);
+  }
+  const keep = new Set(best.values());
+  return rows.filter((r) => keep.has(r));
+}
+
+/** How many alive proxies share each exit IP. */
+export function exitIpCounts(results: ProxyResult[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const r of results) {
+    if (r.alive && r.ip) counts.set(r.ip, (counts.get(r.ip) ?? 0) + 1);
+  }
+  return counts;
 }
 
 const ANON_RANK: Record<string, number> = { elite: 0, anonymous: 1, transparent: 2 };

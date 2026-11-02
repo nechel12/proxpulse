@@ -10,10 +10,12 @@ import {
   tlsShort,
 } from "./format.ts";
 import {
+  exitIpCounts,
   filterOptions,
   filterResults,
   nextSort,
   sortResults,
+  type Dedupe,
   type ResultFilter,
   type Sort,
   type SortKey,
@@ -45,6 +47,7 @@ export class ResultsView {
   private virtual: VirtualRows<ProxyResult> | null = null;
   private t: Translate = (k) => k;
   private optionsKey = "";
+  private shared = new Map<string, number>();
   private deps: Deps | null = null;
 
   init(deps: Deps): void {
@@ -61,7 +64,7 @@ export class ResultsView {
         deps.onChange();
       });
     });
-    for (const id of ["f-proto", "f-anon", "f-country"]) {
+    for (const id of ["f-proto", "f-anon", "f-country", "f-dedupe"]) {
       $(id)?.addEventListener("change", () => {
         this.clearSelection();
         wrap.scrollTop = 0;
@@ -144,6 +147,7 @@ export class ResultsView {
     if (!visible()) return;
     this.updateOptions(results);
     this.renderSortState();
+    this.shared = exitIpCounts(results);
     const body = $<HTMLTableSectionElement>("tbody");
     if (!body || !this.virtual) return;
     this.rows = sortResults(filterResults(results, {
@@ -152,6 +156,7 @@ export class ResultsView {
       proto: $<HTMLSelectElement>("f-proto")?.value ?? "",
       anon: $<HTMLSelectElement>("f-anon")?.value ?? "",
       country: $<HTMLSelectElement>("f-country")?.value ?? "",
+      dedupe: ($<HTMLSelectElement>("f-dedupe")?.value ?? "") as Dedupe,
     }), this.sort);
     if (this.rows.length === 0) {
       this.virtual.set([]);
@@ -261,7 +266,10 @@ export class ResultsView {
       r.tamper === "modified" ? `<span class="anon-trans" title="tamper">?mod</span>` : "",
       r.tls === "modified" ? `<span class="anon-trans" title="tls">?tls</span>` : "",
     ].join(" ");
-    const info = r.alive ? `${escapeHtml(r.ip ?? "ok")} ${marks}` : escapeHtml(r.error ?? "fail");
+    // Several "different" proxies often leave through one exit IP.
+    const same = r.ip ? this.shared.get(r.ip) ?? 0 : 0;
+    const shared = same > 1 ? ` <span class="geo-tag" title="${escapeHtml(t("same_ip_t", { n: same }))}">×${same}</span>` : "";
+    const info = r.alive ? `${escapeHtml(r.ip ?? "ok")}${shared} ${marks}` : escapeHtml(r.error ?? "fail");
     const infoTitle = escapeHtml(rowTitle(r));
     // An empty cell for a stage skipped at its limit gets an explanation
     // instead of looking like "no data".
