@@ -17,6 +17,8 @@ export const SETTINGS_KEYS = [
   "pp-webhooks",
   "pp-webhook-format",
   "pp-webhook-creds",
+  "pp-webhook-changes",
+  "pp-webhook-template",
   "pp-ipapi-key",
   "pp-ipapi-pro",
   "pp-export-template",

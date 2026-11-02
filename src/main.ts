@@ -136,6 +136,7 @@ function applyI18n() {
   renderNet();
   refreshStatusTexts();
   dispatchMonitor.renderPill(t);
+  webhooks.renderFormat(t);
   void updateTray();
 }
 
@@ -916,6 +917,17 @@ window.addEventListener("DOMContentLoaded", () => {
   loadAutoSettings();
   if (!settings.loadCurrentSettings()) profiles.currentId = "builtin:standard";
   ($("chk-webhook-creds") as HTMLInputElement).checked = webhooks.includeCreds;
+  ($("chk-webhook-changes") as HTMLInputElement).checked = webhooks.changesOnly;
+  ($("chk-webhook-changes") as HTMLInputElement).addEventListener("change", (e) => {
+    webhooks.changesOnly = (e.target as HTMLInputElement).checked;
+    webhooks.saveOptions();
+  });
+  const tpl = $<HTMLTextAreaElement>("webhook-template");
+  tpl.value = webhooks.template;
+  tpl.addEventListener("input", () => {
+    webhooks.template = tpl.value;
+    webhooks.saveOptions();
+  });
   ($("chk-webhook-creds") as HTMLInputElement).addEventListener("change", (e) => {
     webhooks.includeCreds = (e.target as HTMLInputElement).checked;
     webhooks.saveCreds();
@@ -948,6 +960,7 @@ window.addEventListener("DOMContentLoaded", () => {
   ($("webhook-format") as HTMLSelectElement).addEventListener("change", () => {
     saveAutoSettings();
     scheduleAutoConfig();
+    webhooks.renderFormat(t);
   });
   void listen<AutoStatusEvent>("auto://status", (e) => {
     autoStatus.handle(e.payload);

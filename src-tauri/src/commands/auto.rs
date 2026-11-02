@@ -2,7 +2,9 @@ use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckConfi
 use crate::commands::dispatch::{
     pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
 };
-use crate::commands::webhook::send_webhooks_inner;
+use crate::commands::webhook::{
+    send_webhooks_inner, Delivery, SentLists, WebhookOptions, TEMPLATE_MAX, WEBHOOK_FORMATS,
+};
 use crate::{epoch_secs, strip_credentials, GeoCacheEntry, ProxyResult, WebhookResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +30,10 @@ pub(crate) struct AutoSettings {
     webhook_urls: Vec<String>,
     webhook_format: String,
     webhook_include_credentials: bool,
+    /// Body for the "template" webhook format.
+    webhook_template: String,
+    /// Send only what changed since the last delivery to each URL.
+    webhook_changes_only: bool,
     check: CheckConfig,
 }
 
@@ -41,6 +47,8 @@ impl Default for AutoSettings {
             webhook_urls: Vec::new(),
             webhook_format: "txt".to_string(),
             webhook_include_credentials: false,
+            webhook_template: String::new(),
+            webhook_changes_only: false,
             check: CheckConfig::default(),
         }
     }
@@ -51,6 +59,8 @@ pub(crate) struct AutoInner {
     /// Unix time of the next scheduled check, 0 when the schedule is off.
     pub(crate) next: AtomicU64,
     pub(crate) running: Arc<AtomicBool>,
+    /// Lists last delivered to each webhook, for change-only delivery.
+    pub(crate) sent: SentLists,
 }
 
 pub(crate) struct AutoState {
@@ -64,6 +74,7 @@ impl Default for AutoState {
                 settings: Mutex::new(AutoSettings::default()),
                 next: AtomicU64::new(0),
                 running: Arc::new(AtomicBool::new(false)),
+                sent: SentLists::default(),
             }),
         }
     }
@@ -341,11 +352,21 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
                         country: p.country.clone(),
                     })
                     .collect();
+                let opts = WebhookOptions {
+                    format: settings.webhook_format.clone(),
+                    include_credentials: settings.webhook_include_credentials,
+                    template: settings.webhook_template.clone(),
+                };
+                let delivery = Delivery {
+                    retry: true,
+                    changes_only: settings.webhook_changes_only,
+                    sent: Some(&auto.inner.sent),
+                };
                 let results = send_webhooks_inner(
                     &settings.webhook_urls,
-                    &settings.webhook_format,
-                    settings.webhook_include_credentials,
+                    &opts,
                     Arc::new(webhook_items),
+                    delivery,
                 )
                 .await;
                 let _ = app.emit("auto://webhook", AutoWebhookPayload { results });
@@ -399,11 +420,10 @@ fn sanitize_auto_settings(mut s: AutoSettings) -> AutoSettings {
     if s.check.test_url.is_empty() {
         s.check.test_url = CheckConfig::default().test_url;
     }
-    s.webhook_format = match s.webhook_format.as_str() {
-        "json" => "json".to_string(),
-        "csv" => "csv".to_string(),
-        _ => "txt".to_string(),
-    };
+    if !WEBHOOK_FORMATS.contains(&s.webhook_format.as_str()) {
+        s.webhook_format = "txt".to_string();
+    }
+    crate::http::truncate_utf8(&mut s.webhook_template, TEMPLATE_MAX);
     s.webhook_urls = s
         .webhook_urls
         .into_iter()

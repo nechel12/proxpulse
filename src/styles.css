@@ -475,3 +475,8 @@ tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--red); }
 }
 .menu-sep { height: 1px; margin: 5px 4px; background: var(--line); }
 .set-num { min-width: 0; width: 100px; }
+.tpl-input {
+  background: var(--field); border: 1px solid var(--line); color: var(--txt); border-radius: 8px;
+  padding: 8px 10px; font-family: var(--mono); font-size: 12px; resize: vertical; outline: none;
+}
+.tpl-input:focus { border-color: var(--red); }

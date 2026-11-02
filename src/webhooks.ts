@@ -16,9 +16,15 @@ export function formatWebhookResults(results: WebhookResult[], t: Translate): st
     .join(" | ");
 }
 
+/** Example body for the "template" format. */
+export const DEFAULT_TEMPLATE = `{"count": {count}, "time": "{time}", "proxies": {proxies_json}}`;
+
 export class WebhookPanel {
   urls: string[] = [""];
   includeCreds = false;
+  /** Scheduled sends carry only additions and removals. */
+  changesOnly = false;
+  template = DEFAULT_TEMPLATE;
   private sending = false;
 
   constructor(private onChange: () => void) {}
@@ -26,6 +32,8 @@ export class WebhookPanel {
   load(): void {
     try {
       this.includeCreds = localStorage.getItem("pp-webhook-creds") === "1";
+      this.changesOnly = localStorage.getItem("pp-webhook-changes") === "1";
+      this.template = localStorage.getItem("pp-webhook-template") ?? DEFAULT_TEMPLATE;
     } catch {
       this.includeCreds = false;
     }
@@ -45,6 +53,25 @@ export class WebhookPanel {
     try {
       localStorage.setItem("pp-webhook-creds", this.includeCreds ? "1" : "0");
     } catch { /* ignore */ }
+  }
+
+  saveOptions(): void {
+    try {
+      localStorage.setItem("pp-webhook-changes", this.changesOnly ? "1" : "0");
+      localStorage.setItem("pp-webhook-template", this.template);
+    } catch { /* ignore */ }
+    this.onChange();
+  }
+
+  /** Show the template field and the URL hint for the selected format. */
+  renderFormat(t: Translate): void {
+    const format = (document.getElementById("webhook-format") as HTMLSelectElement | null)?.value ?? "txt";
+    document.getElementById("webhook-template-wrap")?.classList.toggle("hidden", format !== "template");
+    const hint = document.getElementById("webhook-format-hint");
+    if (!hint) return;
+    const key = format === "telegram" ? "webhook_tg_hint" : format === "discord" ? "webhook_dc_hint" : format === "template" ? "webhook_tpl_hint" : "";
+    hint.classList.toggle("hidden", !key);
+    hint.textContent = key ? t(key) : "";
   }
 
   saveUrls(): void {
@@ -115,6 +142,7 @@ export class WebhookPanel {
         format,
         items,
         includeCredentials: this.includeCreds,
+        template: this.template,
       });
       setStatus("webhook-status", () => formatWebhookResults(results, t));
     } catch (e) {

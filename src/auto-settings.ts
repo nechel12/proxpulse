@@ -5,12 +5,15 @@ import { logErr } from "./diagnostics.ts";
 type Deps = {
   readCheckSettings: () => CheckSettings;
   maxPingMs: () => number;
-  webhooks: { getUrls(): string[]; includeCreds: boolean };
+  webhooks: { getUrls(): string[]; includeCreds: boolean; template: string; changesOnly: boolean };
   saveCurrentSettings: () => void;
   updateTray: () => Promise<void>;
 };
 
 type KeyStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/** Webhook body formats (`WEBHOOK_FORMATS` in webhook.rs). */
+export const WEBHOOK_FORMATS = ["txt", "json", "csv", "telegram", "discord", "template"];
 
 export function clampMinutes(v: unknown, fallback = 30): number {
   return Math.max(1, Math.min(1440, Math.floor(Number(v) || fallback)));
@@ -56,7 +59,7 @@ export class AutoSettingsStore {
       if (min && minEl) minEl.value = String(clampMinutes(min));
       const fmt = localStorage.getItem("pp-webhook-format");
       const fmtEl = document.getElementById("webhook-format") as HTMLSelectElement | null;
-      if (fmtEl && (fmt === "txt" || fmt === "json" || fmt === "csv")) fmtEl.value = fmt;
+      if (fmtEl && fmt && WEBHOOK_FORMATS.includes(fmt)) fmtEl.value = fmt;
     } catch {
       this.enabled = false;
       this.sendWebhooks = true;
@@ -108,6 +111,8 @@ export class AutoSettingsStore {
       webhookUrls: this.deps.webhooks.getUrls(),
       webhookFormat: fmt?.value ?? "txt",
       webhookIncludeCredentials: this.deps.webhooks.includeCreds,
+      webhookTemplate: this.deps.webhooks.template,
+      webhookChangesOnly: this.deps.webhooks.changesOnly,
       check: this.deps.readCheckSettings(),
     };
   }
