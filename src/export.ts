@@ -18,7 +18,7 @@ export function withExtension(path: string, ext: string): string {
 }
 
 export function buildCsv(list: ProxyResult[]): string {
-  const head = ["proxy", "url", "proto", "alive", "latency_ms", "jitter_ms", "success_rate", "attempts", "ip", "country_code", "country", "city", "isp", "org", "asn", "ip_type", "anonymity", "tamper", "tls", "tls_info", "error"];
+  const head = ["proxy", "url", "proto", "alive", "latency_ms", "jitter_ms", "success_rate", "attempts", "ip", "country_code", "country", "city", "isp", "org", "asn", "ip_type", "anonymity", "tamper", "tls", "tls_info", "error", "sites", "speed_mbps"];
   const lines = [head.join(",")];
   for (const r of list) {
     lines.push([
@@ -27,6 +27,8 @@ export function buildCsv(list: ProxyResult[]): string {
       r.country_code ?? "", r.country ?? "", r.city ?? "", r.isp ?? "", r.org ?? "",
       r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tamper ?? "",
       r.tls ?? "", r.tls_info ?? "", r.error ?? "",
+      (r.sites ?? []).map((s) => `${s.url} ${s.ok ? "ok" : "fail"}`).join("; "),
+      r.speed?.ok && r.speed.mbps != null ? r.speed.mbps : "",
     ].map(csvCell).join(","));
   }
   return lines.join("\n");

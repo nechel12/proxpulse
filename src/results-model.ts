@@ -1,10 +1,11 @@
 // Pure helpers for the results table: filtering, column sorting and merging
 // re-checked entries.
 
+import { siteHost } from "./sites.ts";
 import type { ProxyResult } from "./types.ts";
 
 export type ResultFilter = "all" | "alive" | "dead";
-export type SortKey = "proxy" | "proto" | "status" | "ping" | "stab" | "anon" | "geo" | "iptype" | "tls" | "info";
+export type SortKey = "proxy" | "proto" | "status" | "ping" | "stab" | "anon" | "geo" | "iptype" | "tls" | "sites" | "speed" | "info";
 export type SortDir = "asc" | "desc";
 export type Sort = { key: SortKey; dir: SortDir } | null;
 
@@ -17,11 +18,13 @@ export type ResultFilters = {
   country: string;
   /** Keep only the fastest alive proxy per exit IP or per ASN. */
   dedupe: Dedupe;
+  /** Host of a site the proxy must open, or "" for any. */
+  site: string;
 };
 
 export type Dedupe = "" | "ip" | "asn";
 
-export const NO_FILTERS: ResultFilters = { status: "all", query: "", proto: "", anon: "", country: "", dedupe: "" };
+export const NO_FILTERS: ResultFilters = { status: "all", query: "", proto: "", anon: "", country: "", dedupe: "", site: "" };
 
 export function countryOf(r: ProxyResult): string {
   return r.country ?? r.country_code ?? "";
@@ -35,6 +38,7 @@ export function filterResults(results: ProxyResult[], f: ResultFilters): ProxyRe
     if (f.proto && r.proto !== f.proto) return false;
     if (f.anon && (r.anonymity ?? "unknown") !== f.anon) return false;
     if (f.country && countryOf(r) !== f.country) return false;
+    if (f.site && !(r.sites ?? []).some((s) => s.ok && siteHost(s.url) === f.site)) return false;
     if (q) {
       const hay = [r.proxy, r.proto, r.error ?? "", r.ip ?? "", r.country ?? "", r.country_code ?? "", r.city ?? "", r.isp ?? "", r.org ?? "", r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tls ?? ""].join(" ").toLowerCase();
       if (!hay.includes(q)) return false;
@@ -85,6 +89,8 @@ function sortValue(r: ProxyResult, key: SortKey): string | number | null {
     case "geo": return countryOf(r).toLowerCase() || null;
     case "iptype": return r.ip_type;
     case "tls": return r.tls;
+    case "sites": return r.sites?.length ? r.sites.filter((s) => s.ok).length : null;
+    case "speed": return r.speed?.ok ? r.speed.mbps : null;
     case "info": return r.alive ? r.ip : r.error;
   }
 }
@@ -127,17 +133,20 @@ export function mergeResults(base: ProxyResult[], updates: ProxyResult[]): Proxy
 }
 
 /** Distinct values for the filter menus, most frequent first. */
-export function filterOptions(results: ProxyResult[]): { proto: string[]; country: [string, number][] } {
+export function filterOptions(results: ProxyResult[]): { proto: string[]; country: [string, number][]; site: string[] } {
   const protos = new Map<string, number>();
   const countries = new Map<string, number>();
+  const sites = new Set<string>();
   for (const r of results) {
     protos.set(r.proto, (protos.get(r.proto) ?? 0) + 1);
     const c = countryOf(r);
     if (c) countries.set(c, (countries.get(c) ?? 0) + 1);
+    for (const s of r.sites ?? []) sites.add(siteHost(s.url));
   }
   return {
     proto: [...protos.keys()].sort(),
     country: [...countries.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+    site: [...sites].sort(),
   };
 }
 

@@ -1,10 +1,11 @@
 use crate::commands::check::{
-    candidate_budget, dead_result, is_tls_target, wants_direct_ip, CheckFlags,
+    candidate_budget, dead_result, is_tls_target, wants_direct_ip, CheckConfig, CheckFlags,
 };
 use crate::tls::{cert_fp_hex, is_cert_error, tls_client_config};
 use crate::*;
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
+use std::sync::Arc;
 use std::time::Duration;
 
 fn headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -37,6 +38,7 @@ fn direct_ip_is_requested_only_where_a_leak_is_visible() {
         precheck_timeout: Duration::from_millis(300),
         judge,
         ipapi_key: None,
+        sites: Arc::from(Vec::<String>::new()),
     };
     // An HTTPS judge never sees proxy headers: it does not get our IP.
     assert!(!wants_direct_ip(
@@ -242,6 +244,7 @@ fn candidate_budget_covers_deep_tls() {
         precheck_timeout: Duration::from_millis(1500),
         judge: false,
         ipapi_key: None,
+        sites: Arc::from(Vec::<String>::new()),
     };
     // attempts (10s) + DNS/CONNECT/TCP/TLS (20s) + precheck (1.5s) + 5s margin
     assert_eq!(
@@ -256,6 +259,16 @@ fn candidate_budget_covers_deep_tls() {
     assert_eq!(
         candidate_budget(timeout, 1, &no_tls),
         Duration::from_millis(21_500)
+    );
+
+    // Sites are requested after the deep stages: one more timeout.
+    let with_sites = CheckFlags {
+        sites: Arc::from(vec!["https://www.youtube.com".to_string()]),
+        ..no_tls.clone()
+    };
+    assert_eq!(
+        candidate_budget(timeout, 1, &with_sites),
+        Duration::from_millis(26_500)
     );
 
     let judge = CheckFlags {
@@ -332,4 +345,41 @@ fn check_events_are_tagged() {
         serde_json::to_value(CheckEvent::Done).unwrap(),
         serde_json::json!({ "kind": "done" })
     );
+}
+
+#[test]
+fn site_lists_are_sanitized() {
+    let cfg = CheckConfig {
+        sites: vec![
+            " https://www.youtube.com ".to_string(),
+            "https://www.youtube.com".to_string(),
+            "ftp://x".to_string(),
+            "telegram.org".to_string(),
+        ]
+        .into_iter()
+        .chain((0..20).map(|i| format!("https://s{i}.example.com")))
+        .collect(),
+        ..CheckConfig::default()
+    }
+    .sanitized();
+    assert_eq!(cfg.sites[0], "https://www.youtube.com");
+    assert_eq!(cfg.sites.len(), crate::commands::check::MAX_SITES);
+    assert!(cfg.sites.iter().all(|s| s.starts_with("https://")));
+}
+
+#[test]
+fn speed_test_reads_the_response_head() {
+    use crate::commands::speed::{mbps, parse_head};
+    let head = b"HTTP/1.1 200 OK\r\nContent-Type: x\r\nContent-Length: 5000000\r\n\r\nabc";
+    assert_eq!(
+        parse_head(head),
+        Some((head.len() - 3, 200, Some(5_000_000)))
+    );
+    assert_eq!(parse_head(b"HTTP/1.1 200 OK\r\nX: y\r\n"), None);
+    assert_eq!(
+        parse_head(b"HTTP/1.1 403 Forbidden\r\n\r\n"),
+        Some((26, 403, None))
+    );
+    assert_eq!(mbps(5_000_000, Duration::from_secs(4)), Some(10.0));
+    assert_eq!(mbps(0, Duration::from_secs(1)), None);
 }

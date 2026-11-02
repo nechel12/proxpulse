@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { clip } from "./clip.ts";
 import { ResultsView, type RowAction } from "./results.ts";
 import { defaultOrder, mergeResults } from "./results-model.ts";
+import { SitesPanel } from "./sites.ts";
+import { formatMbps, loadSpeedMb, runSpeedTest, saveSpeedMb } from "./speed-client.ts";
 import { PoolView, type PoolItem } from "./pool.ts";
 import { exportList, type ExportKind } from "./export-panel.ts";
 import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } from "./pinggraph.ts";
@@ -65,6 +67,7 @@ let includeDead = false;
 const pool = new PoolView();
 const dispatchMonitor = new DispatchMonitor();
 const profiles = new ProfilePanel();
+const sitesPanel = new SitesPanel();
 const settings = new SettingsPanel({ t, schedule: () => scheduleAutoConfig() });
 const appSettings = new AppSettings({
   t,
@@ -230,6 +233,7 @@ function readCheckSettings(): CheckSettings {
     precheckTimeoutMs: numberIn("precheck-timeout", CHECK_LIMITS.precheckTimeoutMs, 1500),
     judgeMode: judge,
     ipapiKey: settings.activeIpapiKey(),
+    sites: sitesPanel.urls(),
   };
 }
 
@@ -471,6 +475,47 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
   if (!base) pushPingPoint(results);
 }
 
+/** Download speed through the given alive proxies, filled in their rows. */
+async function speedTest(rows: ProxyResult[]): Promise<void> {
+  if (rows.length === 0) return;
+  await withStart(async () => {
+    if (!(await checkerFree())) return;
+    running = true;
+    stopFlag = false;
+    ($("btn-stop") as HTMLButtonElement).disabled = false;
+    setNet("work", "net_work", { s: 0 });
+    const total = rows.length;
+    let done = 0;
+    let best = 0;
+    let ok = 0;
+    setStatusT("speed_running", { done, total });
+    setProgress(0, total);
+    try {
+      await runSpeedTest(rows.map((r) => ({ proxy: r.proxy, url: r.url })), loadSpeedMb(), (s) => {
+        done += 1;
+        if (s.ok && s.mbps != null) {
+          ok += 1;
+          best = Math.max(best, s.mbps);
+        }
+        results = results.map((r) => (r.proxy === s.proxy ? { ...r, speed: s } : r));
+        setStatusT("speed_running", { done, total });
+        setProgress(done, total);
+        render();
+      });
+    } catch (e) {
+      if (String(e).includes("another check is running")) setStatusT("auto_skip");
+      else logErr("speed: " + String(e).slice(0, 200));
+    } finally {
+      running = false;
+      ($("btn-stop") as HTMLButtonElement).disabled = !autoStatus.running;
+    }
+    if (stopFlag) setStatusT("st_stopped", { alive: ok, total: done });
+    else if (ok === 0) setStatusT("speed_none");
+    else setStatusT("speed_done", { ok, total, best: formatMbps(best) });
+    setNet("done", stopFlag ? "net_stopped" : "net_done");
+  });
+}
+
 /** Actions from the results context menu and keyboard. */
 async function rowAction(action: RowAction, rows: ProxyResult[]): Promise<void> {
   if (rows.length === 0) return;
@@ -483,6 +528,8 @@ async function rowAction(action: RowAction, rows: ProxyResult[]): Promise<void> 
     } catch { /* clipboard unavailable */ }
   } else if (action === "recheck") {
     await recheck(rows.map((r) => r.proxy));
+  } else if (action === "speed") {
+    await speedTest(rows.filter((r) => r.alive));
   } else if (action === "pool") {
     const alive = rows.filter((r) => r.alive);
     mergePool(alive.map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
@@ -690,6 +737,12 @@ window.addEventListener("DOMContentLoaded", () => {
       setStatusText("direct-res", () => t("direct_fail", { e: msg }));
     }
   });
+
+  // Sites are not part of presets, and scheduled checks skip them.
+  sitesPanel.init(() => {});
+  const speedSel = $<HTMLSelectElement>("speed-mb");
+  speedSel.value = String(loadSpeedMb());
+  speedSel.addEventListener("change", () => saveSpeedMb(Number(speedSel.value)));
 
   // presets and check target
   profiles.load();

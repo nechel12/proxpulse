@@ -23,6 +23,8 @@ export const SETTINGS_KEYS = [
   "pp-ipapi-key",
   "pp-ipapi-pro",
   "pp-export-template",
+  "pp-sites",
+  "pp-speed-mb",
 ] as const;
 
 const MAX_VALUE_CHARS = 1024 * 1024;

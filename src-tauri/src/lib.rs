@@ -34,6 +34,7 @@ use commands::prefs::{
     autostart_enabled, close_to_tray, get_app_prefs, load_prefs, notify, set_app_prefs,
     set_autostart, start_hidden, start_saved_dispatcher, PrefsState, MINIMIZED_ARG,
 };
+use commands::speed::speed_test;
 use commands::tray::{refresh_tray_menu, update_tray_status, TrayState};
 use commands::webhook::{send_webhook, send_webhooks};
 
@@ -67,6 +68,19 @@ pub struct ProxyResult {
     /// cooldown was hit ("geo", "anon", "tamper", "tls"): run again for them.
     #[serde(default)]
     pub skipped: Vec<String>,
+    /// Reachability of the sites chosen for the check, through this proxy.
+    #[serde(default)]
+    pub sites: Vec<SiteProbe>,
+}
+
+/// One site requested through a proxy: any HTTP answer means reachable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SiteProbe {
+    pub url: String,
+    pub ok: bool,
+    pub ms: Option<u64>,
+    pub status: Option<u16>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,6 +229,7 @@ const DEEP_CONCURRENCY: usize = 64;
 static ANON_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
 static TAMPER_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
 static TLS_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
+static SITES_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
 
 fn geo_semaphore() -> &'static Semaphore {
     GEO_SEM.get_or_init(|| Semaphore::new(GEO_CONCURRENCY))
@@ -303,7 +318,8 @@ pub fn run() {
             set_app_prefs,
             autostart_enabled,
             set_autostart,
-            notify
+            notify,
+            speed_test
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

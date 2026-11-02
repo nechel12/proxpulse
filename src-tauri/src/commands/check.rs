@@ -32,6 +32,8 @@ pub(crate) const TIMEOUT_MS: (u64, u64) = (1_000, 30_000);
 pub(crate) const PRECHECK_TIMEOUT_MS: (u64, u64) = (300, 10_000);
 pub(crate) const MAX_CONCURRENCY: usize = 500;
 pub(crate) const MAX_REPEATS: usize = 5;
+/// Most sites one check requests through each proxy.
+pub(crate) const MAX_SITES: usize = 8;
 
 /// Check parameters, one definition for a manual check and a scheduled pool
 /// check. Mirrors `CheckSettings` in `src/check-client.ts`.
@@ -51,6 +53,8 @@ pub(crate) struct CheckConfig {
     pub(crate) precheck_timeout_ms: u64,
     pub(crate) judge_mode: bool,
     pub(crate) ipapi_key: Option<String>,
+    /// Sites requested through every alive proxy.
+    pub(crate) sites: Vec<String>,
 }
 
 impl Default for CheckConfig {
@@ -69,6 +73,7 @@ impl Default for CheckConfig {
             precheck_timeout_ms: 1500,
             judge_mode: false,
             ipapi_key: None,
+            sites: Vec::new(),
         }
     }
 }
@@ -86,6 +91,13 @@ impl CheckConfig {
             .ipapi_key
             .map(|k| k.trim().to_string())
             .filter(|k| !k.is_empty());
+        let mut sites: Vec<String> = Vec::new();
+        for s in self.sites.iter().map(|s| s.trim()) {
+            if is_http_url(s) && !sites.iter().any(|x| x == s) && sites.len() < MAX_SITES {
+                sites.push(s.to_string());
+            }
+        }
+        self.sites = sites;
         self
     }
 
@@ -103,6 +115,7 @@ impl CheckConfig {
             precheck_timeout: Duration::from_millis(self.precheck_timeout_ms),
             judge: self.judge_mode,
             ipapi_key: self.ipapi_key.as_deref().map(Arc::from),
+            sites: self.sites.iter().cloned().collect(),
         }
     }
 }
@@ -120,6 +133,7 @@ pub(crate) struct CheckFlags {
     /// main test URL is built by the frontend. The key is visible to the
     /// checked proxy because the request originates from it; see README.
     pub(crate) ipapi_key: Option<Arc<str>>,
+    pub(crate) sites: Arc<[String]>,
 }
 
 // ================= checker =================
@@ -148,6 +162,7 @@ pub(crate) fn dead_result(raw: String, proto: String, attempts: u32, err: String
         tls_info: None,
         error: Some(err),
         skipped: Vec::new(),
+        sites: Vec::new(),
     }
 }
 
@@ -212,7 +227,13 @@ pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckF
     } else {
         timeout
     };
-    flags.precheck_timeout + timeout * (repeats as u32 + 1) + deep + Duration::from_secs(5)
+    // Sites are requested together after the deep stages.
+    let sites = if flags.sites.is_empty() {
+        Duration::ZERO
+    } else {
+        timeout
+    };
+    flags.precheck_timeout + timeout * (repeats as u32 + 1) + deep + sites + Duration::from_secs(5)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -366,6 +387,7 @@ async fn check_candidate_inner(
         tls_info: None,
         error: None,
         skipped: Vec::new(),
+        sites: Vec::new(),
     };
 
     if let Some(b) = first_body {
@@ -468,7 +490,48 @@ async fn check_candidate_inner(
         }
         res.skipped = skipped;
     }
+    if !flags.sites.is_empty() && !cancel.load(Ordering::Relaxed) {
+        match deep_semaphore(&SITES_SEM).try_acquire() {
+            Ok(_permit) => res.sites = probe_sites(&client, &flags.sites).await,
+            Err(_) => res.skipped.push("sites".to_string()),
+        }
+    }
     res
+}
+
+/// Request every site through the proxy at once. Any HTTP answer, even an
+/// error page, shows the site is reachable through it.
+pub(crate) async fn probe_sites(client: &reqwest::Client, sites: &[String]) -> Vec<SiteProbe> {
+    let mut set = tokio::task::JoinSet::new();
+    for (i, site) in sites.iter().cloned().enumerate() {
+        let client = client.clone();
+        set.spawn(async move {
+            let start = Instant::now();
+            let probe = match client.get(&site).send().await {
+                Ok(r) => SiteProbe {
+                    url: site,
+                    ok: true,
+                    ms: Some(start.elapsed().as_millis() as u64),
+                    status: Some(r.status().as_u16()),
+                    error: None,
+                },
+                Err(e) => SiteProbe {
+                    url: site,
+                    ok: false,
+                    ms: None,
+                    status: None,
+                    error: Some(short_error(&e.to_string())),
+                },
+            };
+            (i, probe)
+        });
+    }
+    let mut out: Vec<(usize, SiteProbe)> = Vec::new();
+    while let Some(Ok(v)) = set.join_next().await {
+        out.push(v);
+    }
+    out.sort_by_key(|(i, _)| *i);
+    out.into_iter().map(|(_, p)| p).collect()
 }
 
 /// Our direct IP is needed only where a leak can be seen: the anonymity

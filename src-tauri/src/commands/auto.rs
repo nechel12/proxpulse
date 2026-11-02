@@ -253,6 +253,7 @@ pub(crate) fn pool_check_config(check: &CheckConfig) -> CheckConfig {
         with_anonymity: false,
         with_tamper: false,
         with_tls: false,
+        sites: Vec::new(),
         ..check.clone()
     }
 }

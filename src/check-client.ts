@@ -25,6 +25,8 @@ export type CheckSettings = {
   precheckTimeoutMs: number;
   judgeMode: boolean;
   ipapiKey: string | null;
+  /** Sites requested through every alive proxy. */
+  sites: string[];
 };
 
 export function deadStub(proxy: string, msg: string): ProxyResult {

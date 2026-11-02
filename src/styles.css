@@ -480,3 +480,9 @@ tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--red); }
   padding: 8px 10px; font-family: var(--mono); font-size: 12px; resize: vertical; outline: none;
 }
 .tpl-input:focus { border-color: var(--red); }
+.sites-input {
+  background: var(--field); border: 1px solid var(--line); color: var(--txt); border-radius: 8px;
+  padding: 7px 10px; outline: none; font-size: 12.5px; font-family: var(--mono); width: 100%;
+}
+.sites-input:focus { border-color: var(--red); }
+#sites-block { margin-top: 2px; }
