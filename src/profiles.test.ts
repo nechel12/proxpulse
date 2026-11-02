@@ -117,10 +117,19 @@ describe("sanitizeProfile", () => {
     expect(data).toMatchObject({
       target: "judge",
       judgeServer: "custom",
-      judgeUrl: "https://judge.example",
+      judgeUrl: "judge.example",
+      judgeHttps: true,
+      judgeHttp: true,
       customUrl: "",
       testUrlSel: PROFILE_DEFAULTS.testUrlSel,
     });
+  });
+
+  it("keeps an old plain-HTTP judge on HTTP only", () => {
+    const data = sanitizeProfile({ ...LEGACY, target: "judge", judgeServer: "custom", judgeUrl: "http://judge.example:8000/" });
+    expect(data).toMatchObject({ judgeUrl: "judge.example:8000", judgeHttps: false, judgeHttp: true });
+    const none = sanitizeProfile({ ...LEGACY, judgeHttps: false, judgeHttp: false });
+    expect(none).toMatchObject({ judgeHttps: true, judgeHttp: false });
   });
 
   it("migrates a legacy judge preset without a custom server", () => {

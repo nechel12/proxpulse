@@ -1,4 +1,5 @@
 // Settings presets: pure data + validation, covered by profiles.test.ts.
+import { judgeAddress } from "./judge.ts";
 import { IPAPI_FREE_URL, IPAPI_OLD_HTTPS_URL } from "./ipapi.ts";
 
 export type TargetMode = "public" | "judge";
@@ -21,6 +22,9 @@ export type ProfileData = {
   precheck: boolean;
   precheckTimeout: string;
   judgeFull: boolean;
+  /** Judge requests over HTTPS (liveness, geo) and HTTP (anonymity, integrity). */
+  judgeHttps: boolean;
+  judgeHttp: boolean;
 };
 
 export const PUBLIC_CUSTOM = "custom";
@@ -53,6 +57,8 @@ export const PROFILE_DEFAULTS: ProfileData = {
   precheck: true,
   precheckTimeout: "1500",
   judgeFull: true,
+  judgeHttps: true,
+  judgeHttp: true,
 };
 
 export function sanitizeProfile(raw: unknown): ProfileData | null {
@@ -83,6 +89,15 @@ export function sanitizeProfile(raw: unknown): ProfileData | null {
     testUrlSel = PUBLIC_CUSTOM;
   }
 
+  // The judge address used to carry its scheme: http:// meant plain HTTP only.
+  let judgeHttps = bool(o.judgeHttps, true);
+  const judgeHttp = bool(o.judgeHttp, true);
+  if (o.judgeHttps === undefined && o.judgeHttp === undefined && /^http:\/\//i.test(judgeUrl.trim())) {
+    judgeHttps = false;
+  }
+  if (!judgeHttps && !judgeHttp) judgeHttps = true;
+  judgeUrl = judgeAddress(judgeUrl);
+
   if (testUrlSel !== PUBLIC_CUSTOM && !PUBLIC_URL_PRESETS.includes(testUrlSel)) {
     testUrlSel = PROFILE_DEFAULTS.testUrlSel;
   }
@@ -105,6 +120,8 @@ export function sanitizeProfile(raw: unknown): ProfileData | null {
     precheck: bool(o.precheck, true),
     precheckTimeout: str(o.precheckTimeout, PROFILE_DEFAULTS.precheckTimeout, /^\d+$/),
     judgeFull: bool(o.judgeFull, true),
+    judgeHttps,
+    judgeHttp,
   };
 }
 

@@ -256,6 +256,7 @@ function readCheckSettings(): CheckSettings {
     judgeMode: judge,
     ipapiKey: settings.activeIpapiKey(),
     sites: sitesPanel.urls(),
+    judgeHttpUrl: settings.judgeHttpUrl(),
   };
 }
 
@@ -869,6 +870,14 @@ window.addEventListener("DOMContentLoaded", () => {
     markCustomPreset();
     settings.setJudgeFull(true);
   });
+  for (const id of ["judge-https", "judge-http"]) {
+    $<HTMLInputElement>(id).addEventListener("change", (e) => {
+      settings.keepOneScheme(e.target as HTMLInputElement);
+      markCustomPreset();
+      settings.updateTargetUI();
+      scheduleAutoConfig();
+    });
+  }
   $("check-settings").addEventListener("input", markCustomPreset);
   $("check-settings").addEventListener("change", markCustomPreset);
 

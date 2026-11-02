@@ -1,5 +1,5 @@
 import { IPAPI_FREE_URL, IPAPI_OLD_HTTPS_URL, maskKey, resolveTestUrl } from "./ipapi.ts";
-import { resolveJudgeUrl } from "./judge.ts";
+import { judgeUrls, type JudgeSchemes } from "./judge.ts";
 import {
   PUBLIC_CUSTOM,
   sanitizeProfile,
@@ -8,7 +8,8 @@ import {
   type TargetMode,
 } from "./profiles.ts";
 
-export const JUDGE_DEFAULT = "https://proxycheck.lmtunnel.com";
+/** The built-in judge; it answers over both HTTPS and HTTP. */
+export const JUDGE_DEFAULT = "proxycheck.lmtunnel.com";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
@@ -18,14 +19,6 @@ type Deps = {
 };
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T | null;
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
 
 export class SettingsPanel {
   judgeFull = true;
@@ -55,14 +48,35 @@ export class SettingsPanel {
     return el<HTMLSelectElement>("judge-server")?.value === "custom" ? "custom" : "builtin";
   }
 
+  judgeSchemes(): JudgeSchemes {
+    return {
+      https: el<HTMLInputElement>("judge-https")?.checked ?? true,
+      http: el<HTMLInputElement>("judge-http")?.checked ?? true,
+    };
+  }
+
+  private judgeRequests(): { main: string; http: string | null } {
+    // An empty custom server is a real error, not a silent fallback to the
+    // built-in instance.
+    const address = this.judgeServer() === "custom"
+      ? (el<HTMLInputElement>("judge-url")?.value ?? "")
+      : JUDGE_DEFAULT;
+    return judgeUrls(address, this.judgeFull, this.judgeSchemes());
+  }
+
   judgeBase(): string {
-    if (this.judgeServer() === "custom") {
-      const custom = (el<HTMLInputElement>("judge-url")?.value ?? "").trim();
-      // An empty custom server is a real error, not a silent fallback to the
-      // built-in instance.
-      return custom ? resolveJudgeUrl(custom, this.judgeFull, JUDGE_DEFAULT) : "";
-    }
-    return resolveJudgeUrl("", this.judgeFull, JUDGE_DEFAULT);
+    return this.judgeRequests().main;
+  }
+
+  /** The plain-HTTP /judge request for anonymity when both schemes are on. */
+  judgeHttpUrl(): string | null {
+    return this.isJudgeMode() ? this.judgeRequests().http : null;
+  }
+
+  /** At least one scheme stays chosen: unchecking the last one is undone. */
+  keepOneScheme(changed: HTMLInputElement): void {
+    const s = this.judgeSchemes();
+    if (!s.https && !s.http) changed.checked = true;
   }
 
   effectiveTestUrl(): string {
@@ -132,8 +146,10 @@ export class SettingsPanel {
     if (!out) return;
     const url = maskKey(this.effectiveTestUrl());
     const label = this.deps.t("effective_url_t");
-    out.textContent = url || "—";
-    out.title = url ? `${label}\n${url}` : label;
+    const http = this.judgeHttpUrl();
+    const shown = http ? `${url} + ${http}` : url;
+    out.textContent = shown || "—";
+    out.title = shown ? `${label}\n${shown.replace(" + ", "\n")}` : label;
     out.classList.toggle("bad", !/^https?:\/\//i.test(url));
   }
 
@@ -153,20 +169,7 @@ export class SettingsPanel {
     document.getElementById("judge-url-wrap")?.classList.toggle("hidden", !judge || server !== "custom");
 
     const builtin = document.getElementById("opt-judge-builtin");
-    if (builtin) builtin.textContent = this.deps.t("judge_builtin", { host: hostOf(JUDGE_DEFAULT) });
-
-    let insecure = false;
-    let tunneled = false;
-    if (judge) {
-      try {
-        const u = new URL(this.judgeBase());
-        const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(u.hostname);
-        insecure = u.protocol === "http:" && !local;
-        tunneled = u.protocol === "https:";
-      } catch { /* invalid URL is reported by the backend */ }
-    }
-    document.getElementById("judge-http-hint")?.classList.toggle("hidden", !insecure);
-    document.getElementById("judge-https-hint")?.classList.toggle("hidden", !tunneled);
+    if (builtin) builtin.textContent = this.deps.t("judge_builtin", { host: JUDGE_DEFAULT });
 
     this.renderJudgeMode();
     this.updateIpapiUI();
@@ -200,6 +203,8 @@ export class SettingsPanel {
       precheck: chk("chk-precheck"),
       precheckTimeout: val("precheck-timeout"),
       judgeFull: this.judgeFull,
+      judgeHttps: chk("judge-https"),
+      judgeHttp: chk("judge-http"),
     };
   }
 
@@ -230,6 +235,10 @@ export class SettingsPanel {
     setChk("chk-precheck", d.precheck);
     setVal("precheck-timeout", d.precheckTimeout);
     this.judgeFull = d.judgeFull;
+    const https = el<HTMLInputElement>("judge-https");
+    if (https) https.checked = d.judgeHttps;
+    const http = el<HTMLInputElement>("judge-http");
+    if (http) http.checked = d.judgeHttp;
     this.setTargetMode(d.target, true);
     this.deps.schedule();
   }

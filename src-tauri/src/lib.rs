@@ -11,6 +11,7 @@ use tokio::sync::{Mutex, Semaphore};
 
 mod extract;
 mod http;
+mod judge_sig;
 mod netguard;
 mod transport;
 use http::*;
@@ -201,6 +202,8 @@ struct Baseline {
     example_hash: Option<u64>,
     example_cert_fp: Option<String>,
     judge_content_sha: Option<String>,
+    /// Public key of a judge that signs its answers.
+    judge_key: Option<judge_sig::JudgeKey>,
 }
 
 #[derive(Default)]

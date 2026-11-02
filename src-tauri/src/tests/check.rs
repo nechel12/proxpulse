@@ -39,6 +39,7 @@ fn direct_ip_is_requested_only_where_a_leak_is_visible() {
         judge,
         ipapi_key: None,
         sites: Arc::from(Vec::<String>::new()),
+        judge_http: None,
     };
     // An HTTPS judge never sees proxy headers: it does not get our IP.
     assert!(!wants_direct_ip(
@@ -245,6 +246,7 @@ fn candidate_budget_covers_deep_tls() {
         judge: false,
         ipapi_key: None,
         sites: Arc::from(Vec::<String>::new()),
+        judge_http: None,
     };
     // attempts (10s) + DNS/CONNECT/TCP/TLS (20s) + precheck (1.5s) + 5s margin
     assert_eq!(

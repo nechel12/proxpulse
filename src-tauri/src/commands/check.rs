@@ -55,6 +55,9 @@ pub(crate) struct CheckConfig {
     pub(crate) ipapi_key: Option<String>,
     /// Sites requested through every alive proxy.
     pub(crate) sites: Vec<String>,
+    /// Judge mode over HTTPS: the plain-HTTP `/judge` URL asked through every
+    /// alive proxy for anonymity and integrity.
+    pub(crate) judge_http_url: Option<String>,
 }
 
 impl Default for CheckConfig {
@@ -74,6 +77,7 @@ impl Default for CheckConfig {
             judge_mode: false,
             ipapi_key: None,
             sites: Vec::new(),
+            judge_http_url: None,
         }
     }
 }
@@ -98,6 +102,14 @@ impl CheckConfig {
             }
         }
         self.sites = sites;
+        self.judge_http_url = self
+            .judge_http_url
+            .map(|u| u.trim().to_string())
+            .filter(|u| {
+                self.judge_mode
+                    && u.get(..7)
+                        .is_some_and(|p| p.eq_ignore_ascii_case("http://"))
+            });
         self
     }
 
@@ -116,6 +128,7 @@ impl CheckConfig {
             judge: self.judge_mode,
             ipapi_key: self.ipapi_key.as_deref().map(Arc::from),
             sites: self.sites.iter().cloned().collect(),
+            judge_http: self.judge_http_url.as_deref().map(Arc::from),
         }
     }
 }
@@ -134,6 +147,7 @@ pub(crate) struct CheckFlags {
     /// checked proxy because the request originates from it; see README.
     pub(crate) ipapi_key: Option<Arc<str>>,
     pub(crate) sites: Arc<[String]>,
+    pub(crate) judge_http: Option<Arc<str>>,
 }
 
 // ================= checker =================
@@ -227,13 +241,23 @@ pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckF
     } else {
         timeout
     };
-    // Sites are requested together after the deep stages.
+    // Sites, and the judge's HTTP request, follow the main attempts.
     let sites = if flags.sites.is_empty() {
         Duration::ZERO
     } else {
         timeout
     };
-    flags.precheck_timeout + timeout * (repeats as u32 + 1) + deep + sites + Duration::from_secs(5)
+    let judge_http = if flags.judge_http.is_some() {
+        timeout
+    } else {
+        Duration::ZERO
+    };
+    flags.precheck_timeout
+        + timeout * (repeats as u32 + 1)
+        + deep
+        + sites
+        + judge_http
+        + Duration::from_secs(5)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -301,22 +325,20 @@ async fn check_candidate_inner(
         Err(e) => return dead_result(raw, proto, 0, e),
     };
 
-    // HTTP judge: pass our direct IP so the judge can detect leaks. An HTTPS
-    // judge cannot see proxy headers, so it gets no reason to learn our IP.
+    // HTTP judge: pass our direct IP so the judge can detect leaks, and a
+    // nonce the judge signs. An HTTPS judge cannot see proxy headers, so it
+    // gets no reason to learn our IP.
+    let nonce = judge_sig::new_nonce();
+    let direct_ip = baseline.direct_ip.as_deref().unwrap_or("");
     let req_url = if flags.judge && !is_tls_target(&test_url) {
-        match baseline.direct_ip.as_deref() {
-            Some(dip) if !dip.is_empty() => {
-                let sep = if test_url.contains('?') { '&' } else { '?' };
-                format!("{test_url}{sep}direct_ip={dip}")
-            }
-            _ => test_url.clone(),
-        }
+        judge_sig::judge_query(&test_url, Some(direct_ip), &nonce)
     } else {
         test_url.clone()
     };
 
     let mut latencies: Vec<u64> = Vec::new();
     let mut first_body: Option<String> = None;
+    let mut first_sig: Option<String> = None;
     let mut last_err: Option<String> = None;
 
     for _ in 0..repeats {
@@ -332,6 +354,7 @@ async fn check_candidate_inner(
                 if status.is_success() {
                     latencies.push(ms);
                     if first_body.is_none() {
+                        first_sig = signature_header(&r);
                         first_body = read_body_capped(r, BODY_LIMIT_PAGE).await.ok();
                     }
                     last_err = None;
@@ -397,15 +420,12 @@ async fn check_candidate_inner(
                 // Inside a TLS tunnel the proxy can neither add headers nor
                 // change the body: "elite" would be a guess, not a result.
                 res.anonymity = None;
+            } else {
+                let signed = baseline.judge_key.as_ref().map(|k| {
+                    judge_sig::verify(k, &nonce, direct_ip, b.as_bytes(), first_sig.as_deref())
+                });
+                apply_judge_integrity(&mut res, &baseline, signed, proxy_sha.as_deref());
             }
-            res.tamper = match (&baseline.judge_content_sha, &proxy_sha) {
-                (Some(a), Some(c)) => Some(if a == c {
-                    "ok".to_string()
-                } else {
-                    "modified".to_string()
-                }),
-                _ => None,
-            };
         } else {
             try_parse_test_body(&mut res, &test_url, &b);
         }
@@ -490,6 +510,11 @@ async fn check_candidate_inner(
         }
         res.skipped = skipped;
     }
+    if let Some(http_url) = flags.judge_http.as_deref() {
+        if is_tls_target(&test_url) && !cancel.load(Ordering::Relaxed) {
+            judge_over_http(&client, http_url, &nonce, direct_ip, &baseline, &mut res).await;
+        }
+    }
     if !flags.sites.is_empty() && !cancel.load(Ordering::Relaxed) {
         match deep_semaphore(&SITES_SEM).try_acquire() {
             Ok(_permit) => res.sites = probe_sites(&client, &flags.sites).await,
@@ -497,6 +522,67 @@ async fn check_candidate_inner(
         }
     }
     res
+}
+
+fn signature_header(r: &reqwest::Response) -> Option<String> {
+    r.headers()
+        .get(judge_sig::SIGNATURE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+}
+
+/// Anonymity and integrity from a judge answer reached over HTTP. A judge
+/// that signs decides integrity by the signature; an answer that fails it
+/// was rewritten on the way, so its anonymity verdict is dropped too.
+pub(crate) fn apply_judge_integrity(
+    res: &mut ProxyResult,
+    baseline: &Baseline,
+    signed: Option<bool>,
+    proxy_sha: Option<&str>,
+) {
+    res.tamper = judge_sig::judge_tamper(signed, baseline.judge_content_sha.as_deref(), proxy_sha);
+    if signed == Some(false) {
+        res.anonymity = None;
+    }
+}
+
+/// With both schemes on, the HTTPS answer gives liveness and geo; this
+/// plain-HTTP request through the same proxy gives anonymity and integrity.
+/// A proxy limited to port 443, or a judge without plain HTTP, leaves them
+/// empty.
+async fn judge_over_http(
+    client: &reqwest::Client,
+    http_url: &str,
+    nonce: &str,
+    direct_ip: &str,
+    baseline: &Baseline,
+    res: &mut ProxyResult,
+) {
+    let url = judge_sig::judge_query(http_url, Some(direct_ip), nonce);
+    let Ok(r) = client.get(&url).send().await else {
+        return;
+    };
+    // A redirect to HTTPS (some hosts force it) hides the request again.
+    if !r.status().is_success() || r.url().scheme() != "http" {
+        return;
+    }
+    let sig = signature_header(&r);
+    let Ok(body) = read_body_capped(r, BODY_LIMIT_PAGE).await else {
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return;
+    };
+    res.anonymity = v
+        .get("anonymity")
+        .and_then(|a| a.as_str())
+        .map(str::to_string);
+    let proxy_sha = v.get("content_sha256").and_then(|s| s.as_str());
+    let signed = baseline
+        .judge_key
+        .as_ref()
+        .map(|k| judge_sig::verify(k, nonce, direct_ip, body.as_bytes(), sig.as_deref()));
+    apply_judge_integrity(res, baseline, signed, proxy_sha);
 }
 
 /// Request every site through the proxy at once. Any HTTP answer, even an
@@ -538,7 +624,7 @@ pub(crate) async fn probe_sites(client: &reqwest::Client, sites: &[String]) -> V
 /// probe, or a judge reached over plain HTTP.
 pub(crate) fn wants_direct_ip(flags: &CheckFlags, test_url: &str) -> bool {
     if flags.judge {
-        !is_tls_target(test_url)
+        !is_tls_target(test_url) || flags.judge_http.is_some()
     } else {
         flags.anon
     }
@@ -620,6 +706,7 @@ async fn fetch_baseline(flags: CheckFlags, want_ip: bool) -> Baseline {
         example_hash: hash,
         example_cert_fp: cert,
         judge_content_sha: None,
+        judge_key: None,
     }
 }
 
@@ -675,13 +762,12 @@ pub(crate) async fn run_checks(
     // Direct judge content hash (for tamper check in judge mode). The fast
     // mode returns an empty 204 body, and an HTTPS body cannot be modified by
     // the proxy, so in both cases skip the extra /judge request entirely.
-    let judge_url = if flags.judge
-        && !is_tls_target(&test_url)
-        && !test_url.trim_end_matches('/').ends_with("/generate_204")
-    {
+    let judge_url = if !flags.judge || test_url.trim_end_matches('/').ends_with("/generate_204") {
+        None
+    } else if !is_tls_target(&test_url) {
         judge_direct_url(&test_url)
     } else {
-        None
+        flags.judge_http.as_deref().and_then(judge_direct_url)
     };
     let baseline_phase = async {
         tokio::join!(
@@ -691,14 +777,17 @@ pub(crate) async fn run_checks(
             ),
             async {
                 match &judge_url {
-                    Some(u) => fetch_direct_judge_sha(u, timeout).await,
-                    None => None,
+                    Some(u) => tokio::join!(
+                        fetch_direct_judge_sha(u, timeout),
+                        judge_sig::fetch_key(u, timeout)
+                    ),
+                    None => (None, None),
                 }
             }
         )
     };
     // The baseline can take up to 20 s; Stop must not wait for it.
-    let (baseline_res, judge_sha) = tokio::select! {
+    let (baseline_res, (judge_sha, judge_key)) = tokio::select! {
         r = baseline_phase => r,
         _ = wait_cancelled(&cancel) => return Ok(Vec::new()),
     };
@@ -708,8 +797,10 @@ pub(crate) async fn run_checks(
         example_hash: None,
         example_cert_fp: None,
         judge_content_sha: None,
+        judge_key: None,
     });
     baseline_inner.judge_content_sha = judge_sha;
+    baseline_inner.judge_key = judge_key;
     let baseline = Arc::new(baseline_inner);
 
     let sem = Arc::new(Semaphore::new(conc));

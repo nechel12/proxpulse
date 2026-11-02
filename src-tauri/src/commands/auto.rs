@@ -254,6 +254,7 @@ pub(crate) fn pool_check_config(check: &CheckConfig) -> CheckConfig {
         with_tamper: false,
         with_tls: false,
         sites: Vec::new(),
+        judge_http_url: None,
         ..check.clone()
     }
 }

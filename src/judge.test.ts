@@ -1,35 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { resolveJudgeUrl } from "./judge.ts";
+import { judgeAddress, judgeUrls } from "./judge.ts";
 
-const base = "https://judge.example";
+const both = { https: true, http: true };
+const httpsOnly = { https: true, http: false };
+const httpOnly = { https: false, http: true };
 
-describe("resolveJudgeUrl", () => {
-  it("appends the mode suffix to a host", () => {
-    expect(resolveJudgeUrl("", true, base)).toBe(`${base}/judge`);
-    expect(resolveJudgeUrl("", false, base)).toBe(`${base}/generate_204`);
+describe("judgeUrls", () => {
+  it("builds both requests from a bare host", () => {
+    expect(judgeUrls("judge.example", true, both)).toEqual({
+      main: "https://judge.example/judge",
+      http: "http://judge.example/judge",
+    });
+    expect(judgeUrls("judge.example", true, httpsOnly)).toEqual({ main: "https://judge.example/judge", http: null });
+    expect(judgeUrls("judge.example", true, httpOnly)).toEqual({ main: "http://judge.example/judge", http: null });
   });
 
-  it("keeps an explicit endpoint", () => {
-    expect(resolveJudgeUrl(`${base}/judge`, false, base)).toBe(`${base}/judge`);
-    expect(resolveJudgeUrl(`${base}/generate_204/`, true, base)).toBe(
-      `${base}/generate_204`,
-    );
+  it("checks only liveness in fast mode", () => {
+    expect(judgeUrls("judge.example", false, both)).toEqual({ main: "https://judge.example/generate_204", http: null });
+    expect(judgeUrls("judge.example", false, httpOnly).main).toBe("http://judge.example/generate_204");
   });
 
-  it("keeps a custom path as-is", () => {
-    expect(resolveJudgeUrl(`${base}/svc`, true, base)).toBe(`${base}/svc`);
+  it("accepts a typed scheme, an endpoint, a custom path and a query", () => {
+    expect(judgeUrls("http://judge.example/", true, both).main).toBe("https://judge.example/judge");
+    expect(judgeUrls("judge.example/generate_204", true, both)).toEqual({
+      main: "https://judge.example/generate_204",
+      http: "http://judge.example/judge",
+    });
+    expect(judgeUrls("judge.example/svc", true, both)).toEqual({
+      main: "https://judge.example/svc",
+      http: "http://judge.example/svc",
+    });
+    expect(judgeUrls("judge.example:8080/?x=1", true, httpOnly).main).toBe("http://judge.example:8080/judge?x=1");
   });
 
-  it("preserves a query on a host and fixes the old bad concatenation", () => {
-    expect(resolveJudgeUrl(`${base}/?x=1`, true, base)).toBe(
-      `${base}/judge?x=1`,
-    );
-    expect(resolveJudgeUrl(`${base}/judge?x=1`, true, base)).toBe(
-      `${base}/judge?x=1`,
-    );
-  });
-
-  it("falls back for an unparsable URL", () => {
-    expect(resolveJudgeUrl("not a url", true, base)).toBe("not a url/judge");
+  it("falls back to HTTPS when neither scheme is chosen and rejects an empty host", () => {
+    expect(judgeUrls("judge.example", true, { https: false, http: false }).main).toBe("https://judge.example/judge");
+    expect(judgeUrls("  ", true, both)).toEqual({ main: "", http: null });
+    expect(judgeAddress(" HTTPS://Judge.example/ ")).toBe("Judge.example");
   });
 });
