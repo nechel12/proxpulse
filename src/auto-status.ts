@@ -1,5 +1,5 @@
 export type AutoStatusEvent = {
-  state: "running" | "done" | "stopped" | "skipped" | "empty" | "error" | "offline";
+  state: "fetching" | "running" | "done" | "stopped" | "skipped" | "empty" | "error" | "offline";
   alive: number;
   total: number;
   avgMs: number | null;
@@ -30,6 +30,11 @@ export class AutoStatusController {
     const show = (render: () => string) => {
       for (const id of ["auto-status", "disp-auto-status"]) this.deps.setStatusText(id, render);
     };
+    if (ev.state === "fetching") {
+      show(() => this.deps.t("auto_fetching"));
+      this.running = true;
+      return;
+    }
     if (ev.state === "running") {
       show(() => this.deps.t("auto_running", { n: ev.total }));
       this.running = true;

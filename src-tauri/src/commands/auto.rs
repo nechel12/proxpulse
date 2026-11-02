@@ -2,10 +2,15 @@ use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckConfi
 use crate::commands::dispatch::{
     pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
 };
+use crate::commands::import::fetch_url_text;
 use crate::commands::webhook::{
     send_webhooks_inner, Delivery, SentLists, WebhookOptions, TEMPLATE_MAX, WEBHOOK_FORMATS,
 };
-use crate::{epoch_secs, strip_credentials, GeoCacheEntry, ProxyResult, WebhookResult};
+use crate::extract::extract_proxies;
+use crate::proxy::normalize_candidates;
+use crate::{
+    epoch_secs, is_http_url, strip_credentials, GeoCacheEntry, ProxyResult, WebhookResult,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,6 +39,9 @@ pub(crate) struct AutoSettings {
     webhook_template: String,
     /// Send only what changed since the last delivery to each URL.
     webhook_changes_only: bool,
+    /// Proxy list URLs fetched before every scheduled check; new alive
+    /// proxies from them join the pool.
+    subscriptions: Vec<String>,
     check: CheckConfig,
 }
 
@@ -49,6 +57,7 @@ impl Default for AutoSettings {
             webhook_include_credentials: false,
             webhook_template: String::new(),
             webhook_changes_only: false,
+            subscriptions: Vec::new(),
             check: CheckConfig::default(),
         }
     }
@@ -99,6 +108,96 @@ struct AutoPoolPayload {
 #[derive(Debug, Clone, Serialize)]
 struct AutoWebhookPayload {
     results: Vec<WebhookResult>,
+}
+
+/// What one subscription delivered in a scheduled check.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SubscriptionResult {
+    index: usize,
+    ok: bool,
+    /// Proxies in the list.
+    found: usize,
+    /// Proxies not in the pool yet; they are checked with it.
+    added: usize,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AutoSubscriptionPayload {
+    results: Vec<SubscriptionResult>,
+}
+
+/// Most subscriptions, and most new proxies one cycle takes from them.
+const SUBSCRIPTIONS_MAX: usize = 10;
+const SUBSCRIPTION_NEW_MAX: usize = 20_000;
+
+/// Entries of a fetched list that are not in the pool yet (by normalized
+/// URL), up to `room`.
+pub(crate) fn new_entries(
+    entries: Vec<String>,
+    default_proto: &str,
+    known: &mut HashSet<String>,
+    room: usize,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for e in entries {
+        if out.len() >= room {
+            break;
+        }
+        let urls: Vec<String> = normalize_candidates(&e, default_proto)
+            .into_iter()
+            .map(|(url, _)| url)
+            .collect();
+        if urls.is_empty() || urls.iter().any(|u| known.contains(u)) {
+            continue;
+        }
+        known.extend(urls);
+        out.push(e);
+    }
+    out
+}
+
+async fn fetch_subscriptions(
+    urls: &[String],
+    default_proto: &str,
+    known: &mut HashSet<String>,
+) -> (Vec<String>, Vec<SubscriptionResult>) {
+    let mut fresh = Vec::new();
+    let mut results = Vec::new();
+    for (index, url) in urls.iter().take(SUBSCRIPTIONS_MAX).enumerate() {
+        let text = match fetch_url_text(url.clone()).await {
+            Ok(t) => t,
+            Err(e) => {
+                results.push(SubscriptionResult {
+                    index,
+                    ok: false,
+                    found: 0,
+                    added: 0,
+                    error: Some(e),
+                });
+                continue;
+            }
+        };
+        let proto = default_proto.to_string();
+        let entries = tauri::async_runtime::spawn_blocking(move || {
+            extract_proxies(&text, SUBSCRIPTION_NEW_MAX, &proto)
+        })
+        .await
+        .unwrap_or_default();
+        let found = entries.len();
+        let room = SUBSCRIPTION_NEW_MAX.saturating_sub(fresh.len());
+        let added = new_entries(entries, default_proto, known, room);
+        results.push(SubscriptionResult {
+            index,
+            ok: true,
+            found,
+            added: added.len(),
+            error: None,
+        });
+        fresh.extend(added);
+    }
+    (fresh, results)
 }
 
 fn emit_auto_status(
@@ -178,6 +277,38 @@ pub(crate) fn pool_geo_cache(pool: &[DispatchPoolItem]) -> Vec<GeoCacheEntry> {
             })
         })
         .collect()
+}
+
+/// Alive proxies from subscriptions join the pool after the regular merge.
+pub(crate) fn add_new_items(
+    merged: &mut AutoMerge,
+    results: &[ProxyResult],
+    fresh: &HashSet<String>,
+    max_ping_ms: u64,
+) {
+    let mut have: HashSet<String> = merged.items.iter().filter_map(|i| i.url.clone()).collect();
+    let mut sum = merged.avg.unwrap_or(0) * merged.alive as u64;
+    let mut n = merged.alive as u64;
+    for r in results {
+        if !r.alive || !fresh.contains(&r.proxy) || !have.insert(r.url.clone()) {
+            continue;
+        }
+        if max_ping_ms > 0 && r.latency_ms.is_some_and(|ms| ms > max_ping_ms) {
+            continue;
+        }
+        merged.alive += 1;
+        if let Some(ms) = r.latency_ms {
+            sum += ms;
+            n += 1;
+        }
+        merged.items.push(DispatchItem {
+            raw: r.proxy.clone(),
+            url: Some(r.url.clone()),
+            latency: r.latency_ms,
+            country: r.country_code.clone().or_else(|| r.country.clone()),
+        });
+    }
+    merged.avg = sum.checked_div(n);
 }
 
 /// Merge check results into the pool as it is *now*: entries deleted while
@@ -270,7 +401,21 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
     let settings = auto.inner.settings.lock().await.clone();
     let disp: State<'_, DispatchState> = app.state();
     let pool_now = pool_items(&disp.inner).await;
-    let urls: Vec<String> = pool_now.iter().map(|p| p.url.clone()).collect();
+    let mut urls: Vec<String> = pool_now.iter().map(|p| p.url.clone()).collect();
+    let mut fresh = HashSet::new();
+    if !settings.subscriptions.is_empty() {
+        emit_auto_status(app, "fetching", 0, urls.len(), None, None);
+        let mut known: HashSet<String> = urls.iter().cloned().collect();
+        let (new, results) = fetch_subscriptions(
+            &settings.subscriptions,
+            &settings.check.default_proto,
+            &mut known,
+        )
+        .await;
+        let _ = app.emit("auto://subscriptions", AutoSubscriptionPayload { results });
+        fresh = new.iter().cloned().collect();
+        urls.extend(new);
+    }
     let input_total = urls.len();
     if input_total == 0 {
         emit_auto_status(app, "empty", 0, 0, None, None);
@@ -326,7 +471,9 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
                     .collect()
             };
             let prev_fails = disp.inner.fails.lock().await.clone();
-            let merged = merge_auto_items(&results, &current, settings.max_ping_ms, &prev_fails);
+            let mut merged =
+                merge_auto_items(&results, &current, settings.max_ping_ms, &prev_fails);
+            add_new_items(&mut merged, &results, &fresh, settings.max_ping_ms);
             *disp.inner.fails.lock().await = merged.fails;
             store_pool(&disp.inner, merged.items, false).await;
             save_pool(app, &disp.inner).await;
@@ -424,6 +571,13 @@ fn sanitize_auto_settings(mut s: AutoSettings) -> AutoSettings {
         s.webhook_format = "txt".to_string();
     }
     crate::http::truncate_utf8(&mut s.webhook_template, TEMPLATE_MAX);
+    s.subscriptions = s
+        .subscriptions
+        .into_iter()
+        .map(|u| u.trim().to_string())
+        .filter(|u| is_http_url(u))
+        .take(SUBSCRIPTIONS_MAX)
+        .collect();
     s.webhook_urls = s
         .webhook_urls
         .into_iter()
@@ -682,5 +836,65 @@ mod tests {
         let s: AutoSettings = serde_json::from_str(r#"{"enabled": true}"#).unwrap();
         assert_eq!(s.interval_min, 30);
         assert_eq!(s.check.test_url, CheckConfig::default().test_url);
+    }
+    #[test]
+    fn subscriptions_add_only_unknown_proxies() {
+        let mut known: HashSet<String> = ["http://1.1.1.1:80".to_string()].into();
+        let entries = vec![
+            "1.1.1.1:80".to_string(),
+            "2.2.2.2:8080".to_string(),
+            "http://2.2.2.2:8080".to_string(),
+            "garbage".to_string(),
+            "3.3.3.3:3128".to_string(),
+        ];
+        let new = new_entries(entries.clone(), "http", &mut known, 10);
+        assert_eq!(new, vec!["2.2.2.2:8080", "3.3.3.3:3128"]);
+        assert!(known.contains("http://3.3.3.3:3128"));
+
+        let mut known = HashSet::new();
+        assert_eq!(new_entries(entries, "http", &mut known, 1).len(), 1);
+    }
+
+    #[test]
+    fn alive_subscription_proxies_join_the_pool() {
+        let current = HashMap::from([(
+            "http://a:80".to_string(),
+            ("raw-a".to_string(), Some(100), None),
+        )]);
+        let mut fresh_alive = alive_result("http://n:80", 50, "NL");
+        fresh_alive.proxy = "n:80".to_string();
+        let mut fresh_slow = alive_result("http://s:80", 900, "NL");
+        fresh_slow.proxy = "s:80".to_string();
+        let mut fresh_dead = dead("http://d:80");
+        fresh_dead.proxy = "d:80".to_string();
+        let results = vec![
+            alive_result("http://a:80", 10, "DE"),
+            fresh_alive,
+            fresh_slow,
+            fresh_dead,
+        ];
+        let fresh: HashSet<String> = ["n:80", "s:80", "d:80"].map(String::from).into();
+        let mut m = merge_auto_items(&results, &current, 500, &HashMap::new());
+        add_new_items(&mut m, &results, &fresh, 500);
+        assert_eq!(urls(&m), vec!["http://a:80", "http://n:80"]);
+        assert_eq!(m.items[1].raw, "n:80");
+        assert_eq!(m.items[1].country.as_deref(), Some("NL"));
+        assert_eq!(m.alive, 2);
+        assert_eq!(m.avg, Some(30));
+    }
+
+    #[test]
+    fn subscription_urls_are_sanitized() {
+        let s = sanitize_auto_settings(AutoSettings {
+            subscriptions: vec![
+                " https://lists.example.com/a.txt ".to_string(),
+                "ftp://x".to_string(),
+                String::new(),
+            ],
+            webhook_format: "discord".to_string(),
+            ..AutoSettings::default()
+        });
+        assert_eq!(s.subscriptions, vec!["https://lists.example.com/a.txt"]);
+        assert_eq!(s.webhook_format, "discord");
     }
 }

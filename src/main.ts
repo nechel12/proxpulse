@@ -26,6 +26,7 @@ import { AppSettings, readFlag, writeFlag } from "./app-settings.ts";
 import { applyTheme, loadThemePref } from "./theme.ts";
 import { Notifier } from "./notify.ts";
 import { formatWebhookResults } from "./webhooks.ts";
+import { SubscriptionPanel, formatSubscriptionResults, type SubscriptionResult } from "./subscriptions.ts";
 import { askConfirm, askText, flashLabel, screenVisible, setProgress } from "./ui.ts";
 import { NetStatus } from "./net-status.ts";
 import { CHECK_LIMITS, runCheckList, type CheckSettings } from "./check-client.ts";
@@ -295,10 +296,12 @@ async function updateTray(): Promise<void> {
 // ---------- scheduled checks (Rust scheduler events) ----------
 
 const webhooks = new WebhookPanel(() => scheduleAutoConfig());
+const subscriptions = new SubscriptionPanel(() => scheduleAutoConfig());
 const autoSettings = new AutoSettingsStore({
   readCheckSettings,
   maxPingMs: () => maxPingMs,
   webhooks,
+  subscriptions,
   saveCurrentSettings: () => settings.saveCurrentSettings(),
   updateTray,
 });
@@ -913,6 +916,17 @@ window.addEventListener("DOMContentLoaded", () => {
     scheduleAutoConfig();
   });
   webhooks.load();
+  subscriptions.load();
+  subscriptions.render(t);
+  ($("btn-subs-add") as HTMLButtonElement).addEventListener("click", () => {
+    subscriptions.add();
+    subscriptions.render(t);
+    const inputs = document.querySelectorAll<HTMLInputElement>("#subs-list input");
+    inputs[inputs.length - 1]?.focus();
+  });
+  void listen<{ results: SubscriptionResult[] }>("auto://subscriptions", (e) => {
+    setStatusText("subs-status", () => formatSubscriptionResults(e.payload.results, t));
+  }).catch(() => {});
   settings.loadIpapiSettings();
   loadAutoSettings();
   if (!settings.loadCurrentSettings()) profiles.currentId = "builtin:standard";

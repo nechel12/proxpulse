@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { PoolItem } from "./pool.ts";
+import { parseUrlList, renderUrlList } from "./url-list.ts";
 
 export type WebhookResult = { index: number; ok: boolean; message: string };
 export type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -38,15 +39,10 @@ export class WebhookPanel {
       this.includeCreds = false;
     }
     try {
-      const raw = localStorage.getItem("pp-webhooks");
-      const arr = raw ? JSON.parse(raw) : null;
-      this.urls = Array.isArray(arr)
-        ? arr.filter((s): s is string => typeof s === "string").slice(0, 10)
-        : [""];
+      this.urls = parseUrlList(localStorage.getItem("pp-webhooks"));
     } catch {
       this.urls = [""];
     }
-    if (this.urls.length === 0) this.urls = [""];
   }
 
   saveCreds(): void {
@@ -84,32 +80,11 @@ export class WebhookPanel {
   render(t: Translate): void {
     const box = document.getElementById("webhook-list");
     if (!box) return;
-    box.innerHTML = "";
-    this.urls.forEach((u, i) => {
-      const row = document.createElement("div");
-      row.className = "hrow";
-      const inp = document.createElement("input");
-      inp.value = u;
-      inp.placeholder = "https://...";
-      inp.spellcheck = false;
-      inp.addEventListener("input", () => {
-        this.urls[i] = inp.value;
-        this.saveUrls();
-      });
-      const del = document.createElement("button");
-      del.className = "btn ghost";
-      del.textContent = "×";
-      del.title = t("webhook_remove");
-      del.setAttribute("aria-label", t("webhook_remove"));
-      del.addEventListener("click", () => {
-        this.urls.splice(i, 1);
-        if (this.urls.length === 0) this.urls.push("");
-        this.saveUrls();
-        this.render(t);
-      });
-      row.appendChild(inp);
-      row.appendChild(del);
-      box.appendChild(row);
+    renderUrlList(box, this.urls, {
+      placeholder: "https://...",
+      removeLabel: t("webhook_remove"),
+      onChange: () => this.saveUrls(),
+      onRemove: () => this.render(t),
     });
   }
 

@@ -15,6 +15,7 @@ export const SETTINGS_KEYS = [
   "pp-auto-webhooks",
   "pp-maxping",
   "pp-webhooks",
+  "pp-subscriptions",
   "pp-webhook-format",
   "pp-webhook-creds",
   "pp-webhook-changes",

@@ -6,6 +6,7 @@ type Deps = {
   readCheckSettings: () => CheckSettings;
   maxPingMs: () => number;
   webhooks: { getUrls(): string[]; includeCreds: boolean; template: string; changesOnly: boolean };
+  subscriptions: { getUrls(): string[] };
   saveCurrentSettings: () => void;
   updateTray: () => Promise<void>;
 };
@@ -113,6 +114,7 @@ export class AutoSettingsStore {
       webhookIncludeCredentials: this.deps.webhooks.includeCreds,
       webhookTemplate: this.deps.webhooks.template,
       webhookChangesOnly: this.deps.webhooks.changesOnly,
+      subscriptions: this.deps.subscriptions.getUrls(),
       check: this.deps.readCheckSettings(),
     };
   }
