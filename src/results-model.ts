@@ -5,7 +5,7 @@ import { siteHost } from "./sites.ts";
 import type { ProxyResult } from "./types.ts";
 
 export type ResultFilter = "all" | "alive" | "dead";
-export type SortKey = "proxy" | "proto" | "status" | "ping" | "stab" | "anon" | "geo" | "iptype" | "tls" | "sites" | "speed" | "info";
+export type SortKey = "proxy" | "proto" | "status" | "ping" | "stab" | "anon" | "geo" | "iptype" | "tls" | "sites" | "speed" | "uptime" | "info";
 export type SortDir = "asc" | "desc";
 export type Sort = { key: SortKey; dir: SortDir } | null;
 
@@ -91,6 +91,7 @@ function sortValue(r: ProxyResult, key: SortKey): string | number | null {
     case "tls": return r.tls;
     case "sites": return r.sites?.length ? r.sites.filter((s) => s.ok).length : null;
     case "speed": return r.speed?.ok ? r.speed.mbps : null;
+    case "uptime": return r.history ? r.history.score : null;
     case "info": return r.alive ? r.ip : r.error;
   }
 }

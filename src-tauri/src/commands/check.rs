@@ -847,6 +847,7 @@ pub(crate) async fn run_checks(
 
 #[tauri::command]
 pub(crate) async fn check_proxies(
+    app: tauri::AppHandle,
     proxies: Vec<String>,
     config: CheckConfig,
     geo_cache: Option<Vec<GeoCacheEntry>>,
@@ -860,7 +861,7 @@ pub(crate) async fn check_proxies(
     let _guard = BusyGuard(busy);
     state.cancel.store(false, Ordering::SeqCst);
 
-    run_checks(
+    let results = run_checks(
         proxies,
         config,
         geo_cache.unwrap_or_default(),
@@ -868,6 +869,8 @@ pub(crate) async fn check_proxies(
         Some(&on_result),
     )
     .await?;
+    // Recorded before `Done`, so the UI reads the updated history.
+    crate::commands::history::record_results(&app, &results).await;
     // The channel carries the authoritative result list; `Done` tells the UI
     // that it is drained. Returning the Vec as well duplicated the whole
     // payload over IPC.

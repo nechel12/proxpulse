@@ -23,6 +23,7 @@ import {
 import { VirtualRows } from "./virtual-rows.ts";
 import { siteHost, siteSummary } from "./sites.ts";
 import { speedLabel } from "./speed-client.ts";
+import { historyTitle, uptimeClass, uptimeLabel } from "./history.ts";
 
 export type { ResultFilter } from "./results-model.ts";
 export type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -35,7 +36,7 @@ type Deps = {
   canRecheck: () => boolean;
 };
 
-const COLS = 13;
+const COLS = 14;
 const ANON_VALUES = ["elite", "anonymous", "transparent", "unknown"];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T | null;
@@ -48,6 +49,7 @@ export class ResultsView {
   private anchor = -1;
   private virtual: VirtualRows<ProxyResult> | null = null;
   private t: Translate = (k) => k;
+  locale = "ru";
   private optionsKey = "";
   private shared = new Map<string, number>();
   private deps: Deps | null = null;
@@ -318,6 +320,7 @@ export class ResultsView {
       `<td class="${tls.cls}" title="${infoTitle}">${cell("tls", tls.txt)}</td>` +
       this.sitesCell(r) +
       this.speedCell(r) +
+      `<td class="${uptimeClass(r.history)}" title="${escapeHtml(historyTitle(r.history, t, this.locale))}">${uptimeLabel(r.history)}</td>` +
       `<td class="cell-err" title="${infoTitle}">${info}</td>`;
     return tr;
   }

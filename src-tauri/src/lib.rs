@@ -29,6 +29,7 @@ use commands::dispatch::{
     start_proxy_inner, stop_local_proxy, stop_proxy_inner, DispatchState,
 };
 use commands::export::export_text_file;
+use commands::history::{clear_history, history_size, load_history, proxy_history, HistoryState};
 use commands::import::{fetch_url_text, parse_proxy_text};
 use commands::prefs::{
     autostart_enabled, close_to_tray, get_app_prefs, load_prefs, notify, set_app_prefs,
@@ -291,6 +292,7 @@ pub fn run() {
         .manage(TrayState::default())
         .manage(AutoState::default())
         .manage(PrefsState::default())
+        .manage(HistoryState::default())
         .invoke_handler(tauri::generate_handler![
             check_proxies,
             check_busy,
@@ -319,7 +321,10 @@ pub fn run() {
             autostart_enabled,
             set_autostart,
             notify,
-            speed_test
+            speed_test,
+            proxy_history,
+            history_size,
+            clear_history
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -400,6 +405,7 @@ pub fn run() {
             // Restore the pool before the webview asks for it and before the
             // scheduler runs, so scheduled checks survive a restart.
             let prefs = load_prefs(app.handle());
+            tauri::async_runtime::block_on(load_history(app.handle()));
             {
                 let disp: State<DispatchState> = app.state();
                 tauri::async_runtime::block_on(load_pool(app.handle(), &disp.inner));

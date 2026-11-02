@@ -1,11 +1,14 @@
 import { escapeHtml, maskProxy, pingClass } from "./format.ts";
 import { VirtualRows } from "./virtual-rows.ts";
+import { historyTitle, uptimeClass, uptimeLabel, type HistSummary } from "./history.ts";
 
 export type PoolItem = {
   raw: string;
   url: string;
   latency: number | null;
   country: string | null;
+  /** Results of earlier checks; filled in by the UI. */
+  history?: HistSummary;
 };
 
 export type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -16,6 +19,7 @@ export class PoolView {
   private views = new Map<string, VirtualRows<PoolItem>>();
   private onDelete: (raw: string) => void = () => {};
   private t: Translate = (k) => k;
+  locale = "ru";
 
   get count(): number {
     return this.items.length;
@@ -107,7 +111,10 @@ export class PoolView {
     const tr = document.createElement("tr");
     const ping = p.latency == null ? "-" : `${p.latency} ms`;
     const geo = p.country ? ` <span class="geo-tag">${escapeHtml(p.country)}</span>` : "";
-    tr.innerHTML = `<td>${n + 1}</td><td>${escapeHtml(this.hideCreds ? maskProxy(p.raw, p.url) : p.raw)}${geo}</td><td class="${pingClass(p.latency)}">${ping}</td>`;
+    const up = p.history
+      ? ` <span class="geo-tag ${uptimeClass(p.history)}" title="${escapeHtml(historyTitle(p.history, this.t, this.locale))}">${uptimeLabel(p.history)}</span>`
+      : "";
+    tr.innerHTML = `<td>${n + 1}</td><td>${escapeHtml(this.hideCreds ? maskProxy(p.raw, p.url) : p.raw)}${geo}</td><td class="${pingClass(p.latency)}">${ping}${up}</td>`;
     if (withDelete) {
       const td = document.createElement("td");
       const b = document.createElement("button");
@@ -138,6 +145,9 @@ export class PoolView {
     }
     if (sort === "ping") rows = [...rows].sort((a, b) => (a.latency ?? 1e12) - (b.latency ?? 1e12));
     else if (sort === "country") rows = [...rows].sort((a, b) => (a.country ?? "~~~").localeCompare(b.country ?? "~~~"));
+    else if (sort === "score") {
+      rows = [...rows].sort((a, b) => (b.history?.score ?? -1) - (a.history?.score ?? -1) || (a.latency ?? 1e12) - (b.latency ?? 1e12));
+    }
 
     if (rows.length === 0) {
       view.set([]);

@@ -241,10 +241,10 @@
         <div class="table-wrap" id="results-wrap" tabindex="0" data-i18n-aria="results_t">
           <table>
             <thead id="results-head">
-              <tr><th>#</th><th aria-sort="none"><button class="th-btn" data-sort="proxy" data-i18n="th_proxy">Прокси</button></th><th aria-sort="none"><button class="th-btn" data-sort="proto" data-i18n="th_type">Тип</button></th><th aria-sort="none"><button class="th-btn" data-sort="status" data-i18n="th_status">Статус</button></th><th aria-sort="none"><button class="th-btn" data-sort="ping" data-i18n="th_ping">Пинг</button></th><th aria-sort="none"><button class="th-btn" data-sort="stab" data-i18n="th_stab">Джиттер/SR</button></th><th aria-sort="none"><button class="th-btn" data-sort="anon" data-i18n="th_anon">Анон</button></th><th aria-sort="none"><button class="th-btn" data-sort="geo" data-i18n="th_geo">Гео</button></th><th aria-sort="none"><button class="th-btn" data-sort="iptype" data-i18n="th_iptype">Тип IP</button></th><th aria-sort="none"><button class="th-btn" data-sort="tls">TLS</button></th><th aria-sort="none"><button class="th-btn" data-sort="sites" data-i18n="th_sites">Сайты</button></th><th aria-sort="none"><button class="th-btn" data-sort="speed" data-i18n="th_speed">Скорость</button></th><th aria-sort="none"><button class="th-btn" data-sort="info" data-i18n="th_info">Инфо</button></th></tr>
+              <tr><th>#</th><th aria-sort="none"><button class="th-btn" data-sort="proxy" data-i18n="th_proxy">Прокси</button></th><th aria-sort="none"><button class="th-btn" data-sort="proto" data-i18n="th_type">Тип</button></th><th aria-sort="none"><button class="th-btn" data-sort="status" data-i18n="th_status">Статус</button></th><th aria-sort="none"><button class="th-btn" data-sort="ping" data-i18n="th_ping">Пинг</button></th><th aria-sort="none"><button class="th-btn" data-sort="stab" data-i18n="th_stab">Джиттер/SR</button></th><th aria-sort="none"><button class="th-btn" data-sort="anon" data-i18n="th_anon">Анон</button></th><th aria-sort="none"><button class="th-btn" data-sort="geo" data-i18n="th_geo">Гео</button></th><th aria-sort="none"><button class="th-btn" data-sort="iptype" data-i18n="th_iptype">Тип IP</button></th><th aria-sort="none"><button class="th-btn" data-sort="tls">TLS</button></th><th aria-sort="none"><button class="th-btn" data-sort="sites" data-i18n="th_sites">Сайты</button></th><th aria-sort="none"><button class="th-btn" data-sort="speed" data-i18n="th_speed">Скорость</button></th><th aria-sort="none"><button class="th-btn" data-sort="uptime" data-i18n="th_uptime" data-i18n-title="th_uptime_t">Аптайм</button></th><th aria-sort="none"><button class="th-btn" data-sort="info" data-i18n="th_info">Инфо</button></th></tr>
             </thead>
             <tbody id="tbody">
-              <tr class="empty"><td colspan="13" data-i18n="empty_idle">Пока пусто — вставьте список слева и нажмите «Старт».</td></tr>
+              <tr class="empty"><td colspan="14" data-i18n="empty_idle">Пока пусто — вставьте список слева и нажмите «Старт».</td></tr>
             </tbody>
           </table>
         </div>
@@ -312,6 +312,7 @@
             <option value="added" data-i18n="pool_sort_added">Порядок</option>
             <option value="ping" data-i18n="pool_sort_ping">Пинг</option>
             <option value="country" data-i18n="pool_sort_country">Страна</option>
+            <option value="score" data-i18n="pool_sort_score">Надёжность</option>
           </select>
         </div>        <div class="hint" style="margin-bottom:8px" data-i18n="pool_hint">Пул пополняется автоматически после каждой проверки.</div>
         <div class="table-wrap">
@@ -403,6 +404,7 @@
             <option value="added" data-i18n="pool_sort_added">Порядок</option>
             <option value="ping" data-i18n="pool_sort_ping">Пинг</option>
             <option value="country" data-i18n="pool_sort_country">Страна</option>
+            <option value="score" data-i18n="pool_sort_score">Надёжность</option>
           </select>
         </div>
         <div class="table-wrap">
@@ -506,6 +508,10 @@
         <div class="set-row">
           <span class="set-text"><span class="set-name" data-i18n="diag_title">Диагностика</span><span class="set-desc" data-i18n="diag_d">Версия, система и последние ошибки — для отчёта об ошибке</span></span>
           <button id="btn-copy-diag" class="btn ghost" data-i18n="diag_copy">Копировать</button>
+        </div>
+        <div class="set-row">
+          <span class="set-text"><span class="set-name" data-i18n="hist_row">История прокси</span><span class="set-desc" id="hist-size"></span></span>
+          <button id="btn-hist-clear" class="btn ghost" data-i18n="btn_clear">Очистить</button>
         </div>
         <details class="set-row set-details">
           <summary><span data-i18n="err_title">Журнал ошибок</span> <span id="err-count" class="count">0</span></summary>

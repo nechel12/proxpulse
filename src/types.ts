@@ -1,3 +1,5 @@
+import type { HistSummary } from "./history.ts";
+
 export type ProxyResult = {
   proxy: string;
   url: string;
@@ -26,6 +28,8 @@ export type ProxyResult = {
   sites?: SiteProbe[];
   /** Filled by a speed test after the check. */
   speed?: SpeedResult;
+  /** Results of earlier checks of this proxy. */
+  history?: HistSummary;
 };
 
 export type SiteProbe = { url: string; ok: boolean; ms: number | null; status: number | null; error: string | null };

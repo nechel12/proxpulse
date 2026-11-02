@@ -465,6 +465,7 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
                 emit_auto_status(app, "offline", 0, total, None, None);
                 return AutoOutcome::Offline;
             }
+            crate::commands::history::record_results(app, &results).await;
             let current: HashMap<String, PoolEntry> = {
                 let pool = disp.inner.pool.lock().await;
                 pool.iter()

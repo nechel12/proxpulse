@@ -4,6 +4,7 @@ import { clip } from "./clip.ts";
 import { ResultsView, type RowAction } from "./results.ts";
 import { defaultOrder, mergeResults } from "./results-model.ts";
 import { SitesPanel } from "./sites.ts";
+import { fetchHistory } from "./history.ts";
 import { formatMbps, loadSpeedMb, runSpeedTest, saveSpeedMb } from "./speed-client.ts";
 import { PoolView, type PoolItem } from "./pool.ts";
 import { exportList, type ExportKind } from "./export-panel.ts";
@@ -109,6 +110,8 @@ function setNet(
 
 function applyI18n() {
   document.documentElement.lang = lang;
+  resultsView.locale = lang;
+  pool.locale = lang;
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     const k = (el as HTMLElement).dataset.i18n as string;
     (el as HTMLElement).textContent = t(k);
@@ -177,6 +180,25 @@ function updateCounts() {
 
 function render() {
   resultsView.render(results, filter, t, () => screenVisible("screen-check"));
+}
+
+/** Attach the per-proxy history to the results and the pool. */
+async function attachHistory(): Promise<void> {
+  const map = await fetchHistory([...results.map((r) => r.url), ...pool.items.map((p) => p.url)]);
+  if (Object.keys(map).length === 0) return;
+  results = results.map((r) => (map[r.url] ? { ...r, history: map[r.url] } : r));
+  for (const p of pool.items) p.history = map[p.url];
+  render();
+  renderPool();
+  void refreshHistorySize();
+}
+
+async function refreshHistorySize(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    const n = await invoke<number>("history_size");
+    setStatusText("hist-size", () => t("hist_size", { n }));
+  } catch { /* older backend */ }
 }
 
 function renderPool() {
@@ -473,6 +495,7 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
   await syncPool(false);
   // A re-check of a few entries would distort the per-run ping history.
   if (!base) pushPingPoint(results);
+  void attachHistory();
 }
 
 /** Download speed through the given alive proxies, filled in their rows. */
@@ -1041,6 +1064,7 @@ window.addEventListener("DOMContentLoaded", () => {
   void listen<AutoPoolEvent>("auto://pool", (e) => {
     const before = pool.count;
     applyAutoPool(e.payload, (items) => pool.set(items), () => { renderPool(); updateCounts(); });
+    void attachHistory();
     const min = appSettings.poolMin;
     if (before >= min && pool.count < min) {
       void notifier.send(
@@ -1083,9 +1107,22 @@ window.addEventListener("DOMContentLoaded", () => {
       })));
       renderPool();
       updateCounts();
+      void attachHistory();
     })
     .catch(() => { /* older backend */ });
   void dispatchMonitor.poll(t, setStatusText);
+
+  $("btn-hist-clear").addEventListener("click", async () => {
+    if (!(await askConfirm(t("hist_clear_confirm")))) return;
+    try {
+      await invoke("clear_history");
+    } catch { /* older backend */ }
+    results = results.map((r) => ({ ...r, history: undefined }));
+    for (const p of pool.items) p.history = undefined;
+    render();
+    renderPool();
+    void refreshHistorySize();
+  });
 
   // Keyboard shortcuts: Ctrl+Enter starts, Esc stops, Ctrl+F filters.
   document.addEventListener("keydown", (e) => {

@@ -3,6 +3,7 @@ pub(crate) mod auto;
 pub(crate) mod check;
 pub(crate) mod dispatch;
 pub(crate) mod export;
+pub(crate) mod history;
 pub(crate) mod import;
 pub(crate) mod prefs;
 pub(crate) mod speed;
