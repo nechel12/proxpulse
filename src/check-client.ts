@@ -29,6 +29,8 @@ export type CheckSettings = {
   sites: string[];
   /** Judge over HTTPS and HTTP: the plain-HTTP request for anonymity. */
   judgeHttpUrl: string | null;
+  /** Look exit IPs up in DNS blocklists. */
+  withDnsbl: boolean;
 };
 
 export function deadStub(proxy: string, msg: string): ProxyResult {

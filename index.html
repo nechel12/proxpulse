@@ -153,6 +153,7 @@
             <div class="deep-title" data-i18n="sites_title">Доступ к сайтам</div>
             <div class="preset-chips" id="site-chips"></div>
             <input id="sites-custom" class="sites-input" spellcheck="false" data-i18n-ph="sites_ph" placeholder="Свои сайты: example.com, https://…" />
+            <label class="chk"><input id="chk-dnsbl" type="checkbox" /><span data-i18n="chk_dnsbl">Чёрные списки IP (DNSBL)</span></label>
           </div>
 
           <details class="adv" id="adv-settings">
@@ -227,6 +228,11 @@
           <select id="f-anon" class="pool-sort" data-i18n-aria="f_anon_t"><option value="">Анонимность: все</option></select>
           <select id="f-country" class="pool-sort" data-i18n-aria="f_country_t"><option value="">Страна: все</option></select>
           <select id="f-site" class="pool-sort hidden" data-i18n-aria="f_site_t"><option value="">Сайт: любой</option></select>
+          <select id="f-dnsbl" class="pool-sort hidden" data-i18n-aria="f_dnsbl_t">
+            <option value="" data-i18n="f_dnsbl_all">DNSBL: все</option>
+            <option value="clean" data-i18n="f_dnsbl_clean">Нет в чёрных списках</option>
+            <option value="listed" data-i18n="f_dnsbl_listed">В чёрных списках</option>
+          </select>
           <select id="f-dedupe" class="pool-sort" data-i18n-aria="f_dedupe_t">
             <option value="" data-i18n="f_dedupe_all">Все прокси</option>
             <option value="ip" data-i18n="f_dedupe_ip">Один на IP выхода</option>

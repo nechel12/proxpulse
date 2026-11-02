@@ -105,3 +105,14 @@ describe("exit IP and ASN grouping", () => {
     expect(exitIpCounts(rows)).toEqual(new Map([["9.9.9.9", 2], ["8.8.8.8", 1]]));
   });
 });
+
+describe("DNSBL filter", () => {
+  it("keeps clean or listed proxies and skips unchecked ones", () => {
+    const listed = alive("1.0.0.9:80", { dnsbl: { listed: ["Spamhaus"], unknown: [] } });
+    const clean = alive("1.0.0.8:80", { dnsbl: { listed: [], unknown: ["Spamhaus"] } });
+    const rows = [listed, clean, de];
+    expect(filterResults(rows, { ...NO_FILTERS, dnsbl: "listed" })).toEqual([listed]);
+    expect(filterResults(rows, { ...NO_FILTERS, dnsbl: "clean" })).toEqual([clean]);
+    expect(filterResults(rows, NO_FILTERS)).toHaveLength(3);
+  });
+});

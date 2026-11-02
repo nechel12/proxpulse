@@ -20,11 +20,13 @@ export type ResultFilters = {
   dedupe: Dedupe;
   /** Host of a site the proxy must open, or "" for any. */
   site: string;
+  /** "clean" or "listed" by DNS blocklists, or "" for any. */
+  dnsbl: string;
 };
 
 export type Dedupe = "" | "ip" | "asn";
 
-export const NO_FILTERS: ResultFilters = { status: "all", query: "", proto: "", anon: "", country: "", dedupe: "", site: "" };
+export const NO_FILTERS: ResultFilters = { status: "all", query: "", proto: "", anon: "", country: "", dedupe: "", site: "", dnsbl: "" };
 
 export function countryOf(r: ProxyResult): string {
   return r.country ?? r.country_code ?? "";
@@ -39,6 +41,7 @@ export function filterResults(results: ProxyResult[], f: ResultFilters): ProxyRe
     if (f.anon && (r.anonymity ?? "unknown") !== f.anon) return false;
     if (f.country && countryOf(r) !== f.country) return false;
     if (f.site && !(r.sites ?? []).some((s) => s.ok && siteHost(s.url) === f.site)) return false;
+    if (f.dnsbl && (!r.dnsbl || (r.dnsbl.listed.length > 0) !== (f.dnsbl === "listed"))) return false;
     if (q) {
       const hay = [r.proxy, r.proto, r.error ?? "", r.ip ?? "", r.country ?? "", r.country_code ?? "", r.city ?? "", r.isp ?? "", r.org ?? "", r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tls ?? ""].join(" ").toLowerCase();
       if (!hay.includes(q)) return false;

@@ -30,7 +30,12 @@ export type ProxyResult = {
   speed?: SpeedResult;
   /** Results of earlier checks of this proxy. */
   history?: HistSummary;
+  /** Exit IP in DNS blocklists; absent when not checked. */
+  dnsbl?: DnsblResult | null;
 };
+
+/** `DnsblResult` in dnsbl.rs. */
+export type DnsblResult = { listed: string[]; unknown: string[] };
 
 export type SiteProbe = { url: string; ok: boolean; ms: number | null; status: number | null; error: string | null };
 

@@ -9,6 +9,7 @@ use tauri::{
 };
 use tokio::sync::{Mutex, Semaphore};
 
+mod dnsbl;
 mod extract;
 mod http;
 mod judge_sig;
@@ -73,6 +74,9 @@ pub struct ProxyResult {
     /// Reachability of the sites chosen for the check, through this proxy.
     #[serde(default)]
     pub sites: Vec<SiteProbe>,
+    /// Exit IP in DNS blocklists; None when not checked.
+    #[serde(default)]
+    pub dnsbl: Option<dnsbl::DnsblResult>,
 }
 
 /// One site requested through a proxy: any HTTP answer means reachable.
@@ -234,6 +238,7 @@ static ANON_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
 static TAMPER_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
 static TLS_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
 static SITES_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
+static DNSBL_SEM: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
 
 fn geo_semaphore() -> &'static Semaphore {
     GEO_SEM.get_or_init(|| Semaphore::new(GEO_CONCURRENCY))

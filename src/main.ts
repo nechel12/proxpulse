@@ -257,6 +257,7 @@ function readCheckSettings(): CheckSettings {
     ipapiKey: settings.activeIpapiKey(),
     sites: sitesPanel.urls(),
     judgeHttpUrl: settings.judgeHttpUrl(),
+    withDnsbl: ($("chk-dnsbl") as HTMLInputElement).checked,
   };
 }
 
@@ -801,8 +802,11 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Sites are not part of presets, and scheduled checks skip them.
+  // Sites and DNSBL are not part of presets, and scheduled checks skip them.
   sitesPanel.init(() => {});
+  const dnsbl = $<HTMLInputElement>("chk-dnsbl");
+  dnsbl.checked = readFlag("pp-dnsbl", false);
+  dnsbl.addEventListener("change", () => writeFlag("pp-dnsbl", dnsbl.checked));
   const speedSel = $<HTMLSelectElement>("speed-mb");
   speedSel.value = String(loadSpeedMb());
   speedSel.addEventListener("change", () => saveSpeedMb(Number(speedSel.value)));

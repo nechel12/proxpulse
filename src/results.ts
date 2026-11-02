@@ -68,7 +68,7 @@ export class ResultsView {
         deps.onChange();
       });
     });
-    for (const id of ["f-proto", "f-anon", "f-country", "f-site", "f-dedupe"]) {
+    for (const id of ["f-proto", "f-anon", "f-country", "f-site", "f-dnsbl", "f-dedupe"]) {
       $(id)?.addEventListener("change", () => {
         this.clearSelection();
         wrap.scrollTop = 0;
@@ -162,6 +162,7 @@ export class ResultsView {
       country: $<HTMLSelectElement>("f-country")?.value ?? "",
       dedupe: ($<HTMLSelectElement>("f-dedupe")?.value ?? "") as Dedupe,
       site: $<HTMLSelectElement>("f-site")?.value ?? "",
+      dnsbl: $<HTMLSelectElement>("f-dnsbl")?.value ?? "",
     }), this.sort);
     if (this.rows.length === 0) {
       this.virtual.set([]);
@@ -256,6 +257,7 @@ export class ResultsView {
     fill("f-country", t("f_country_all"), countries.map((c) => [c, c]));
     fill("f-site", t("f_site_all"), opts.site.map((h) => [h, t("f_site_opens", { site: h })]));
     $("f-site")?.classList.toggle("hidden", opts.site.length === 0);
+    $("f-dnsbl")?.classList.toggle("hidden", !results.some((r) => r.dnsbl));
   }
 
   private sitesCell(r: ProxyResult): string {
@@ -298,6 +300,9 @@ export class ResultsView {
     const marks = [
       r.tamper === "modified" ? `<span class="anon-trans" title="tamper">?mod</span>` : "",
       r.tls === "modified" ? `<span class="anon-trans" title="tls">?tls</span>` : "",
+      r.dnsbl?.listed.length
+        ? `<span class="anon-trans" title="${escapeHtml(t("dnsbl_listed_t", { lists: r.dnsbl.listed.join(", ") }))}">bl ${r.dnsbl.listed.length}</span>`
+        : "",
     ].join(" ");
     // Several "different" proxies often leave through one exit IP.
     const same = r.ip ? this.shared.get(r.ip) ?? 0 : 0;

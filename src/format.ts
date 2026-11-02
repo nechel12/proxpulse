@@ -50,6 +50,10 @@ export function rowTitle(r: ProxyResult): string {
   if (r.tamper) parts.push(`tamper ${r.tamper}`);
   if (r.tls) parts.push(`tls ${r.tls}${r.tls_info ? ` (${r.tls_info})` : ""}`);
   else if (r.tls_info) parts.push(`tls ? (${r.tls_info})`);
+  if (r.dnsbl) {
+    const unknown = r.dnsbl.unknown.length ? ` (no answer: ${r.dnsbl.unknown.join(", ")})` : "";
+    parts.push(`dnsbl ${r.dnsbl.listed.length ? `listed: ${r.dnsbl.listed.join(", ")}` : "clean"}${unknown}`);
+  }
   if (r.skipped?.length) parts.push(`skipped ${r.skipped.join(", ")}`);
   if (r.error) parts.push(r.error);
   return parts.join(" | ");

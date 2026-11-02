@@ -58,6 +58,8 @@ pub(crate) struct CheckConfig {
     /// Judge mode over HTTPS: the plain-HTTP `/judge` URL asked through every
     /// alive proxy for anonymity and integrity.
     pub(crate) judge_http_url: Option<String>,
+    /// Look the exit IP up in DNS blocklists.
+    pub(crate) with_dnsbl: bool,
 }
 
 impl Default for CheckConfig {
@@ -78,6 +80,7 @@ impl Default for CheckConfig {
             ipapi_key: None,
             sites: Vec::new(),
             judge_http_url: None,
+            with_dnsbl: false,
         }
     }
 }
@@ -129,6 +132,7 @@ impl CheckConfig {
             ipapi_key: self.ipapi_key.as_deref().map(Arc::from),
             sites: self.sites.iter().cloned().collect(),
             judge_http: self.judge_http_url.as_deref().map(Arc::from),
+            dnsbl: self.with_dnsbl,
         }
     }
 }
@@ -148,6 +152,7 @@ pub(crate) struct CheckFlags {
     pub(crate) ipapi_key: Option<Arc<str>>,
     pub(crate) sites: Arc<[String]>,
     pub(crate) judge_http: Option<Arc<str>>,
+    pub(crate) dnsbl: bool,
 }
 
 // ================= checker =================
@@ -177,6 +182,7 @@ pub(crate) fn dead_result(raw: String, proto: String, attempts: u32, err: String
         error: Some(err),
         skipped: Vec::new(),
         sites: Vec::new(),
+        dnsbl: None,
     }
 }
 
@@ -252,11 +258,18 @@ pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckF
     } else {
         Duration::ZERO
     };
+    // DNS lookups of all lists run together, four seconds at most.
+    let dnsbl = if flags.dnsbl {
+        Duration::from_secs(5)
+    } else {
+        Duration::ZERO
+    };
     flags.precheck_timeout
         + timeout * (repeats as u32 + 1)
         + deep
         + sites
         + judge_http
+        + dnsbl
         + Duration::from_secs(5)
 }
 
@@ -411,6 +424,7 @@ async fn check_candidate_inner(
         error: None,
         skipped: Vec::new(),
         sites: Vec::new(),
+        dnsbl: None,
     };
 
     if let Some(b) = first_body {
@@ -519,6 +533,14 @@ async fn check_candidate_inner(
         match deep_semaphore(&SITES_SEM).try_acquire() {
             Ok(_permit) => res.sites = probe_sites(&client, &flags.sites).await,
             Err(_) => res.skipped.push("sites".to_string()),
+        }
+    }
+    if flags.dnsbl && !cancel.load(Ordering::Relaxed) {
+        if let Some(ip) = res.ip.clone() {
+            match deep_semaphore(&DNSBL_SEM).try_acquire() {
+                Ok(_permit) => res.dnsbl = crate::dnsbl::check_ip(&ip).await,
+                Err(_) => res.skipped.push("dnsbl".to_string()),
+            }
         }
     }
     res

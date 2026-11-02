@@ -40,6 +40,7 @@ fn direct_ip_is_requested_only_where_a_leak_is_visible() {
         ipapi_key: None,
         sites: Arc::from(Vec::<String>::new()),
         judge_http: None,
+        dnsbl: false,
     };
     // An HTTPS judge never sees proxy headers: it does not get our IP.
     assert!(!wants_direct_ip(
@@ -247,6 +248,7 @@ fn candidate_budget_covers_deep_tls() {
         ipapi_key: None,
         sites: Arc::from(Vec::<String>::new()),
         judge_http: None,
+        dnsbl: false,
     };
     // attempts (10s) + DNS/CONNECT/TCP/TLS (20s) + precheck (1.5s) + 5s margin
     assert_eq!(
@@ -384,4 +386,26 @@ fn speed_test_reads_the_response_head() {
     );
     assert_eq!(mbps(5_000_000, Duration::from_secs(4)), Some(10.0));
     assert_eq!(mbps(0, Duration::from_secs(1)), None);
+}
+
+#[test]
+fn dnsbl_names_and_answers() {
+    use crate::dnsbl::{interpret, query_name, Answer};
+    use std::net::{IpAddr, Ipv4Addr};
+    assert_eq!(
+        query_name(Ipv4Addr::new(1, 2, 3, 4), "zen.spamhaus.org"),
+        "4.3.2.1.zen.spamhaus.org"
+    );
+    let ip = |a, b, c, d| IpAddr::V4(Ipv4Addr::new(a, b, c, d));
+    assert_eq!(interpret(&[ip(127, 0, 0, 2)]), Answer::Listed);
+    assert_eq!(interpret(&[]), Answer::NotListed);
+    // Spamhaus refuses queries from public resolvers with 127.255.255.x.
+    assert_eq!(interpret(&[ip(127, 255, 255, 254)]), Answer::Unknown);
+    assert_eq!(interpret(&[ip(10, 0, 0, 1)]), Answer::Unknown);
+}
+
+#[tokio::test]
+async fn dnsbl_skips_ipv6_and_garbage() {
+    assert!(crate::dnsbl::check_ip("2001:db8::1").await.is_none());
+    assert!(crate::dnsbl::check_ip("not an ip").await.is_none());
 }

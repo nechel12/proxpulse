@@ -24,6 +24,7 @@ export const SETTINGS_KEYS = [
   "pp-ipapi-pro",
   "pp-export-template",
   "pp-sites",
+  "pp-dnsbl",
   "pp-speed-mb",
 ] as const;
 
