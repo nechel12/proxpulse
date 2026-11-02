@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { clampMinutes, migrateLegacySchedule } from "./auto-settings.ts";
+import { clampMinutes, migrateLegacySchedule, storedAutoConfig } from "./auto-settings.ts";
+import type { CheckSettings } from "./check-client.ts";
 
 function store(initial: Record<string, string>) {
   const data = new Map(Object.entries(initial));
@@ -41,5 +42,30 @@ describe("migrateLegacySchedule", () => {
     expect(clampMinutes("9999")).toBe(1440);
     expect(clampMinutes("7.9")).toBe(7);
     expect(clampMinutes(null)).toBe(30);
+  });
+
+  it("reads another pool's schedule from its own keys", () => {
+    const check = { testUrl: "https://example.com" } as CheckSettings;
+    const s = store({
+      "pp-auto-on": "1",
+      "pp-auto-on@p1": "1",
+      "pp-auto-min@p1": "5",
+      "pp-maxping@p1": "800",
+      "pp-webhooks@p1": '["https://hooks.example.com/a", ""]',
+      "pp-webhook-format@p1": "bogus",
+      "pp-subscriptions@p1": '["https://lists.example.com/x.txt", "ftp://nope"]',
+    });
+    const cfg = storedAutoConfig(s, "p1", check);
+    expect(cfg).toMatchObject({
+      enabled: true,
+      intervalMin: 5,
+      sendWebhooks: true,
+      maxPingMs: 800,
+      webhookUrls: ["https://hooks.example.com/a"],
+      webhookFormat: "txt",
+      subscriptions: ["https://lists.example.com/x.txt"],
+      check,
+    });
+    expect(storedAutoConfig(s, "p2", check).enabled).toBe(false);
   });
 });

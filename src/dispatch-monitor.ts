@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { MAIN_POOL } from "./pools.ts";
 
 export type DispatchStatus = {
   running: boolean;
@@ -18,6 +19,8 @@ type Translate = (key: string, params?: Record<string, string | number>) => stri
 type StatusSetter = (id: string, render: () => string) => void;
 
 export class DispatchMonitor {
+  /** The pool whose dispatcher is shown. */
+  pool = MAIN_POOL;
   running = false;
   private lastError: string | null = null;
   private timer: number | undefined;
@@ -29,6 +32,13 @@ export class DispatchMonitor {
     if (el) el.textContent = `127.0.0.1:${port}`;
   }
 
+  /** Show another pool: its saved configuration fills the form again. */
+  reset(): void {
+    this.running = false;
+    this.lastError = null;
+    this.filled = false;
+  }
+
   renderPill(t: Translate): void {
     const pill = document.getElementById("srv-pill");
     if (!pill) return;
@@ -38,7 +48,10 @@ export class DispatchMonitor {
 
   async poll(t: Translate, setStatus: StatusSetter): Promise<void> {
     try {
-      const s = await invoke<DispatchStatus>("local_proxy_status");
+      const pool = this.pool;
+      const s = await invoke<DispatchStatus>("local_proxy_status", { pool });
+      // The user switched pools while this poll was in flight.
+      if (pool !== this.pool) return;
       const req = document.getElementById("srv-req");
       if (req) req.textContent = String(s.requests);
       const cooling = document.getElementById("srv-cooling");

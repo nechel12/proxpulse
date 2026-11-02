@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { PoolItem } from "./pool.ts";
 import { parseUrlList, renderUrlList } from "./url-list.ts";
+import { MAIN_POOL, scopedKey } from "./pools.ts";
 
 export type WebhookResult = { index: number; ok: boolean; message: string };
 export type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -26,20 +27,22 @@ export class WebhookPanel {
   /** Scheduled sends carry only additions and removals. */
   changesOnly = false;
   template = DEFAULT_TEMPLATE;
+  /** The pool whose webhooks are shown and stored. */
+  pool = MAIN_POOL;
   private sending = false;
 
   constructor(private onChange: () => void) {}
 
   load(): void {
     try {
-      this.includeCreds = localStorage.getItem("pp-webhook-creds") === "1";
-      this.changesOnly = localStorage.getItem("pp-webhook-changes") === "1";
-      this.template = localStorage.getItem("pp-webhook-template") ?? DEFAULT_TEMPLATE;
+      this.includeCreds = localStorage.getItem(scopedKey("pp-webhook-creds", this.pool)) === "1";
+      this.changesOnly = localStorage.getItem(scopedKey("pp-webhook-changes", this.pool)) === "1";
+      this.template = localStorage.getItem(scopedKey("pp-webhook-template", this.pool)) ?? DEFAULT_TEMPLATE;
     } catch {
       this.includeCreds = false;
     }
     try {
-      this.urls = parseUrlList(localStorage.getItem("pp-webhooks"));
+      this.urls = parseUrlList(localStorage.getItem(scopedKey("pp-webhooks", this.pool)));
     } catch {
       this.urls = [""];
     }
@@ -47,14 +50,14 @@ export class WebhookPanel {
 
   saveCreds(): void {
     try {
-      localStorage.setItem("pp-webhook-creds", this.includeCreds ? "1" : "0");
+      localStorage.setItem(scopedKey("pp-webhook-creds", this.pool), this.includeCreds ? "1" : "0");
     } catch { /* ignore */ }
   }
 
   saveOptions(): void {
     try {
-      localStorage.setItem("pp-webhook-changes", this.changesOnly ? "1" : "0");
-      localStorage.setItem("pp-webhook-template", this.template);
+      localStorage.setItem(scopedKey("pp-webhook-changes", this.pool), this.changesOnly ? "1" : "0");
+      localStorage.setItem(scopedKey("pp-webhook-template", this.pool), this.template);
     } catch { /* ignore */ }
     this.onChange();
   }
@@ -72,7 +75,7 @@ export class WebhookPanel {
 
   saveUrls(): void {
     try {
-      localStorage.setItem("pp-webhooks", JSON.stringify(this.urls.slice(0, 10)));
+      localStorage.setItem(scopedKey("pp-webhooks", this.pool), JSON.stringify(this.urls.slice(0, 10)));
     } catch { /* ignore */ }
     this.onChange();
   }

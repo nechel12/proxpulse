@@ -4,5 +4,6 @@ mod extract;
 mod history;
 mod judge_sig;
 mod parser;
+mod pools;
 mod prefs;
 mod transport;

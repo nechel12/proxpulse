@@ -1,6 +1,6 @@
 use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckConfig, CheckState};
 use crate::commands::dispatch::{
-    pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
+    pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState, MAIN_POOL,
 };
 use crate::commands::import::fetch_url_text;
 use crate::commands::webhook::{
@@ -72,26 +72,74 @@ pub(crate) struct AutoInner {
     pub(crate) sent: SentLists,
 }
 
+impl AutoInner {
+    fn new() -> Self {
+        Self {
+            settings: Mutex::new(AutoSettings::default()),
+            next: AtomicU64::new(0),
+            running: Arc::new(AtomicBool::new(false)),
+            sent: SentLists::default(),
+        }
+    }
+}
+
+/// One schedule per pool: the main one, reached directly by the tray, and
+/// the named pools by id.
 pub(crate) struct AutoState {
     pub(crate) inner: Arc<AutoInner>,
+    extra: std::sync::RwLock<HashMap<String, Arc<AutoInner>>>,
 }
 
 impl Default for AutoState {
     fn default() -> Self {
         Self {
-            inner: Arc::new(AutoInner {
-                settings: Mutex::new(AutoSettings::default()),
-                next: AtomicU64::new(0),
-                running: Arc::new(AtomicBool::new(false)),
-                sent: SentLists::default(),
-            }),
+            inner: Arc::new(AutoInner::new()),
+            extra: std::sync::RwLock::new(HashMap::new()),
         }
+    }
+}
+
+impl AutoState {
+    pub(crate) fn pool(&self, id: Option<&str>) -> Result<Arc<AutoInner>, String> {
+        match id.unwrap_or(MAIN_POOL) {
+            MAIN_POOL => Ok(self.inner.clone()),
+            id => self
+                .extra
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(id)
+                .cloned()
+                .ok_or_else(|| "unknown pool".to_string()),
+        }
+    }
+
+    pub(crate) fn add(&self, id: &str) {
+        self.extra
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(AutoInner::new()));
+    }
+
+    pub(crate) fn remove(&self, id: &str) {
+        self.extra
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+    }
+
+    fn all(&self) -> Vec<(String, Arc<AutoInner>)> {
+        let mut out = vec![(MAIN_POOL.to_string(), self.inner.clone())];
+        let extra = self.extra.read().unwrap_or_else(|e| e.into_inner());
+        out.extend(extra.iter().map(|(id, a)| (id.clone(), a.clone())));
+        out
     }
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AutoStatus {
+    pool: String,
     state: String,
     alive: usize,
     total: usize,
@@ -102,11 +150,13 @@ struct AutoStatus {
 
 #[derive(Debug, Clone, Serialize)]
 struct AutoPoolPayload {
+    pool: String,
     items: Vec<DispatchPoolItem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct AutoWebhookPayload {
+    pool: String,
     results: Vec<WebhookResult>,
 }
 
@@ -125,6 +175,7 @@ pub(crate) struct SubscriptionResult {
 
 #[derive(Debug, Clone, Serialize)]
 struct AutoSubscriptionPayload {
+    pool: String,
     results: Vec<SubscriptionResult>,
 }
 
@@ -202,6 +253,7 @@ async fn fetch_subscriptions(
 
 fn emit_auto_status(
     app: &tauri::AppHandle,
+    pool: &str,
     state: &str,
     alive: usize,
     total: usize,
@@ -211,6 +263,7 @@ fn emit_auto_status(
     let _ = app.emit(
         "auto://status",
         AutoStatus {
+            pool: pool.to_string(),
             state: state.to_string(),
             alive,
             total,
@@ -393,21 +446,25 @@ pub(crate) fn merge_auto_items(
     }
 }
 
-async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
-    let auto: State<'_, AutoState> = app.state();
-    if auto.inner.running.swap(true, Ordering::SeqCst) {
-        emit_auto_status(app, "skipped", 0, 0, None, None);
+async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
+    let (Ok(auto), Ok(disp)) = (
+        app.state::<AutoState>().pool(Some(pool)),
+        app.state::<DispatchState>().pool(Some(pool)),
+    ) else {
+        return AutoOutcome::Finished;
+    };
+    if auto.running.swap(true, Ordering::SeqCst) {
+        emit_auto_status(app, pool, "skipped", 0, 0, None, None);
         return AutoOutcome::Finished;
     }
-    let _run_guard = BusyGuard(auto.inner.running.clone());
+    let _run_guard = BusyGuard(auto.running.clone());
 
-    let settings = auto.inner.settings.lock().await.clone();
-    let disp: State<'_, DispatchState> = app.state();
-    let pool_now = pool_items(&disp.inner).await;
+    let settings = auto.settings.lock().await.clone();
+    let pool_now = pool_items(&disp).await;
     let mut urls: Vec<String> = pool_now.iter().map(|p| p.url.clone()).collect();
     let mut fresh = HashSet::new();
     if !settings.subscriptions.is_empty() {
-        emit_auto_status(app, "fetching", 0, urls.len(), None, None);
+        emit_auto_status(app, pool, "fetching", 0, urls.len(), None, None);
         let mut known: HashSet<String> = urls.iter().cloned().collect();
         let (new, results) = fetch_subscriptions(
             &settings.subscriptions,
@@ -415,24 +472,30 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
             &mut known,
         )
         .await;
-        let _ = app.emit("auto://subscriptions", AutoSubscriptionPayload { results });
+        let _ = app.emit(
+            "auto://subscriptions",
+            AutoSubscriptionPayload {
+                pool: pool.to_string(),
+                results,
+            },
+        );
         fresh = new.iter().cloned().collect();
         urls.extend(new);
     }
     let input_total = urls.len();
     if input_total == 0 {
-        emit_auto_status(app, "empty", 0, 0, None, None);
+        emit_auto_status(app, pool, "empty", 0, 0, None, None);
         return AutoOutcome::Finished;
     }
 
     let check: State<'_, CheckState> = app.state();
     if check.busy.swap(true, Ordering::SeqCst) {
-        emit_auto_status(app, "skipped", 0, input_total, None, None);
+        emit_auto_status(app, pool, "skipped", 0, input_total, None, None);
         return AutoOutcome::Busy;
     }
     let _busy_guard = BusyGuard(check.busy.clone());
     check.cancel.store(false, Ordering::SeqCst);
-    emit_auto_status(app, "running", 0, input_total, None, None);
+    emit_auto_status(app, pool, "running", 0, input_total, None, None);
 
     let cfg = pool_check_config(&settings.check).sanitized();
     let timeout = cfg.timeout();
@@ -449,13 +512,13 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
 
     match result {
         Err(e) => {
-            emit_auto_status(app, "error", 0, input_total, None, Some(e));
+            emit_auto_status(app, pool, "error", 0, input_total, None, Some(e));
             AutoOutcome::Finished
         }
         Ok(results) => {
             if canceled {
                 let alive = results.iter().filter(|r| r.alive).count();
-                emit_auto_status(app, "stopped", alive, results.len(), None, None);
+                emit_auto_status(app, pool, "stopped", alive, results.len(), None, None);
                 return AutoOutcome::Finished;
             }
             let total = results.len();
@@ -464,37 +527,39 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
             // died. Without direct access to the check server the results say
             // nothing about the proxies, so the pool is left untouched.
             if !results.iter().any(|r| r.alive) && !direct_reachable(&test_url, timeout).await {
-                emit_auto_status(app, "offline", 0, total, None, None);
+                emit_auto_status(app, pool, "offline", 0, total, None, None);
                 return AutoOutcome::Offline;
             }
             crate::commands::history::record_results(app, &results).await;
             let current: HashMap<String, PoolEntry> = {
-                let pool = disp.inner.pool.lock().await;
+                let pool = disp.pool.lock().await;
                 pool.iter()
                     .map(|u| (u.url.clone(), (u.raw.clone(), u.latency, u.country.clone())))
                     .collect()
             };
-            let prev_fails = disp.inner.fails.lock().await.clone();
+            let prev_fails = disp.fails.lock().await.clone();
             let mut merged =
                 merge_auto_items(&results, &current, settings.max_ping_ms, &prev_fails);
             add_new_items(&mut merged, &results, &fresh, settings.max_ping_ms);
-            *disp.inner.fails.lock().await = merged.fails;
-            store_pool(&disp.inner, merged.items, false).await;
-            save_pool(app, &disp.inner).await;
-            let pool = pool_items(&disp.inner).await;
+            *disp.fails.lock().await = merged.fails;
+            store_pool(&disp, merged.items, false).await;
+            save_pool(app, &disp).await;
+            let pool_id = pool.to_string();
+            let pool_list = pool_items(&disp).await;
             let _ = app.emit(
                 "auto://pool",
                 AutoPoolPayload {
-                    items: pool.clone(),
+                    pool: pool_id.clone(),
+                    items: pool_list.clone(),
                 },
             );
             // The check and pool update are done; only webhook delivery
             // remains, and it must not keep a manual check blocked.
             drop(_busy_guard);
-            emit_auto_status(app, "done", merged.alive, total, merged.avg, None);
+            emit_auto_status(app, pool, "done", merged.alive, total, merged.avg, None);
 
             if settings.send_webhooks && !settings.webhook_urls.is_empty() {
-                let webhook_items: Vec<DispatchItem> = pool
+                let webhook_items: Vec<DispatchItem> = pool_list
                     .iter()
                     .map(|p| DispatchItem {
                         raw: p.raw.clone(),
@@ -511,7 +576,7 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
                 let delivery = Delivery {
                     retry: true,
                     changes_only: settings.webhook_changes_only,
-                    sent: Some(&auto.inner.sent),
+                    sent: Some(&auto.sent),
                 };
                 let results = send_webhooks_inner(
                     &settings.webhook_urls,
@@ -520,7 +585,13 @@ async fn run_auto_cycle(app: &tauri::AppHandle) -> AutoOutcome {
                     delivery,
                 )
                 .await;
-                let _ = app.emit("auto://webhook", AutoWebhookPayload { results });
+                let _ = app.emit(
+                    "auto://webhook",
+                    AutoWebhookPayload {
+                        pool: pool_id,
+                        results,
+                    },
+                );
             }
             AutoOutcome::Finished
         }
@@ -542,26 +613,30 @@ fn next_run(enabled: bool, interval_min: u64, outcome: AutoOutcome, now: u64) ->
 pub(crate) async fn auto_scheduler_loop(app: tauri::AppHandle) {
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let auto: State<'_, AutoState> = app.state();
-        if auto.inner.running.load(Ordering::SeqCst) {
-            continue;
+        // Pools take turns; a cycle crowded out by another one is retried
+        // a minute later like one crowded out by a manual check.
+        let pools = app.state::<AutoState>().all();
+        for (id, auto) in pools {
+            if auto.running.load(Ordering::SeqCst) {
+                continue;
+            }
+            let next = auto.next.load(Ordering::SeqCst);
+            let enabled = auto.settings.lock().await.enabled;
+            if !enabled || next == 0 || epoch_secs() < next {
+                continue;
+            }
+            let outcome = run_auto_cycle(&app, &id).await;
+            let settings = auto.settings.lock().await.clone();
+            auto.next.store(
+                next_run(
+                    settings.enabled,
+                    settings.interval_min,
+                    outcome,
+                    epoch_secs(),
+                ),
+                Ordering::SeqCst,
+            );
         }
-        let next = auto.inner.next.load(Ordering::SeqCst);
-        let enabled = auto.inner.settings.lock().await.enabled;
-        if !enabled || next == 0 || epoch_secs() < next {
-            continue;
-        }
-        let outcome = run_auto_cycle(&app).await;
-        let settings = auto.inner.settings.lock().await.clone();
-        auto.inner.next.store(
-            next_run(
-                settings.enabled,
-                settings.interval_min,
-                outcome,
-                epoch_secs(),
-            ),
-            Ordering::SeqCst,
-        );
     }
 }
 
@@ -594,35 +669,40 @@ fn sanitize_auto_settings(mut s: AutoSettings) -> AutoSettings {
 
 #[tauri::command]
 pub(crate) async fn set_auto_config(
+    pool: Option<String>,
     settings: AutoSettings,
     state: State<'_, AutoState>,
 ) -> Result<(), String> {
+    let auto = state.pool(pool.as_deref())?;
     let s = sanitize_auto_settings(settings);
 
     let old = {
-        let mut cur = state.inner.settings.lock().await;
+        let mut cur = auto.settings.lock().await;
         let old = cur.clone();
         *cur = s.clone();
         old
     };
     if !s.enabled {
-        state.inner.next.store(0, Ordering::SeqCst);
+        auto.next.store(0, Ordering::SeqCst);
     } else if !old.enabled
         || old.interval_min != s.interval_min
-        || state.inner.next.load(Ordering::SeqCst) == 0
+        || auto.next.load(Ordering::SeqCst) == 0
     {
-        state
-            .inner
-            .next
+        auto.next
             .store(epoch_secs() + s.interval_min * 60, Ordering::SeqCst);
     }
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) async fn run_auto_now(app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) async fn run_auto_now(
+    app: tauri::AppHandle,
+    pool: Option<String>,
+) -> Result<(), String> {
+    let pool = pool.unwrap_or_else(|| MAIN_POOL.to_string());
+    app.state::<AutoState>().pool(Some(&pool))?;
     tauri::async_runtime::spawn(async move {
-        let _ = run_auto_cycle(&app).await;
+        let _ = run_auto_cycle(&app, &pool).await;
     });
     Ok(())
 }

@@ -90,4 +90,40 @@ describe("settings export and import", () => {
       { raw: "5.6.7.8:3128", url: "5.6.7.8:3128", latency: null, country: null },
     ]);
   });
+
+  it("carries the named pools with their own settings", () => {
+    const storage = memoryStorage({
+      "pp-auto-on": "1",
+      "pp-auto-on@p1": "0",
+      "pp-webhooks@p1": '["https://hooks.example.com/w"]',
+      "pp-auto-on@gone": "1",
+    });
+    const items = [{ raw: "1.2.3.4:80", url: "http://1.2.3.4:80", latency: 50, country: null }];
+    const file = collectSettings(storage, {
+      poolDispatchers: { p1: { port: 1081, mode: "fastest", listener: "both", started: true } },
+    }, new Date(), null, [{ id: "main", name: "" }, { id: "p1", name: "Work", items }]);
+    expect(file.storage).toEqual({
+      "pp-auto-on": "1",
+      "pp-auto-on@p1": "0",
+      "pp-webhooks@p1": '["https://hooks.example.com/w"]',
+    });
+    expect(file.pools).toEqual([{ id: "p1", name: "Work", items }]);
+
+    const parsed = parseSettingsFile(JSON.stringify({
+      ...file,
+      storage: { ...file.storage, "pp-auto-on@other": "1" },
+      pools: [...(file.pools ?? []), { id: "main", name: "x" }, { id: "../x", name: "bad" }, { id: "p1", name: "dup" }],
+      prefs: { poolDispatchers: { ...file.prefs.poolDispatchers, main: { port: 1, mode: "x", listener: "y" } } },
+    }));
+    expect(parsed?.pools).toEqual([{ meta: { id: "p1", name: "Work" }, items }]);
+    expect(parsed?.storage).toEqual(file.storage);
+    expect(parsed?.prefs.poolDispatchers).toEqual({ p1: { port: 1081, mode: "fastest", listener: "both", started: true } });
+
+    // Import replaces the settings of every pool named, reset clears them.
+    const target = memoryStorage({ "pp-auto-on@p1": "1", "pp-maxping@p1": "300", "pp-auto-on@p2": "1" });
+    applySettings(target, parsed?.storage ?? {}, ["main", "p1"]);
+    expect(Object.fromEntries(target.data)).toEqual({ ...file.storage, "pp-auto-on@p2": "1" });
+    clearSettings(target, ["main", "p1", "p2"]);
+    expect(target.data.size).toBe(0);
+  });
 });

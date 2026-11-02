@@ -1,9 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CheckSettings } from "./check-client.ts";
 import { logErr } from "./diagnostics.ts";
+import { MAIN_POOL, scopedKey } from "./pools.ts";
+import { parseUrlList } from "./url-list.ts";
+import { DEFAULT_TEMPLATE } from "./webhooks.ts";
 
 type Deps = {
   readCheckSettings: () => CheckSettings;
+  /** Pools other than the shown one; their schedules come from storage. */
+  otherPools: () => string[];
   maxPingMs: () => number;
   webhooks: { getUrls(): string[]; includeCreds: boolean; template: string; changesOnly: boolean };
   subscriptions: { getUrls(): string[] };
@@ -42,7 +47,31 @@ export function migrateLegacySchedule(store: KeyStore): void {
 }
 
 /** The single pool schedule, mirrored to the Rust scheduler. */
+/**
+ * A pool's schedule as stored, for pools not shown in the UI. The shown
+ * pool's schedule is read from the form instead.
+ */
+export function storedAutoConfig(store: Pick<Storage, "getItem">, pool: string, check: CheckSettings) {
+  const get = (base: string) => store.getItem(scopedKey(base, pool));
+  const fmt = get("pp-webhook-format");
+  return {
+    enabled: get("pp-auto-on") === "1",
+    intervalMin: clampMinutes(get("pp-auto-min")),
+    sendWebhooks: (get("pp-auto-webhooks") ?? "1") === "1",
+    maxPingMs: Math.max(0, Math.floor(Number(get("pp-maxping")) || 0)),
+    webhookUrls: parseUrlList(get("pp-webhooks")).map((u) => u.trim()).filter(Boolean),
+    webhookFormat: fmt && WEBHOOK_FORMATS.includes(fmt) ? fmt : "txt",
+    webhookIncludeCredentials: get("pp-webhook-creds") === "1",
+    webhookTemplate: get("pp-webhook-template") ?? DEFAULT_TEMPLATE,
+    webhookChangesOnly: get("pp-webhook-changes") === "1",
+    subscriptions: parseUrlList(get("pp-subscriptions")).map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u)),
+    check,
+  };
+}
+
 export class AutoSettingsStore {
+  /** The pool shown in the Auto tab. */
+  pool = MAIN_POOL;
   enabled = false;
   /** POST the pool to the webhooks after every scheduled check. */
   sendWebhooks = true;
@@ -53,14 +82,15 @@ export class AutoSettingsStore {
   load(): void {
     try {
       migrateLegacySchedule(localStorage);
-      this.enabled = localStorage.getItem("pp-auto-on") === "1";
-      this.sendWebhooks = (localStorage.getItem("pp-auto-webhooks") ?? "1") === "1";
-      const min = localStorage.getItem("pp-auto-min");
+      const key = (base: string) => scopedKey(base, this.pool);
+      this.enabled = localStorage.getItem(key("pp-auto-on")) === "1";
+      this.sendWebhooks = (localStorage.getItem(key("pp-auto-webhooks")) ?? "1") === "1";
+      const min = localStorage.getItem(key("pp-auto-min"));
       const minEl = document.getElementById("auto-min") as HTMLInputElement | null;
-      if (min && minEl) minEl.value = String(clampMinutes(min));
-      const fmt = localStorage.getItem("pp-webhook-format");
+      if (minEl) minEl.value = String(clampMinutes(min));
+      const fmt = localStorage.getItem(key("pp-webhook-format"));
       const fmtEl = document.getElementById("webhook-format") as HTMLSelectElement | null;
-      if (fmtEl && fmt && WEBHOOK_FORMATS.includes(fmt)) fmtEl.value = fmt;
+      if (fmtEl) fmtEl.value = fmt && WEBHOOK_FORMATS.includes(fmt) ? fmt : "txt";
     } catch {
       this.enabled = false;
       this.sendWebhooks = true;
@@ -73,10 +103,11 @@ export class AutoSettingsStore {
     try {
       const min = document.getElementById("auto-min") as HTMLInputElement | null;
       const fmt = document.getElementById("webhook-format") as HTMLSelectElement | null;
-      localStorage.setItem("pp-auto-on", this.enabled ? "1" : "0");
-      localStorage.setItem("pp-auto-webhooks", this.sendWebhooks ? "1" : "0");
-      localStorage.setItem("pp-auto-min", String(clampMinutes(min?.value)));
-      if (fmt) localStorage.setItem("pp-webhook-format", fmt.value);
+      const key = (base: string) => scopedKey(base, this.pool);
+      localStorage.setItem(key("pp-auto-on"), this.enabled ? "1" : "0");
+      localStorage.setItem(key("pp-auto-webhooks"), this.sendWebhooks ? "1" : "0");
+      localStorage.setItem(key("pp-auto-min"), String(clampMinutes(min?.value)));
+      if (fmt) localStorage.setItem(key("pp-webhook-format"), fmt.value);
     } catch { /* ignore */ }
   }
 
@@ -92,9 +123,15 @@ export class AutoSettingsStore {
     this.timer = window.setTimeout(() => {
       try {
         this.deps.saveCurrentSettings();
-        void invoke("set_auto_config", { settings: this.build() }).catch(
-          (e) => logErr("auto-config: " + String(e).slice(0, 200)),
-        );
+        const push = (pool: string, settings: unknown) => {
+          void invoke("set_auto_config", { pool, settings }).catch(
+            (e) => logErr("auto-config: " + String(e).slice(0, 200)),
+          );
+        };
+        push(this.pool, this.build());
+        // The shared check settings changed for every pool's schedule.
+        const check = this.deps.readCheckSettings();
+        for (const other of this.deps.otherPools()) push(other, storedAutoConfig(localStorage, other, check));
       } catch (e) {
         logErr("auto-config: " + String(e).slice(0, 200));
       }

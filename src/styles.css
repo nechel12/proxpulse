@@ -170,6 +170,14 @@ body {
 #proxy-input:focus { border-color: var(--red); box-shadow: 0 0 0 1px var(--red), 0 0 18px rgba(255,30,45,.25); }
 
 .row2 { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.pool-switch { display: flex; gap: 6px; align-items: center; }
+.pool-switch select {
+  flex: 1; min-width: 0; background: var(--field); border: 1px solid var(--line); color: var(--txt);
+  border-radius: 8px; padding: 7px 10px; outline: none; font-size: 13px;
+}
+.pool-switch select:focus { border-color: var(--red); }
+.pool-switch .btn { flex: none; min-width: 32px; padding: 7px 9px; }
+.pool-switch .btn:disabled { opacity: .45; cursor: not-allowed; border-color: var(--line); }
 .btn {
   background: var(--panel2); color: var(--txt); border: 1px solid var(--line);
   border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 13px; transition: .15s;

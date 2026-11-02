@@ -110,6 +110,8 @@ pub(crate) async fn pool_items(inner: &Arc<DispatchInner>) -> Vec<DispatchPoolIt
 }
 
 pub(crate) struct DispatchInner {
+    /// Pool id: "main" or a named pool's id.
+    pub(crate) id: String,
     pub(crate) running: AtomicBool,
     pub(crate) port: Mutex<u16>,
     pub(crate) mode: Mutex<String>,
@@ -144,36 +146,114 @@ pub(crate) struct DispatchInner {
 
 const MAX_CONNECTIONS: usize = 1024;
 
+/// The pool every install has; named pools come on top of it.
+pub(crate) const MAIN_POOL: &str = "main";
+
+impl DispatchInner {
+    pub(crate) fn new(id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            running: AtomicBool::new(false),
+            port: Mutex::new(1080),
+            mode: Mutex::new("round-robin".to_string()),
+            listener: Mutex::new("both".to_string()),
+            pool: Mutex::new(Vec::new()),
+            rr: AtomicUsize::new(0),
+            requests: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+            current: Mutex::new(None),
+            last_error: Mutex::new(None),
+            handle: Mutex::new(None),
+            lifecycle: Mutex::new(()),
+            connections: Mutex::new(tokio::task::JoinSet::new()),
+            dns_cache: Mutex::new(HashMap::new()),
+            conn_sem: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+            fails: Mutex::new(HashMap::new()),
+            save_lock: Mutex::new(()),
+            options: Mutex::new(DispatchOptions::default()),
+            sticky: Mutex::new(HashMap::new()),
+            cooldown: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
 pub(crate) struct DispatchState {
+    /// The main pool, reached directly by the tray and the setup code.
     pub(crate) inner: Arc<DispatchInner>,
+    /// Named pools by id.
+    extra: std::sync::RwLock<HashMap<String, Arc<DispatchInner>>>,
 }
 
 impl Default for DispatchState {
     fn default() -> Self {
         Self {
-            inner: Arc::new(DispatchInner {
-                running: AtomicBool::new(false),
-                port: Mutex::new(1080),
-                mode: Mutex::new("round-robin".to_string()),
-                listener: Mutex::new("both".to_string()),
-                pool: Mutex::new(Vec::new()),
-                rr: AtomicUsize::new(0),
-                requests: AtomicU64::new(0),
-                errors: AtomicU64::new(0),
-                current: Mutex::new(None),
-                last_error: Mutex::new(None),
-                handle: Mutex::new(None),
-                lifecycle: Mutex::new(()),
-                connections: Mutex::new(tokio::task::JoinSet::new()),
-                dns_cache: Mutex::new(HashMap::new()),
-                conn_sem: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
-                fails: Mutex::new(HashMap::new()),
-                save_lock: Mutex::new(()),
-                options: Mutex::new(DispatchOptions::default()),
-                sticky: Mutex::new(HashMap::new()),
-                cooldown: Mutex::new(HashMap::new()),
-            }),
+            inner: Arc::new(DispatchInner::new(MAIN_POOL)),
+            extra: std::sync::RwLock::new(HashMap::new()),
         }
+    }
+}
+
+impl DispatchState {
+    /// The pool with this id; `None` means the main pool.
+    pub(crate) fn pool(&self, id: Option<&str>) -> Result<Arc<DispatchInner>, String> {
+        match id.unwrap_or(MAIN_POOL) {
+            MAIN_POOL => Ok(self.inner.clone()),
+            id => self
+                .extra
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(id)
+                .cloned()
+                .ok_or_else(|| "unknown pool".to_string()),
+        }
+    }
+
+    pub(crate) fn add(&self, id: &str) -> Arc<DispatchInner> {
+        let mut extra = self.extra.write().unwrap_or_else(|e| e.into_inner());
+        extra
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(DispatchInner::new(id)))
+            .clone()
+    }
+
+    pub(crate) fn remove(&self, id: &str) -> Option<Arc<DispatchInner>> {
+        self.extra
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id)
+    }
+
+    /// Every pool, the main one first.
+    pub(crate) fn all(&self) -> Vec<Arc<DispatchInner>> {
+        let mut out = vec![self.inner.clone()];
+        let extra = self.extra.read().unwrap_or_else(|e| e.into_inner());
+        let mut named: Vec<_> = extra.values().cloned().collect();
+        named.sort_by(|a, b| a.id.cmp(&b.id));
+        out.extend(named);
+        out
+    }
+}
+
+/// Ports of every running dispatcher: an upstream pointing at any of them
+/// would loop traffic between our own listeners.
+fn listener_ports() -> &'static std::sync::Mutex<HashSet<u16>> {
+    static PORTS: std::sync::OnceLock<std::sync::Mutex<HashSet<u16>>> = std::sync::OnceLock::new();
+    PORTS.get_or_init(|| std::sync::Mutex::new(HashSet::new()))
+}
+
+pub(crate) fn is_listener_port(port: u16) -> bool {
+    listener_ports()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(&port)
+}
+
+fn set_listener_port(port: u16, active: bool) {
+    let mut ports = listener_ports().lock().unwrap_or_else(|e| e.into_inner());
+    if active {
+        ports.insert(port);
+    } else {
+        ports.remove(&port);
     }
 }
 
@@ -254,7 +334,7 @@ pub(crate) async fn is_self_upstream_async(
     port: u16,
     cache: &Mutex<HashMap<String, (bool, Instant)>>,
 ) -> bool {
-    if up.port != port {
+    if up.port != port && !is_listener_port(up.port) {
         return false;
     }
     if is_self_literal(&up.host) {
@@ -949,8 +1029,26 @@ pub(crate) async fn store_pool(
 const POOL_FILE: &str = "pool.json";
 const POOL_FILE_MAX: u64 = 16 * 1024 * 1024;
 
-fn pool_path(app: &tauri::AppHandle) -> Option<PathBuf> {
-    app.path().app_data_dir().ok().map(|d| d.join(POOL_FILE))
+/// `pool.json` for the main pool, `pool-<id>.json` for named pools.
+pub(crate) fn pool_file_name(id: &str) -> String {
+    if id == MAIN_POOL {
+        POOL_FILE.to_string()
+    } else {
+        format!("pool-{id}.json")
+    }
+}
+
+fn pool_path(app: &tauri::AppHandle, id: &str) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join(pool_file_name(id)))
+}
+
+pub(crate) fn delete_pool_file(app: &tauri::AppHandle, id: &str) {
+    if let Some(path) = pool_path(app, id) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Write the pool atomically. The file holds proxy credentials.
@@ -998,7 +1096,7 @@ pub(crate) fn read_pool_file(path: &Path) -> Vec<DispatchItem> {
 /// Persist the current pool so it survives restarts; scheduled checks would
 /// otherwise start from an empty pool after every launch.
 pub(crate) async fn save_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>) {
-    let Some(path) = pool_path(app) else {
+    let Some(path) = pool_path(app, &inner.id) else {
         return;
     };
     let _guard = inner.save_lock.lock().await;
@@ -1007,7 +1105,7 @@ pub(crate) async fn save_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>
 }
 
 pub(crate) async fn load_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>) {
-    let Some(path) = pool_path(app) else {
+    let Some(path) = pool_path(app, &inner.id) else {
         return;
     };
     let items = tauri::async_runtime::spawn_blocking(move || read_pool_file(&path))
@@ -1021,11 +1119,13 @@ pub(crate) async fn load_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>
 #[tauri::command]
 pub(crate) async fn set_dispatch_pool(
     app: tauri::AppHandle,
+    pool: Option<String>,
     items: Vec<DispatchItem>,
     state: State<'_, DispatchState>,
 ) -> Result<usize, String> {
-    let n = store_pool(&state.inner, items, true).await;
-    save_pool(&app, &state.inner).await;
+    let inner = state.pool(pool.as_deref())?;
+    let n = store_pool(&inner, items, true).await;
+    save_pool(&app, &inner).await;
     Ok(n)
 }
 
@@ -1047,6 +1147,7 @@ async fn start_proxy_locked(
         // before binding; otherwise the old address may still be in use and
         // the requested port silently drifts to +1.
         let _ = h.await;
+        set_listener_port(*inner.port.lock().await, false);
     }
     abort_connections(inner).await;
     inner.running.store(false, Ordering::SeqCst);
@@ -1066,6 +1167,7 @@ async fn start_proxy_locked(
         }
     };
     *inner.port.lock().await = port;
+    set_listener_port(port, true);
     {
         let mut pool = inner.pool.lock().await;
         pool.retain(|u| !is_self_upstream(u, port));
@@ -1107,6 +1209,7 @@ pub(crate) async fn stop_proxy_inner(inner: &Arc<DispatchInner>) {
     if let Some(h) = inner.handle.lock().await.take() {
         h.abort();
         let _ = h.await;
+        set_listener_port(*inner.port.lock().await, false);
     }
     // Stop must terminate active tunnels too, not only new connections.
     abort_connections(inner).await;
@@ -1132,6 +1235,7 @@ pub(crate) fn normalize_listener(listener: &str) -> String {
 #[tauri::command]
 pub(crate) async fn start_local_proxy(
     app: tauri::AppHandle,
+    pool: Option<String>,
     port: u16,
     mode: String,
     listener: Option<String>,
@@ -1140,18 +1244,21 @@ pub(crate) async fn start_local_proxy(
     if port == 0 {
         return Err("bad port".to_string());
     }
+    let inner = state.pool(pool.as_deref())?;
     let listener = normalize_listener(listener.as_deref().unwrap_or("both"));
     let mode = normalize_mode(&mode);
-    let addr = start_proxy_inner(&state.inner, port, mode.clone(), listener.clone()).await?;
+    let addr = start_proxy_inner(&inner, port, mode.clone(), listener.clone()).await?;
     // The dispatcher started at launch reuses the last configuration.
-    let options = state.inner.options.lock().await.clone();
+    let options = inner.options.lock().await.clone();
     remember_dispatcher(
         &app,
+        &inner.id,
         DispatcherPrefs {
             port,
             mode,
             listener,
             options,
+            started: true,
         },
     )
     .await;
@@ -1163,45 +1270,47 @@ pub(crate) async fn start_local_proxy(
 #[tauri::command]
 pub(crate) async fn set_dispatch_options(
     app: tauri::AppHandle,
+    pool: Option<String>,
     options: DispatchOptions,
     state: State<'_, DispatchState>,
 ) -> Result<DispatchOptions, String> {
+    let inner = state.pool(pool.as_deref())?;
     let options = options.sanitized();
-    *state.inner.options.lock().await = options.clone();
+    *inner.options.lock().await = options.clone();
     // Bindings made under the old countries may point at excluded upstreams.
-    state.inner.sticky.lock().await.clear();
-    remember_dispatch_options(&app, options.clone()).await;
+    inner.sticky.lock().await.clear();
+    remember_dispatch_options(&app, &inner.id, options.clone()).await;
     Ok(options)
 }
 
 #[tauri::command]
-pub(crate) async fn stop_local_proxy(state: State<'_, DispatchState>) -> Result<(), String> {
-    stop_proxy_inner(&state.inner).await;
+pub(crate) async fn stop_local_proxy(
+    pool: Option<String>,
+    state: State<'_, DispatchState>,
+) -> Result<(), String> {
+    stop_proxy_inner(&state.pool(pool.as_deref())?).await;
     Ok(())
 }
 
 #[tauri::command]
 pub(crate) async fn get_dispatch_pool(
+    pool: Option<String>,
     state: State<'_, DispatchState>,
 ) -> Result<Vec<DispatchPoolItem>, String> {
-    Ok(pool_items(&state.inner).await)
+    Ok(pool_items(&state.pool(pool.as_deref())?).await)
 }
 
-#[tauri::command]
-pub(crate) async fn local_proxy_status(
-    state: State<'_, DispatchState>,
-) -> Result<DispatchStatus, String> {
-    let pool_n = state.inner.pool.lock().await.len();
-    Ok(DispatchStatus {
-        running: state.inner.running.load(Ordering::SeqCst),
-        port: *state.inner.port.lock().await,
-        mode: state.inner.mode.lock().await.clone(),
-        listener: state.inner.listener.lock().await.clone(),
+pub(crate) async fn dispatch_status(inner: &Arc<DispatchInner>) -> DispatchStatus {
+    let pool_n = inner.pool.lock().await.len();
+    DispatchStatus {
+        running: inner.running.load(Ordering::SeqCst),
+        port: *inner.port.lock().await,
+        mode: inner.mode.lock().await.clone(),
+        listener: inner.listener.lock().await.clone(),
         upstreams: pool_n,
         cooling: {
             let now = Instant::now();
-            state
-                .inner
+            inner
                 .cooldown
                 .lock()
                 .await
@@ -1209,9 +1318,17 @@ pub(crate) async fn local_proxy_status(
                 .filter(|u| **u > now)
                 .count()
         },
-        current: state.inner.current.lock().await.clone(),
-        requests: state.inner.requests.load(Ordering::SeqCst),
-        errors: state.inner.errors.load(Ordering::SeqCst),
-        last_error: state.inner.last_error.lock().await.clone(),
-    })
+        current: inner.current.lock().await.clone(),
+        requests: inner.requests.load(Ordering::SeqCst),
+        errors: inner.errors.load(Ordering::SeqCst),
+        last_error: inner.last_error.lock().await.clone(),
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn local_proxy_status(
+    pool: Option<String>,
+    state: State<'_, DispatchState>,
+) -> Result<DispatchStatus, String> {
+    Ok(dispatch_status(&state.pool(pool.as_deref())?).await)
 }

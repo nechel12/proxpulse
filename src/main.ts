@@ -21,7 +21,8 @@ import { SettingsPanel } from "./settings-panel.ts";
 import { initUpdater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
 import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
-import { AutoSettingsStore } from "./auto-settings.ts";
+import { AutoSettingsStore, storedAutoConfig } from "./auto-settings.ts";
+import { MAIN_POOL, MAX_POOLS, forgetPoolSettings, poolLabel, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
@@ -67,6 +68,19 @@ let starting = false;
 let includeDead = false;
 const pool = new PoolView();
 const dispatchMonitor = new DispatchMonitor();
+/** Named pools (`pools.rs`); the shown one fills the Dispatcher and Auto tabs and takes new alive proxies. */
+let pools: PoolMeta[] = [{ id: MAIN_POOL, name: "" }];
+let currentPool = loadCurrentPool();
+/** Pool sizes after the last scheduled check, for the low-pool warning. */
+const poolCounts = new Map<string, number>();
+
+function loadCurrentPool(): string {
+  try {
+    const id = localStorage.getItem("pp-pool-current");
+    if (id && validPoolId(id)) return id;
+  } catch { /* ignore */ }
+  return MAIN_POOL;
+}
 const profiles = new ProfilePanel();
 const sitesPanel = new SitesPanel();
 const settings = new SettingsPanel({ t, schedule: () => scheduleAutoConfig() });
@@ -75,6 +89,7 @@ const appSettings = new AppSettings({
   setStatusText,
   logErr,
   isTauriRuntime,
+  pools: () => pools,
   onHideCreds: () => {
     resultsView.hideCreds = appSettings.hideCreds;
     pool.hideCreds = appSettings.hideCreds;
@@ -144,6 +159,7 @@ function applyI18n() {
   refreshStatusTexts();
   dispatchMonitor.renderPill(t);
   webhooks.renderFormat(t);
+  renderPoolSwitchers();
   void updateTray();
 }
 
@@ -219,7 +235,7 @@ let maxPingMs = 0;
 
 function loadMaxPing(): void {
   try {
-    const v = Math.floor(Number(localStorage.getItem("pp-maxping")) || 0);
+    const v = Math.floor(Number(localStorage.getItem(scopedKey("pp-maxping", currentPool))) || 0);
     maxPingMs = Number.isFinite(v) && v > 0 ? v : 0;
   } catch {
     maxPingMs = 0;
@@ -295,6 +311,7 @@ function pushPingPoint(list: ProxyResult[] = results): void {
 async function syncPool(notify: boolean): Promise<number> {
   try {
     const n = await invoke<number>("set_dispatch_pool", {
+      pool: currentPool,
       items: pool.items.map((p) => ({
         raw: p.raw,
         url: p.url,
@@ -310,15 +327,186 @@ async function syncPool(notify: boolean): Promise<number> {
   }
 }
 
+/** The tray shows the main pool's schedule. */
 async function updateTray(): Promise<void> {
   try {
-    const urls = webhooks.getUrls();
+    let on: boolean;
+    let urls: string[];
+    if (currentPool === MAIN_POOL) {
+      on = autoSettings.enabled && autoSettings.sendWebhooks;
+      urls = webhooks.getUrls();
+    } else {
+      const main = storedAutoConfig(localStorage, MAIN_POOL, readCheckSettings());
+      on = main.enabled && main.sendWebhooks;
+      urls = main.webhookUrls;
+    }
     await invoke("update_tray_status", {
-      webhookOn: autoSettings.enabled && autoSettings.sendWebhooks && urls.length > 0,
+      webhookOn: on && urls.length > 0,
       webhookUrl: urls[0] ?? "",
       lang,
     });
   } catch { /* tray may be unavailable */ }
+}
+
+// ---------- named pools ----------
+
+function shownPool(id: string | undefined): boolean {
+  return (id ?? MAIN_POOL) === currentPool;
+}
+
+function currentPoolMeta(): PoolMeta {
+  return pools.find((p) => p.id === currentPool) ?? { id: currentPool, name: "" };
+}
+
+/** A notification title names the pool when there is more than one. */
+function notifTitle(key: string, id: string): string {
+  const meta = pools.find((p) => p.id === id);
+  return pools.length > 1 && meta ? `${t(key)} · ${poolLabel(meta, t)}` : t(key);
+}
+
+/** Load the shown pool's proxies from the backend, which keeps them. */
+async function loadPoolItems(): Promise<void> {
+  const id = currentPool;
+  try {
+    const items = await invoke<PoolItem[]>("get_dispatch_pool", { pool: id });
+    if (id !== currentPool) return;
+    pool.set(items.map((p) => ({
+      raw: p.raw,
+      url: p.url,
+      latency: p.latency,
+      country: p.country ?? null,
+    })));
+    poolCounts.set(id, pool.count);
+    renderPool();
+    updateCounts();
+    void attachHistory();
+  } catch { /* older backend */ }
+}
+
+function renderPoolSwitchers(): void {
+  const label = poolLabel(currentPoolMeta(), t);
+  document.querySelectorAll<HTMLSelectElement>(".pool-select").forEach((sel) => {
+    sel.replaceChildren(...pools.map((p) => new Option(poolLabel(p, t), p.id)));
+    sel.value = currentPool;
+  });
+  document.querySelectorAll<HTMLButtonElement>(".pool-new").forEach((b) => { b.disabled = pools.length >= MAX_POOLS; });
+  document.querySelectorAll<HTMLButtonElement>(".pool-delete").forEach((b) => { b.disabled = currentPool === MAIN_POOL; });
+  document.querySelectorAll<HTMLElement>(".pool-tag").forEach((el) => {
+    el.textContent = pools.length > 1 ? ` · ${label}` : "";
+  });
+}
+
+function showWebhookOptions(): void {
+  ($("chk-webhook-creds") as HTMLInputElement).checked = webhooks.includeCreds;
+  ($("chk-webhook-changes") as HTMLInputElement).checked = webhooks.changesOnly;
+  $<HTMLTextAreaElement>("webhook-template").value = webhooks.template;
+}
+
+/** Show another pool in the Dispatcher and Auto tabs. */
+async function switchPool(id: string): Promise<void> {
+  if (id === currentPool || !pools.some((p) => p.id === id)) {
+    renderPoolSwitchers();
+    return;
+  }
+  saveAutoSettings();
+  currentPool = id;
+  try {
+    localStorage.setItem("pp-pool-current", id);
+  } catch { /* ignore */ }
+  autoSettings.pool = id;
+  webhooks.pool = id;
+  subscriptions.pool = id;
+  dispatchMonitor.pool = id;
+  dispatchMonitor.reset();
+  loadAutoSettings();
+  loadMaxPing();
+  syncMaxPingInputs();
+  webhooks.load();
+  showWebhookOptions();
+  webhooks.render(t);
+  webhooks.renderFormat(t);
+  subscriptions.load();
+  subscriptions.render(t);
+  for (const el of ["auto-status", "disp-auto-status", "subs-status", "webhook-status", "srv-opts-status"]) {
+    setStatusText(el, () => "—");
+  }
+  setStatusText("srv-status", () => "-");
+  showDispatchOptions();
+  renderPoolSwitchers();
+  pool.set([]);
+  renderPool();
+  updateCounts();
+  await loadPoolItems();
+  void dispatchMonitor.poll(t, setStatusText);
+  void updateTray();
+}
+
+/** Read the pool registry; a remembered pool that is gone falls back to the main one. */
+async function loadPools(): Promise<void> {
+  try {
+    pools = await invoke<PoolMeta[]>("list_pools");
+  } catch {
+    return; // browser preview or older backend: only the main pool
+  }
+  if (!pools.some((p) => p.id === currentPool)) await switchPool(MAIN_POOL);
+  renderPoolSwitchers();
+  // Push every pool's schedule now that all are known.
+  scheduleAutoConfig();
+}
+
+async function newPool(): Promise<void> {
+  if (pools.length >= MAX_POOLS) return;
+  const name = (await askText(t("pool_new_q"), "", 40))?.trim();
+  if (!name) return;
+  try {
+    const meta = await invoke<PoolMeta>("create_pool", { name });
+    pools = [...pools, meta];
+    await switchPool(meta.id);
+  } catch (e) {
+    const msg = String(e).slice(0, 120);
+    setStatusText("srv-status", () => t("srv_err", { e: msg }));
+  }
+}
+
+async function renamePool(): Promise<void> {
+  const meta = currentPoolMeta();
+  const name = (await askText(t("pool_rename_q"), poolLabel(meta, t), 40))?.trim();
+  if (name == null) return;
+  try {
+    const out = await invoke<PoolMeta>("rename_pool", { id: meta.id, name });
+    pools = pools.map((p) => (p.id === out.id ? out : p));
+    renderPoolSwitchers();
+  } catch { /* older backend */ }
+}
+
+async function deletePool(): Promise<void> {
+  const meta = currentPoolMeta();
+  if (meta.id === MAIN_POOL) return;
+  if (!(await askConfirm(t("pool_delete_confirm", { name: poolLabel(meta, t) })))) return;
+  try {
+    await invoke("delete_pool", { id: meta.id });
+  } catch (e) {
+    const msg = String(e).slice(0, 120);
+    setStatusText("srv-status", () => t("srv_err", { e: msg }));
+    return;
+  }
+  pools = pools.filter((p) => p.id !== meta.id);
+  poolCounts.delete(meta.id);
+  // Switching saves the shown pool's settings: forget them only afterwards.
+  await switchPool(MAIN_POOL);
+  try {
+    forgetPoolSettings(localStorage, meta.id);
+  } catch { /* ignore */ }
+}
+
+function initPoolSwitchers(): void {
+  document.querySelectorAll<HTMLSelectElement>(".pool-select").forEach((sel) => {
+    sel.addEventListener("change", () => void switchPool(sel.value));
+  });
+  document.querySelectorAll(".pool-new").forEach((b) => b.addEventListener("click", () => void newPool()));
+  document.querySelectorAll(".pool-rename").forEach((b) => b.addEventListener("click", () => void renamePool()));
+  document.querySelectorAll(".pool-delete").forEach((b) => b.addEventListener("click", () => void deletePool()));
+  renderPoolSwitchers();
 }
 
 // ---------- scheduled checks (Rust scheduler events) ----------
@@ -327,12 +515,18 @@ const webhooks = new WebhookPanel(() => scheduleAutoConfig());
 const subscriptions = new SubscriptionPanel(() => scheduleAutoConfig());
 const autoSettings = new AutoSettingsStore({
   readCheckSettings,
+  otherPools: () => pools.map((p) => p.id).filter((id) => id !== currentPool),
   maxPingMs: () => maxPingMs,
   webhooks,
   subscriptions,
   saveCurrentSettings: () => settings.saveCurrentSettings(),
   updateTray,
 });
+// The remembered pool is shown from the first load of its settings.
+autoSettings.pool = currentPool;
+webhooks.pool = currentPool;
+subscriptions.pool = currentPool;
+dispatchMonitor.pool = currentPool;
 
 const autoStatus = new AutoStatusController({
   t,
@@ -597,6 +791,26 @@ async function askTemplate(): Promise<string | null> {
 }
 
 type DispatchOptions = { countries: string[]; stickyMin: number; authUser: string; authPass: string };
+type DispatcherPrefs = { options?: DispatchOptions };
+
+/** Show the dispatcher filter, sessions and login of the shown pool. */
+function showDispatchOptions(): void {
+  const id = currentPool;
+  const show = (o: DispatchOptions) => {
+    $<HTMLInputElement>("srv-countries").value = o.countries.join(", ");
+    $<HTMLInputElement>("srv-sticky").value = String(o.stickyMin);
+    $<HTMLInputElement>("srv-user").value = o.authUser;
+    $<HTMLInputElement>("srv-pass").value = o.authPass;
+  };
+  show({ countries: [], stickyMin: 0, authUser: "", authPass: "" });
+  void invoke<{ dispatcher?: DispatcherPrefs; poolDispatchers?: Record<string, DispatcherPrefs> }>("get_app_prefs")
+    .then((p) => {
+      if (id !== currentPool) return;
+      const options = id === MAIN_POOL ? p.dispatcher?.options : p.poolDispatchers?.[id]?.options;
+      if (options) show(options);
+    })
+    .catch(() => { /* browser preview or older backend */ });
+}
 
 /** Dispatcher filter, sticky sessions and login: applied at once, kept by the backend. */
 function initDispatchOptions(): void {
@@ -604,27 +818,21 @@ function initDispatchOptions(): void {
   const sticky = $<HTMLInputElement>("srv-sticky");
   const user = $<HTMLInputElement>("srv-user");
   const pass = $<HTMLInputElement>("srv-pass");
-  const show = (o: DispatchOptions) => {
-    countries.value = o.countries.join(", ");
-    sticky.value = String(o.stickyMin);
-    user.value = o.authUser;
-    pass.value = o.authPass;
-  };
-  void invoke<{ dispatcher?: { options?: DispatchOptions } }>("get_app_prefs")
-    .then((p) => { if (p.dispatcher?.options) show(p.dispatcher.options); })
-    .catch(() => { /* browser preview or older backend */ });
+  showDispatchOptions();
   let timer: number | undefined;
   const apply = () => {
     window.clearTimeout(timer);
+    // Read now: the pool may be switched before the debounce ends.
+    const target = currentPool;
+    const options: DispatchOptions = {
+      countries: countries.value.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
+      stickyMin: Math.max(0, Math.min(1440, Math.floor(Number(sticky.value) || 0))),
+      authUser: user.value.trim(),
+      authPass: pass.value,
+    };
     timer = window.setTimeout(async () => {
-      const options: DispatchOptions = {
-        countries: countries.value.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
-        stickyMin: Math.max(0, Math.min(1440, Math.floor(Number(sticky.value) || 0))),
-        authUser: user.value.trim(),
-        authPass: pass.value,
-      };
       try {
-        await invoke("set_dispatch_options", { options });
+        await invoke("set_dispatch_options", { pool: target, options });
         setStatusText("srv-opts-status", () => t("srv_opts_saved"));
       } catch (e) {
         const msg = String(e).slice(0, 120);
@@ -936,10 +1144,10 @@ window.addEventListener("DOMContentLoaded", () => {
       }
       const synced = await syncPool(false);
       if (synced < 0) throw new Error(t("pool_sync_err"));
-      const addr = await invoke<string>("start_local_proxy", { port, mode, listener });
+      const addr = await invoke<string>("start_local_proxy", { pool: currentPool, port, mode, listener });
       setStatusText("srv-status", () => t("srv_on", { addr }));
       try {
-        const st = await invoke<DispatchStatus>("local_proxy_status");
+        const st = await invoke<DispatchStatus>("local_proxy_status", { pool: currentPool });
         ($("srv-port") as HTMLInputElement).value = String(st.port);
       } catch { /* keep typed value */ }
       dispatchMonitor.refreshAddr();
@@ -957,7 +1165,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   ($("btn-srv-stop") as HTMLButtonElement).addEventListener("click", async () => {
     try {
-      await invoke("stop_local_proxy");
+      await invoke("stop_local_proxy", { pool: currentPool });
     } catch { /* ignore */ }
     setStatusText("srv-status", () => t("srv_off"));
     void dispatchMonitor.poll(t, setStatusText);
@@ -1039,7 +1247,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const v = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0));
     maxPingMs = Number.isFinite(v) ? v : 0;
     try {
-      localStorage.setItem("pp-maxping", String(maxPingMs));
+      localStorage.setItem(scopedKey("pp-maxping", currentPool), String(maxPingMs));
     } catch { /* ignore */ }
     syncMaxPingInputs();
     scheduleAutoConfig();
@@ -1053,20 +1261,19 @@ window.addEventListener("DOMContentLoaded", () => {
     const inputs = document.querySelectorAll<HTMLInputElement>("#subs-list input");
     inputs[inputs.length - 1]?.focus();
   });
-  void listen<{ results: SubscriptionResult[] }>("auto://subscriptions", (e) => {
+  void listen<{ pool?: string; results: SubscriptionResult[] }>("auto://subscriptions", (e) => {
+    if (!shownPool(e.payload.pool)) return;
     setStatusText("subs-status", () => formatSubscriptionResults(e.payload.results, t));
   }).catch(() => {});
   settings.loadIpapiSettings();
   loadAutoSettings();
   if (!settings.loadCurrentSettings()) profiles.currentId = "builtin:standard";
-  ($("chk-webhook-creds") as HTMLInputElement).checked = webhooks.includeCreds;
-  ($("chk-webhook-changes") as HTMLInputElement).checked = webhooks.changesOnly;
+  showWebhookOptions();
   ($("chk-webhook-changes") as HTMLInputElement).addEventListener("change", (e) => {
     webhooks.changesOnly = (e.target as HTMLInputElement).checked;
     webhooks.saveOptions();
   });
   const tpl = $<HTMLTextAreaElement>("webhook-template");
-  tpl.value = webhooks.template;
   tpl.addEventListener("input", () => {
     webhooks.template = tpl.value;
     webhooks.saveOptions();
@@ -1086,7 +1293,7 @@ window.addEventListener("DOMContentLoaded", () => {
     inputs[inputs.length - 1]?.focus();
   });
   ($("btn-auto-now") as HTMLButtonElement).addEventListener("click", () => {
-    void invoke("run_auto_now").catch((e) => {
+    void invoke("run_auto_now", { pool: currentPool }).catch((e) => {
       const msg = String(e).slice(0, 120);
       setStatusText("auto-status", () => t("auto_err", { e: msg }));
     });
@@ -1106,31 +1313,38 @@ window.addEventListener("DOMContentLoaded", () => {
     webhooks.renderFormat(t);
   });
   void listen<AutoStatusEvent>("auto://status", (e) => {
-    autoStatus.handle(e.payload);
+    const id = e.payload.pool ?? MAIN_POOL;
+    autoStatus.handle(e.payload, shownPool(id));
     // An offline cycle repeats every minute: report it once until a check succeeds.
     if (e.payload.state === "offline") {
-      if (notifier.latch.raise("offline")) void notifier.send(t("notif_offline_t"), t("notif_offline_b"));
+      if (notifier.latch.raise(`offline@${id}`)) void notifier.send(notifTitle("notif_offline_t", id), t("notif_offline_b"));
     } else if (e.payload.state === "done") {
-      notifier.latch.clear("offline");
+      notifier.latch.clear(`offline@${id}`);
     }
   }).catch(() => {});
   void listen<AutoPoolEvent>("auto://pool", (e) => {
-    const before = pool.count;
-    applyAutoPool(e.payload, (items) => pool.set(items), () => { renderPool(); updateCounts(); });
-    void attachHistory();
+    const id = e.payload.pool ?? MAIN_POOL;
+    const before = shownPool(id) ? pool.count : poolCounts.get(id);
+    const after = e.payload.items.length;
+    poolCounts.set(id, after);
+    if (shownPool(id)) {
+      applyAutoPool(e.payload, (items) => pool.set(items), () => { renderPool(); updateCounts(); });
+      void attachHistory();
+    }
     const min = appSettings.poolMin;
-    if (before >= min && pool.count < min) {
+    if (before != null && before >= min && after < min) {
       void notifier.send(
-        t(pool.count === 0 ? "notif_pool_t" : "notif_pool_low_t"),
-        pool.count === 0 ? t("notif_pool_b") : t("notif_pool_low_b", { n: pool.count, min }),
+        notifTitle(after === 0 ? "notif_pool_t" : "notif_pool_low_t", id),
+        after === 0 ? t("notif_pool_b") : t("notif_pool_low_b", { n: after, min }),
       );
     }
   }).catch(() => {});
   void listen<AutoWebhookEvent>("auto://webhook", (e) => {
-    showAutoWebhook(e.payload, t, setStatusText);
+    const id = e.payload.pool ?? MAIN_POOL;
+    if (shownPool(id)) showAutoWebhook(e.payload, t, setStatusText);
     const failed = e.payload.results.filter((r) => !r.ok);
-    if (failed.length === 0) notifier.latch.clear("webhook");
-    else if (notifier.latch.raise("webhook")) void notifier.send(t("notif_webhook_t"), formatWebhookResults(failed, t));
+    if (failed.length === 0) notifier.latch.clear(`webhook@${id}`);
+    else if (notifier.latch.raise(`webhook@${id}`)) void notifier.send(notifTitle("notif_webhook_t", id), formatWebhookResults(failed, t));
   }).catch(() => {});
   void listen("app://hidden-to-tray", () => {
     if (readFlag("pp-tray-hint", false)) return;
@@ -1150,19 +1364,9 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // The renderer can be reloaded independently of the Rust process; restore
   // the authoritative pool and dispatcher state instead of showing empty.
-  void invoke<PoolItem[]>("get_dispatch_pool")
-    .then((items) => {
-      pool.set(items.map((p) => ({
-        raw: p.raw,
-        url: p.url,
-        latency: p.latency,
-        country: p.country ?? null,
-      })));
-      renderPool();
-      updateCounts();
-      void attachHistory();
-    })
-    .catch(() => { /* older backend */ });
+  initPoolSwitchers();
+  void loadPools();
+  void loadPoolItems();
   void dispatchMonitor.poll(t, setStatusText);
 
   $("btn-hist-clear").addEventListener("click", async () => {

@@ -1,5 +1,7 @@
 // Export, import and reset of the app settings kept in localStorage.
 
+import { MAIN_POOL, POOL_KEYS, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
+
 /** Settings keys; caches, logs and the ping history are not settings. */
 export const SETTINGS_KEYS = [
   "pp-settings",
@@ -31,14 +33,20 @@ export const SETTINGS_KEYS = [
 const MAX_VALUE_CHARS = 1024 * 1024;
 /** Same cap as the pool in the app. */
 const MAX_POOL = 20_000;
+const MAX_NAMED_POOLS = 9;
 const FILE_VERSION = 1;
+
+/** `DispatcherPrefs` in prefs.rs. */
+type DispatcherPrefs = { port: number; mode: string; listener: string; options?: DispatcherOptions; started?: boolean };
 
 /** Backend preferences carried in the file (see `prefs.rs`). */
 export type PrefsUpdate = {
   closeToTray?: boolean;
   startMinimized?: boolean;
   startDispatcher?: boolean;
-  dispatcher?: { port: number; mode: string; listener: string; options?: DispatcherOptions };
+  dispatcher?: DispatcherPrefs;
+  /** The dispatchers of the named pools, by pool id. */
+  poolDispatchers?: Record<string, DispatcherPrefs>;
 };
 
 /** `DispatchOptions` in dispatch.rs. */
@@ -63,6 +71,9 @@ function pickOptions(raw: unknown): DispatcherOptions | undefined {
 /** A dispatcher pool entry (`DispatchPoolItem` in dispatch.rs). */
 export type PoolEntry = { raw: string; url: string; latency: number | null; country: string | null };
 
+/** A named pool in the file; its proxies only when the user chose to include them. */
+export type PoolFileEntry = PoolMeta & { items?: PoolEntry[] };
+
 export type SettingsFile = {
   app: "ProxPulse";
   kind: "settings";
@@ -72,6 +83,8 @@ export type SettingsFile = {
   prefs: PrefsUpdate;
   /** Only when the user chose to include it; holds credentials. */
   pool?: PoolEntry[];
+  /** The named pools; their settings are in `storage` under `key@id`. */
+  pools?: PoolFileEntry[];
 };
 
 export type ParsedSettings = {
@@ -79,7 +92,19 @@ export type ParsedSettings = {
   prefs: PrefsUpdate;
   /** null when the file has no pool; the current pool is then kept. */
   pool: PoolEntry[] | null;
+  /** The named pools; `items` is null when the file has no proxies for one. */
+  pools: { meta: PoolMeta; items: PoolEntry[] | null }[];
 };
+
+/** Every settings key, with the per-pool keys of the named pools. */
+function allKeys(poolIds: readonly string[]): string[] {
+  const keys: string[] = [...SETTINGS_KEYS];
+  for (const id of poolIds) {
+    if (id === MAIN_POOL || !validPoolId(id)) continue;
+    for (const base of POOL_KEYS) keys.push(scopedKey(base, id));
+  }
+  return keys;
+}
 
 type ReadStorage = Pick<Storage, "getItem">;
 type WriteStorage = Pick<Storage, "setItem" | "removeItem">;
@@ -89,9 +114,11 @@ export function collectSettings(
   prefs: PrefsUpdate,
   now = new Date(),
   pool: PoolEntry[] | null = null,
+  pools: PoolFileEntry[] = [],
 ): SettingsFile {
+  const named = pools.filter((p) => p.id !== MAIN_POOL);
   const values: Record<string, string> = {};
-  for (const key of SETTINGS_KEYS) {
+  for (const key of allKeys(named.map((p) => p.id))) {
     const v = storage.getItem(key);
     if (v != null) values[key] = v;
   }
@@ -103,6 +130,24 @@ export function collectSettings(
     storage: values,
     prefs,
     ...(pool ? { pool } : {}),
+    ...(named.length ? { pools: named } : {}),
+  };
+}
+
+function pickDispatcher(raw: unknown): DispatcherPrefs | undefined {
+  const d = raw as Record<string, unknown> | undefined;
+  if (
+    !d || typeof d !== "object" ||
+    !Number.isInteger(d.port) || (d.port as number) < 1 || (d.port as number) > 65535 ||
+    typeof d.mode !== "string" || typeof d.listener !== "string"
+  ) return undefined;
+  const options = pickOptions(d.options);
+  return {
+    port: d.port as number,
+    mode: d.mode,
+    listener: d.listener,
+    ...(options ? { options } : {}),
+    ...(d.started === true ? { started: true } : {}),
   };
 }
 
@@ -113,14 +158,32 @@ function pickPrefs(raw: unknown): PrefsUpdate {
   for (const k of ["closeToTray", "startMinimized", "startDispatcher"] as const) {
     if (typeof src[k] === "boolean") out[k] = src[k];
   }
-  const d = src.dispatcher as Record<string, unknown> | undefined;
-  if (
-    d && typeof d === "object" &&
-    Number.isInteger(d.port) && (d.port as number) >= 1 && (d.port as number) <= 65535 &&
-    typeof d.mode === "string" && typeof d.listener === "string"
-  ) {
-    const options = pickOptions(d.options);
-    out.dispatcher = { port: d.port as number, mode: d.mode, listener: d.listener, ...(options ? { options } : {}) };
+  const dispatcher = pickDispatcher(src.dispatcher);
+  if (dispatcher) out.dispatcher = dispatcher;
+  const named = src.poolDispatchers;
+  if (named && typeof named === "object") {
+    const map: Record<string, DispatcherPrefs> = {};
+    for (const [id, d] of Object.entries(named as Record<string, unknown>)) {
+      const picked = id !== MAIN_POOL && validPoolId(id) ? pickDispatcher(d) : undefined;
+      if (picked) map[id] = picked;
+    }
+    if (Object.keys(map).length) out.poolDispatchers = map;
+  }
+  return out;
+}
+
+function pickPools(raw: unknown): ParsedSettings["pools"] {
+  if (!Array.isArray(raw)) return [];
+  const out: ParsedSettings["pools"] = [];
+  for (const it of raw.slice(0, MAX_NAMED_POOLS)) {
+    if (!it || typeof it !== "object") continue;
+    const p = it as Record<string, unknown>;
+    if (typeof p.id !== "string" || p.id === MAIN_POOL || !validPoolId(p.id)) continue;
+    if (out.some((o) => o.meta.id === p.id)) continue;
+    out.push({
+      meta: { id: p.id, name: typeof p.name === "string" ? p.name.slice(0, 40) : "" },
+      items: pickPool(p.items),
+    });
   }
   return out;
 }
@@ -154,24 +217,32 @@ export function parseSettingsFile(text: string): ParsedSettings | null {
   const file = data as Record<string, unknown>;
   if (file.app !== "ProxPulse" || file.kind !== "settings" || file.version !== FILE_VERSION) return null;
   if (!file.storage || typeof file.storage !== "object") return null;
+  const pools = pickPools(file.pools);
   const src = file.storage as Record<string, unknown>;
   const storage: Record<string, string> = {};
-  for (const key of SETTINGS_KEYS) {
+  for (const key of allKeys(pools.map((p) => p.meta.id))) {
     const v = src[key];
     if (typeof v === "string" && v.length <= MAX_VALUE_CHARS) storage[key] = v;
   }
-  return { storage, prefs: pickPrefs(file.prefs), pool: pickPool(file.pool) };
+  return { storage, prefs: pickPrefs(file.prefs), pool: pickPool(file.pool), pools };
 }
 
-/** Replace all settings: keys missing from the file return to defaults. */
-export function applySettings(storage: WriteStorage, values: Record<string, string>): void {
-  for (const key of SETTINGS_KEYS) {
+/**
+ * Replace all settings: keys missing from the file return to defaults.
+ * `poolIds` names the pools whose own settings are replaced too.
+ */
+export function applySettings(
+  storage: WriteStorage,
+  values: Record<string, string>,
+  poolIds: readonly string[] = [],
+): void {
+  for (const key of allKeys(poolIds)) {
     const v = values[key];
     if (v == null) storage.removeItem(key);
     else storage.setItem(key, v);
   }
 }
 
-export function clearSettings(storage: WriteStorage): void {
-  applySettings(storage, {});
+export function clearSettings(storage: WriteStorage, poolIds: readonly string[] = []): void {
+  applySettings(storage, {}, poolIds);
 }

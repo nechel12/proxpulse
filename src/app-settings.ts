@@ -7,8 +7,10 @@ import {
   collectSettings,
   parseSettingsFile,
   type PoolEntry,
+  type PoolFileEntry,
   type PrefsUpdate,
 } from "./settings-io.ts";
+import { MAIN_POOL, forgetPoolSettings, type PoolMeta } from "./pools.ts";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 type StatusSetter = (id: string, render: () => string) => void;
@@ -19,6 +21,8 @@ type Deps = {
   logErr: (msg: string) => void;
   isTauriRuntime: () => boolean;
   onHideCreds: () => void;
+  /** The pool registry, for the per-pool settings. */
+  pools: () => PoolMeta[];
 };
 
 /** Backend preferences (`prefs.rs`). */
@@ -201,14 +205,18 @@ export class AppSettings {
     const { t, setStatusText } = this.deps;
     let prefs: PrefsUpdate = {};
     let pool: PoolEntry[] = [];
+    const named: PoolFileEntry[] = this.deps.pools().filter((p) => p.id !== MAIN_POOL).map((p) => ({ ...p }));
     try {
       prefs = await invoke<BackendPrefs>("get_app_prefs");
       pool = await invoke<PoolEntry[]>("get_dispatch_pool");
+      for (const p of named) p.items = await invoke<PoolEntry[]>("get_dispatch_pool", { pool: p.id });
     } catch { /* browser preview or older backend */ }
-    // The pool carries logins and passwords: include it only on request.
-    const withPool = pool.length > 0 &&
-      await askChoice(t("settings_pool_q", { n: pool.length }), t("settings_pool_yes"), t("settings_pool_no"));
-    const data = collectSettings(localStorage, prefs, new Date(), withPool ? pool : null);
+    // The pools carry logins and passwords: include them only on request.
+    const total = pool.length + named.reduce((n, p) => n + (p.items?.length ?? 0), 0);
+    const withPool = total > 0 &&
+      await askChoice(t("settings_pool_q", { n: total }), t("settings_pool_yes"), t("settings_pool_no"));
+    if (!withPool) for (const p of named) delete p.items;
+    const data = collectSettings(localStorage, prefs, new Date(), withPool ? pool : null, named);
     const day = data.exported.slice(0, 10);
     try {
       const path = await invoke<string | null>("export_text_file", {
@@ -231,21 +239,32 @@ export class AppSettings {
       setStatusText("data-status", () => t("settings_bad"));
       return;
     }
-    const question = parsed.pool
-      ? t("settings_import_pool_confirm", { n: parsed.pool.length })
+    const proxies = (parsed.pool?.length ?? 0) + parsed.pools.reduce((n, p) => n + (p.items?.length ?? 0), 0);
+    const question = parsed.pool || parsed.pools.some((p) => p.items)
+      ? t("settings_import_pool_confirm", { n: proxies })
       : t("settings_import_confirm");
     if (!(await askConfirm(question))) return;
-    applySettings(localStorage, parsed.storage);
+    const ids = new Set([...this.deps.pools().map((p) => p.id), ...parsed.pools.map((p) => p.meta.id)]);
+    applySettings(localStorage, parsed.storage, [...ids]);
     try {
       await invoke("set_app_prefs", { prefs: { ...DEFAULT_PREFS, ...parsed.prefs } });
       if (parsed.pool) await invoke("set_dispatch_pool", { items: parsed.pool });
+      if (parsed.pools.length) {
+        const restored = await invoke<PoolMeta[]>("restore_pools", { pools: parsed.pools.map((p) => p.meta) });
+        const known = new Set(restored.map((p) => p.id));
+        for (const p of parsed.pools) {
+          // A full registry takes no more pools: drop what was written for them.
+          if (!known.has(p.meta.id)) forgetPoolSettings(localStorage, p.meta.id);
+          else if (p.items) await invoke("set_dispatch_pool", { pool: p.meta.id, items: p.items });
+        }
+      }
     } catch { /* browser preview or older backend */ }
     location.reload();
   }
 
   private async resetSettings(): Promise<void> {
     if (!(await askConfirm(this.deps.t("settings_reset_confirm")))) return;
-    clearSettings(localStorage);
+    clearSettings(localStorage, this.deps.pools().map((p) => p.id));
     try {
       await invoke("set_app_prefs", { prefs: DEFAULT_PREFS });
       await invoke("set_autostart", { enabled: false });

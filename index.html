@@ -264,6 +264,12 @@
           <span class="ph-title" data-i18n="srv_title">▸ Локальный сервер</span>
           <span id="srv-pill" class="pill dead">OFF</span>
         </div>
+        <div class="pool-switch">
+          <select class="pool-select" data-i18n-aria="pool_label" data-i18n-title="pool_label"></select>
+          <button class="btn ghost pool-new" data-i18n-title="pool_new_t" data-i18n-aria="pool_new_t">+</button>
+          <button class="btn ghost pool-rename" data-i18n-title="pool_rename_t" data-i18n-aria="pool_rename_t">✎</button>
+          <button class="btn ghost pool-delete" data-i18n-title="pool_delete_t" data-i18n-aria="pool_delete_t">✕</button>
+        </div>
         <div class="settings">
           <div class="grid2">
             <label class="fld"><span data-i18n="srv_port">Порт</span><input id="srv-port" type="number" value="1080" min="1" max="65535" /></label>
@@ -317,7 +323,7 @@
 
       <section class="panel right">
         <div class="panel-head">
-          <span class="ph-title" data-i18n="pool_title">▸ Пул живых</span>
+          <span class="ph-title"><span data-i18n="pool_title">▸ Пул живых</span><span class="pool-tag"></span></span>
           <span id="pool-count" class="count">0</span>
         </div>
         <div class="toolbar">
@@ -350,6 +356,12 @@
       <section class="panel left">
         <div class="panel-head">
           <span class="ph-title" data-i18n="auto_title">▸ Авторежим</span>
+        </div>
+        <div class="pool-switch">
+          <select class="pool-select" data-i18n-aria="pool_label" data-i18n-title="pool_label"></select>
+          <button class="btn ghost pool-new" data-i18n-title="pool_new_t" data-i18n-aria="pool_new_t">+</button>
+          <button class="btn ghost pool-rename" data-i18n-title="pool_rename_t" data-i18n-aria="pool_rename_t">✎</button>
+          <button class="btn ghost pool-delete" data-i18n-title="pool_delete_t" data-i18n-aria="pool_delete_t">✕</button>
         </div>
         <div class="settings">
           <div class="checks end">
@@ -403,7 +415,7 @@
 
       <section class="panel right">
         <div class="panel-head">
-          <span class="ph-title" data-i18n="pool_title">▸ Пул живых</span>
+          <span class="ph-title"><span data-i18n="pool_title">▸ Пул живых</span><span class="pool-tag"></span></span>
           <span id="auto-pool-count" class="count">0</span>
         </div>
         <div class="toolbar">

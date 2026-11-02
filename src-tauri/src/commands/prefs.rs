@@ -3,11 +3,12 @@
 
 use crate::commands::dispatch::{
     normalize_listener, normalize_mode, start_proxy_inner, write_private_file, DispatchOptions,
-    DispatchState,
+    DispatchState, MAIN_POOL,
 };
 use crate::commands::tray::refresh_tray_menu;
 use crate::http::truncate_utf8;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use tauri::{AppHandle, Manager, State};
@@ -28,6 +29,9 @@ pub(crate) struct DispatcherPrefs {
     pub(crate) mode: String,
     pub(crate) listener: String,
     pub(crate) options: DispatchOptions,
+    /// The dispatcher was started at least once. A named pool's dispatcher
+    /// starts at launch only then; the main pool's always does.
+    pub(crate) started: bool,
 }
 
 impl Default for DispatcherPrefs {
@@ -37,6 +41,7 @@ impl Default for DispatcherPrefs {
             mode: "round-robin".to_string(),
             listener: "both".to_string(),
             options: DispatchOptions::default(),
+            started: false,
         }
     }
 }
@@ -49,6 +54,7 @@ impl DispatcherPrefs {
             mode: normalize_mode(&self.mode),
             listener: normalize_listener(&self.listener),
             options: self.options.sanitized(),
+            started: self.started,
         }
     }
 }
@@ -61,6 +67,8 @@ pub(crate) struct AppPrefs {
     pub(crate) start_dispatcher: bool,
     /// The last started dispatcher configuration.
     pub(crate) dispatcher: DispatcherPrefs,
+    /// The same for every named pool, by pool id.
+    pub(crate) pool_dispatchers: HashMap<String, DispatcherPrefs>,
 }
 
 impl Default for AppPrefs {
@@ -70,6 +78,7 @@ impl Default for AppPrefs {
             start_minimized: true,
             start_dispatcher: false,
             dispatcher: DispatcherPrefs::default(),
+            pool_dispatchers: HashMap::new(),
         }
     }
 }
@@ -82,6 +91,8 @@ pub(crate) struct AppPrefsUpdate {
     pub(crate) start_minimized: Option<bool>,
     pub(crate) start_dispatcher: Option<bool>,
     pub(crate) dispatcher: Option<DispatcherPrefs>,
+    /// Named pools' dispatchers; replaces the whole map when given.
+    pub(crate) pool_dispatchers: Option<HashMap<String, DispatcherPrefs>>,
 }
 
 impl AppPrefs {
@@ -97,6 +108,13 @@ impl AppPrefs {
         }
         if let Some(d) = update.dispatcher {
             self.dispatcher = d.sanitized();
+        }
+        if let Some(map) = update.pool_dispatchers {
+            self.pool_dispatchers = map
+                .into_iter()
+                .filter(|(id, _)| crate::commands::pools::valid_pool_id(id) && id != MAIN_POOL)
+                .map(|(id, d)| (id, d.sanitized()))
+                .collect();
         }
     }
 }
@@ -134,6 +152,10 @@ pub(crate) fn read_prefs_file(path: &Path) -> AppPrefs {
         .and_then(|bytes| serde_json::from_slice::<AppPrefs>(&bytes).ok())
         .map(|mut p| {
             p.dispatcher = p.dispatcher.sanitized();
+            p.pool_dispatchers = std::mem::take(&mut p.pool_dispatchers)
+                .into_iter()
+                .map(|(id, d)| (id, d.sanitized()))
+                .collect();
             p
         })
         .unwrap_or_default()
@@ -176,18 +198,56 @@ async fn update_prefs(app: &AppHandle, update: AppPrefsUpdate) -> Result<AppPref
     Ok(prefs)
 }
 
-pub(crate) async fn remember_dispatcher(app: &AppHandle, dispatcher: DispatcherPrefs) {
-    let update = AppPrefsUpdate {
-        dispatcher: Some(dispatcher),
-        ..AppPrefsUpdate::default()
+/// The remembered dispatcher of a pool; defaults for one never started.
+pub(crate) fn pool_dispatcher(prefs: &AppPrefs, pool: &str) -> DispatcherPrefs {
+    if pool == MAIN_POOL {
+        prefs.dispatcher.clone()
+    } else {
+        prefs
+            .pool_dispatchers
+            .get(pool)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+pub(crate) async fn remember_dispatcher(app: &AppHandle, pool: &str, dispatcher: DispatcherPrefs) {
+    let update = if pool == MAIN_POOL {
+        AppPrefsUpdate {
+            dispatcher: Some(dispatcher),
+            ..AppPrefsUpdate::default()
+        }
+    } else {
+        let mut map = app.state::<PrefsState>().get().pool_dispatchers;
+        map.insert(pool.to_string(), dispatcher);
+        AppPrefsUpdate {
+            pool_dispatchers: Some(map),
+            ..AppPrefsUpdate::default()
+        }
     };
     let _ = update_prefs(app, update).await;
 }
 
-pub(crate) async fn remember_dispatch_options(app: &AppHandle, options: DispatchOptions) {
-    let mut dispatcher = app.state::<PrefsState>().get().dispatcher;
+pub(crate) async fn remember_dispatch_options(
+    app: &AppHandle,
+    pool: &str,
+    options: DispatchOptions,
+) {
+    let mut dispatcher = pool_dispatcher(&app.state::<PrefsState>().get(), pool);
     dispatcher.options = options;
-    remember_dispatcher(app, dispatcher).await;
+    remember_dispatcher(app, pool, dispatcher).await;
+}
+
+/// Drop what a deleted pool left in the preferences.
+pub(crate) async fn forget_pool(app: &AppHandle, pool: &str) {
+    let mut map = app.state::<PrefsState>().get().pool_dispatchers;
+    if map.remove(pool).is_some() {
+        let update = AppPrefsUpdate {
+            pool_dispatchers: Some(map),
+            ..AppPrefsUpdate::default()
+        };
+        let _ = update_prefs(app, update).await;
+    }
 }
 
 /// Closing the main window hides it instead when the user chose so and the
@@ -203,20 +263,34 @@ pub(crate) fn start_hidden(app: &AppHandle, prefs: &AppPrefs) -> bool {
         && app.tray_by_id("main").is_some()
 }
 
-/// Start the dispatcher with the last configuration when the user enabled it.
+/// Whether the pool's dispatcher starts at launch when the user enabled it:
+/// the main pool's always, a named pool's once it was started. Editing the
+/// options of a pool that never ran keeps them without starting it.
+pub(crate) fn starts_at_launch(prefs: &AppPrefs, pool: &str) -> bool {
+    pool == MAIN_POOL || pool_dispatcher(prefs, pool).started
+}
+
+/// Restore every pool's dispatcher configuration and, when the user
+/// enabled it, start the dispatchers of the main pool and of every named
+/// pool that was started before.
 pub(crate) async fn start_saved_dispatcher(app: AppHandle) {
     let prefs = app.state::<PrefsState>().get();
     let disp: State<DispatchState> = app.state();
-    let d = prefs.dispatcher;
-    *disp.inner.port.lock().await = d.port;
-    *disp.inner.mode.lock().await = d.mode.clone();
-    *disp.inner.listener.lock().await = d.listener.clone();
-    *disp.inner.options.lock().await = d.options.clone();
-    if !prefs.start_dispatcher || disp.inner.pool.lock().await.is_empty() {
-        return;
-    }
-    if let Err(e) = start_proxy_inner(&disp.inner, d.port, d.mode, d.listener).await {
-        *disp.inner.last_error.lock().await = Some(format!("start at launch: {e}"));
+    for inner in disp.all() {
+        let d = pool_dispatcher(&prefs, &inner.id);
+        *inner.port.lock().await = d.port;
+        *inner.mode.lock().await = d.mode.clone();
+        *inner.listener.lock().await = d.listener.clone();
+        *inner.options.lock().await = d.options.clone();
+        if !prefs.start_dispatcher
+            || !starts_at_launch(&prefs, &inner.id)
+            || inner.pool.lock().await.is_empty()
+        {
+            continue;
+        }
+        if let Err(e) = start_proxy_inner(&inner, d.port, d.mode, d.listener).await {
+            *inner.last_error.lock().await = Some(format!("start at launch: {e}"));
+        }
     }
     refresh_tray_menu(&app).await;
 }

@@ -1,4 +1,5 @@
 import { parseUrlList, renderUrlList } from "./url-list.ts";
+import { MAIN_POOL, scopedKey } from "./pools.ts";
 
 export type SubscriptionResult = {
   index: number;
@@ -24,12 +25,14 @@ export function formatSubscriptionResults(results: SubscriptionResult[], t: Tran
 /** Proxy list URLs fetched by the scheduler before every check. */
 export class SubscriptionPanel {
   urls: string[] = [""];
+  /** The pool whose subscriptions are shown and stored. */
+  pool = MAIN_POOL;
 
   constructor(private onChange: () => void) {}
 
   load(): void {
     try {
-      this.urls = parseUrlList(localStorage.getItem(STORAGE_KEY), MAX);
+      this.urls = parseUrlList(localStorage.getItem(scopedKey(STORAGE_KEY, this.pool)), MAX);
     } catch {
       this.urls = [""];
     }
@@ -37,7 +40,7 @@ export class SubscriptionPanel {
 
   save(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.urls.slice(0, MAX)));
+      localStorage.setItem(scopedKey(STORAGE_KEY, this.pool), JSON.stringify(this.urls.slice(0, MAX)));
     } catch { /* ignore */ }
     this.onChange();
   }

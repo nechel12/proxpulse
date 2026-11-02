@@ -1,3 +1,4 @@
+use crate::commands::dispatch::MAIN_POOL;
 use crate::commands::prefs::*;
 
 fn temp_path(name: &str) -> std::path::PathBuf {
@@ -58,7 +59,7 @@ fn partial_updates_change_only_the_given_fields() {
             port: 3128,
             mode: "failover".to_string(),
             listener: "http".to_string(),
-            options: Default::default(),
+            ..DispatcherPrefs::default()
         }),
         ..AppPrefsUpdate::default()
     });
@@ -66,4 +67,29 @@ fn partial_updates_change_only_the_given_fields() {
     assert_eq!(prefs.dispatcher.mode, "failover");
     assert_eq!(prefs.dispatcher.listener, "http");
     assert!(!prefs.start_minimized);
+}
+
+#[test]
+fn only_started_named_dispatchers_start_at_launch() {
+    let mut prefs = AppPrefs::default();
+    // Options edited on a pool whose dispatcher never ran.
+    prefs
+        .pool_dispatchers
+        .insert("p1".into(), DispatcherPrefs::default());
+    prefs.pool_dispatchers.insert(
+        "p2".into(),
+        DispatcherPrefs {
+            started: true,
+            ..DispatcherPrefs::default()
+        },
+    );
+    assert!(starts_at_launch(&prefs, MAIN_POOL));
+    assert!(!starts_at_launch(&prefs, "p1"));
+    assert!(starts_at_launch(&prefs, "p2"));
+    assert!(!starts_at_launch(&prefs, "p3"));
+
+    // Entries saved without the flag read as never started.
+    let old: DispatcherPrefs =
+        serde_json::from_str(r#"{"port":1081,"mode":"fastest","listener":"both"}"#).unwrap();
+    assert!(!old.started);
 }

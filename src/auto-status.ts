@@ -1,4 +1,6 @@
 export type AutoStatusEvent = {
+  /** The pool whose schedule ran. */
+  pool?: string;
   state: "fetching" | "running" | "done" | "stopped" | "skipped" | "empty" | "error" | "offline";
   alive: number;
   total: number;
@@ -23,11 +25,16 @@ export class AutoStatusController {
 
   constructor(private deps: Deps) {}
 
-  handle(ev: AutoStatusEvent): void {
+  /**
+   * One checker serves every pool's schedule, so the buttons follow every
+   * event; the status lines only show the pool in the tabs (`shown`).
+   */
+  handle(ev: AutoStatusEvent, shown = true): void {
     const time = () =>
       new Date(ev.at * 1000).toLocaleTimeString(this.deps.locale() === "ru" ? "ru-RU" : "en-US");
-    // One schedule for the shared pool: both tabs show its status.
+    // Both tabs show the schedule of the pool they show.
     const show = (render: () => string) => {
+      if (!shown) return;
       for (const id of ["auto-status", "disp-auto-status"]) this.deps.setStatusText(id, render);
     };
     if (ev.state === "fetching") {
@@ -63,7 +70,7 @@ export class AutoStatusController {
         show(() => `${this.deps.t("auto_offline")} ${time()}`);
         break;
     }
-    if (ev.state === "done") this.deps.onDone(ev.avgMs, ev.alive);
+    if (ev.state === "done" && shown) this.deps.onDone(ev.avgMs, ev.alive);
     if (!this.deps.isManualRunning()) {
       const start = document.getElementById("btn-start") as HTMLButtonElement | null;
       if (start) start.disabled = false;

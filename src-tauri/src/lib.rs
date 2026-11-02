@@ -33,6 +33,9 @@ use commands::dispatch::{
 use commands::export::export_text_file;
 use commands::history::{clear_history, history_size, load_history, proxy_history, HistoryState};
 use commands::import::{fetch_url_text, parse_proxy_text};
+use commands::pools::{
+    create_pool, delete_pool, list_pools, load_pools, rename_pool, restore_pools, PoolsState,
+};
 use commands::prefs::{
     autostart_enabled, close_to_tray, get_app_prefs, load_prefs, notify, set_app_prefs,
     set_autostart, start_hidden, start_saved_dispatcher, PrefsState, MINIMIZED_ARG,
@@ -301,6 +304,7 @@ pub fn run() {
         .manage(AutoState::default())
         .manage(PrefsState::default())
         .manage(HistoryState::default())
+        .manage(PoolsState::default())
         .invoke_handler(tauri::generate_handler![
             check_proxies,
             check_busy,
@@ -332,6 +336,11 @@ pub fn run() {
             speed_test,
             proxy_history,
             set_dispatch_options,
+            list_pools,
+            create_pool,
+            rename_pool,
+            delete_pool,
+            restore_pools,
             history_size,
             clear_history
         ])
@@ -419,6 +428,7 @@ pub fn run() {
                 let disp: State<DispatchState> = app.state();
                 tauri::async_runtime::block_on(load_pool(app.handle(), &disp.inner));
             }
+            tauri::async_runtime::block_on(load_pools(app.handle()));
             // The window is created hidden; an autostart launch may keep it so.
             if !start_hidden(app.handle(), &prefs) {
                 if let Some(w) = app.get_webview_window("main") {
