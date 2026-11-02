@@ -949,11 +949,25 @@ window.addEventListener("DOMContentLoaded", () => {
     saveAutoSettings();
     scheduleAutoConfig();
   });
-  void listen<AutoStatusEvent>("auto://status", (e) => autoStatus.handle(e.payload)).catch(() => {});
+  void listen<AutoStatusEvent>("auto://status", (e) => {
+    autoStatus.handle(e.payload);
+    // An offline cycle repeats every minute: report it once until a check succeeds.
+    if (e.payload.state === "offline") {
+      if (notifier.latch.raise("offline")) void notifier.send(t("notif_offline_t"), t("notif_offline_b"));
+    } else if (e.payload.state === "done") {
+      notifier.latch.clear("offline");
+    }
+  }).catch(() => {});
   void listen<AutoPoolEvent>("auto://pool", (e) => {
     const before = pool.count;
     applyAutoPool(e.payload, (items) => pool.set(items), () => { renderPool(); updateCounts(); });
-    if (before > 0 && pool.count === 0) void notifier.send(t("notif_pool_t"), t("notif_pool_b"));
+    const min = appSettings.poolMin;
+    if (before >= min && pool.count < min) {
+      void notifier.send(
+        t(pool.count === 0 ? "notif_pool_t" : "notif_pool_low_t"),
+        pool.count === 0 ? t("notif_pool_b") : t("notif_pool_low_b", { n: pool.count, min }),
+      );
+    }
   }).catch(() => {});
   void listen<AutoWebhookEvent>("auto://webhook", (e) => {
     showAutoWebhook(e.payload, t, setStatusText);

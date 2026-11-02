@@ -9,6 +9,7 @@ export const SETTINGS_KEYS = [
   "pp-hide-creds",
   "pp-upd-auto",
   "pp-notify",
+  "pp-notify-pool-min",
   "pp-auto-on",
   "pp-auto-min",
   "pp-auto-webhooks",

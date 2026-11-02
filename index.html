@@ -455,6 +455,10 @@
           <span class="set-text"><span class="set-name" id="pref-notify-l" data-i18n="pref_notify">Системные уведомления</span><span class="set-desc" data-i18n="pref_notify_d">Когда окно скрыто: вебхук не отправлен, пул опустел, вышло обновление</span></span>
           <button id="pref-notify" class="switch" role="switch" aria-checked="true" aria-labelledby="pref-notify-l"></button>
         </div>
+        <div class="set-row sub" id="pref-pool-min-row">
+          <label class="set-text" for="pref-pool-min"><span class="set-name" data-i18n="pref_pool_min">Предупреждать, когда в пуле меньше</span><span class="set-desc" data-i18n="pref_pool_min_d">После автопроверки; 1 — только когда пул опустел</span></label>
+          <input id="pref-pool-min" class="set-select set-num" type="number" min="1" max="20000" value="1" />
+        </div>
       </div>
 
       <h2 class="set-head" data-i18n="sg_data">Данные</h2>

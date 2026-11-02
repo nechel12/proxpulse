@@ -41,6 +41,18 @@ export function writeFlag(key: string, value: boolean): void {
   } catch { /* ignore */ }
 }
 
+export function clampPoolMin(v: number): number {
+  return Number.isFinite(v) ? Math.max(1, Math.min(20_000, Math.floor(v))) : 1;
+}
+
+function readPoolMin(): number {
+  try {
+    return clampPoolMin(Number(localStorage.getItem("pp-notify-pool-min") ?? 1));
+  } catch {
+    return 1;
+  }
+}
+
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T | null;
 
 function setSwitch(id: string, on: boolean): void {
@@ -52,6 +64,8 @@ export class AppSettings {
   hideCreds = readFlag("pp-hide-creds", false);
   updateOnStart = readFlag("pp-upd-auto", true);
   notifications = readFlag("pp-notify", true);
+  /** Notify when a scheduled check leaves fewer proxies than this. */
+  poolMin = readPoolMin();
   theme: ThemePref = loadThemePref();
   private autostart = false;
 
@@ -74,7 +88,22 @@ export class AppSettings {
       this.deps.onHideCreds();
     });
     this.bindFlag("pref-upd-auto", "pp-upd-auto", () => this.updateOnStart, (v) => { this.updateOnStart = v; });
-    this.bindFlag("pref-notify", "pp-notify", () => this.notifications, (v) => { this.notifications = v; });
+    this.bindFlag("pref-notify", "pp-notify", () => this.notifications, (v) => {
+      this.notifications = v;
+      this.renderNotify();
+    });
+    const poolMin = el<HTMLInputElement>("pref-pool-min");
+    if (poolMin) {
+      poolMin.value = String(this.poolMin);
+      poolMin.addEventListener("change", () => {
+        this.poolMin = clampPoolMin(Number(poolMin.value));
+        poolMin.value = String(this.poolMin);
+        try {
+          localStorage.setItem("pp-notify-pool-min", String(this.poolMin));
+        } catch { /* ignore */ }
+      });
+    }
+    this.renderNotify();
 
     el<HTMLSelectElement>("pref-close")?.addEventListener("change", (e) => {
       void this.savePrefs({ closeToTray: (e.target as HTMLSelectElement).value === "tray" });
@@ -110,6 +139,12 @@ export class AppSettings {
       setSwitch(id, on);
       void this.savePrefs({ [key]: on });
     });
+  }
+
+  private renderNotify(): void {
+    el("pref-pool-min-row")?.classList.toggle("off", !this.notifications);
+    const input = el<HTMLInputElement>("pref-pool-min");
+    if (input) input.disabled = !this.notifications;
   }
 
   private renderPrefs(p: PrefsUpdate): void {
