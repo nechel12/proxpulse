@@ -64,7 +64,6 @@
           <input id="import-url" data-i18n-ph="import_url_ph" placeholder="https://… — список прокси" style="flex:1" />
           <button id="btn-import-url" class="btn ghost" data-i18n="import_url_btn">Загрузить</button>
         </div>
-        <div class="hint" style="margin-top:6px" data-i18n="import_hint">Импорт: txt, csv, json, log и любые другие — форматы распознаются автоматически.</div>
 
         <div class="panel-head" style="margin-top:14px">
           <span class="ph-title" data-i18n="set_title">▸ Параметры проверки</span>
@@ -148,14 +147,12 @@
               <label class="chk"><input id="chk-tamper" type="checkbox" checked /><span data-i18n="chk_tamper">Целостность</span></label>
               <label class="chk"><input id="chk-tls" type="checkbox" checked /><span data-i18n="chk_tls">TLS-интегрити</span></label>
             </div>
-            <div class="hint" id="deep-hint" data-i18n="deep_hint">Глубокие проверки медленнее: гео — через ip-api, анонимность — заголовки через httpbin по HTTP, целостность — сверка example.com по HTTP, TLS — сверка сертификата.</div>
           </div>
 
           <div id="sites-block" class="deep-block">
             <div class="deep-title" data-i18n="sites_title">Доступ к сайтам</div>
             <div class="preset-chips" id="site-chips"></div>
             <input id="sites-custom" class="sites-input" spellcheck="false" data-i18n-ph="sites_ph" placeholder="Свои сайты: example.com, https://…" />
-            <div class="hint" data-i18n="sites_hint">Каждый живой прокси открывает выбранные сайты; любой HTTP-ответ означает, что сайт доступен.</div>
           </div>
 
           <details class="adv" id="adv-settings">
@@ -182,7 +179,6 @@
                 <label class="chk"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Пречек порта</span></label>
                 <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" data-i18n-title="precheck_timeout" data-i18n-aria="precheck_timeout" /></label>
               </div>
-              <div class="hint" id="precheck-hint" data-i18n="precheck_hint">Быстрый TCP-пречек отсеивает мёртвые хосты до полной проверки.</div>
             </div>
           </details>
         </div>
@@ -262,7 +258,6 @@
           <span class="ph-title" data-i18n="srv_title">▸ Локальный сервер</span>
           <span id="srv-pill" class="pill dead">OFF</span>
         </div>
-        <div class="hint" data-i18n="srv_hint">Поднимает прокси 127.0.0.1:порт и гоняет трафик через живые из проверки.</div>
         <div class="settings">
           <div class="grid2">
             <label class="fld"><span data-i18n="srv_port">Порт</span><input id="srv-port" type="number" value="1080" min="1" max="65535" /></label>
@@ -310,7 +305,6 @@
           <div class="panel-head" style="margin-top:14px">
             <span class="ph-title" data-i18n="disp_auto_title">▸ Автопроверка</span>
           </div>
-          <div class="hint" data-i18n="disp_auto_hint">Пул перепроверяется по расписанию из вкладки «Авто»; там же макс. пинг.</div>
           <div id="disp-auto-status" class="status-line">—</div>
         </div>
       </section>
@@ -330,8 +324,7 @@
             <option value="country" data-i18n="pool_sort_country">Страна</option>
             <option value="score" data-i18n="pool_sort_score">Надёжность</option>
           </select>
-        </div>        <div class="hint" style="margin-bottom:8px" data-i18n="pool_hint">Пул пополняется автоматически после каждой проверки.</div>
-        <div class="table-wrap">
+        </div>        <div class="table-wrap">
           <table>
             <thead>
               <tr><th>#</th><th data-i18n="th_proxy">Прокси</th><th data-i18n="th_ping">Пинг</th><th></th></tr>
@@ -352,7 +345,6 @@
         <div class="panel-head">
           <span class="ph-title" data-i18n="auto_title">▸ Авторежим</span>
         </div>
-        <div class="hint" data-i18n="auto_hint">Общий пул перепроверяется по таймеру: живость, пинг и страна. Прокси удаляется после двух неудач подряд.</div>
         <div class="settings">
           <div class="checks end">
             <button id="auto-on" class="sqchk" aria-pressed="false"><span class="sq"></span><span data-i18n="auto_on">Вкл</span></button>
@@ -364,7 +356,6 @@
           <div class="panel-head" style="margin-top:14px">
             <span class="ph-title" data-i18n="subs_title">▸ Подписки на списки</span>
           </div>
-          <div class="hint" data-i18n="subs_hint">Перед каждой автопроверкой списки скачиваются; новые прокси проверяются вместе с пулом, живые попадают в него.</div>
           <div id="subs-list"></div>
           <div class="row2">
             <button id="btn-subs-add" class="btn ghost" data-i18n="webhook_add">+ Добавить</button>
@@ -399,10 +390,7 @@
             <button id="auto-webhook-on" class="sqchk" aria-pressed="true"><span class="sq"></span><span data-i18n="webhook_after_check">Отправлять после автопроверки</span></button>
           </div>
           <label class="chk" style="margin-top:8px"><input id="chk-webhook-changes" type="checkbox" /><span data-i18n="webhook_changes">Только изменения</span></label>
-          <div class="hint" data-i18n="webhook_changes_hint">После автопроверки отправляются только добавленные и удалённые прокси; без изменений отправки нет.</div>
-          <label class="chk" style="margin-top:8px"><input id="chk-webhook-creds" type="checkbox" /><span data-i18n="webhook_creds">Отправлять логин/пароль</span></label>
-          <div class="hint" data-i18n="webhook_creds_hint">По умолчанию credentials вырезаются из URL. Включение требует HTTPS.</div>
-          <div class="hint" data-i18n="webhook_hint">Пул уходит POST-запросом на каждый URL. Пусто — отправки нет.</div>
+          <label class="chk" style="margin-top:8px"><input id="chk-webhook-creds" type="checkbox" /><span data-i18n="webhook_creds">Отправлять логин/пароль (только HTTPS)</span></label>
           <div id="webhook-status" class="status-line">—</div>
         </div>
       </section>
