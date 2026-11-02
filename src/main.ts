@@ -503,7 +503,21 @@ function exportScope(): ProxyResult[] {
 }
 
 async function doExport(kind: ExportKind): Promise<void> {
-  await exportList(kind, exportScope(), { isTauriRuntime, notify: setStatusT, includeDead });
+  await exportList(kind, exportScope(), { isTauriRuntime, notify: setStatusT, includeDead, askTemplate });
+}
+
+/** The line template for "Export by template", remembered between uses. */
+async function askTemplate(): Promise<string | null> {
+  let saved = "{scheme}://{user}:{pass}@{host}:{port}";
+  try {
+    saved = localStorage.getItem("pp-export-template") ?? saved;
+  } catch { /* ignore */ }
+  const value = (await askText(t("exp_template_q"), saved, 300))?.trim();
+  if (!value) return null;
+  try {
+    localStorage.setItem("pp-export-template", value);
+  } catch { /* ignore */ }
+  return value;
 }
 
 /** The dispatcher hint names the protocols the selected listener accepts. */
@@ -644,7 +658,7 @@ window.addEventListener("DOMContentLoaded", () => {
   menu.querySelectorAll("button").forEach((b) => {
     b.addEventListener("click", () => {
       menu.classList.add("hidden");
-      void doExport((b as HTMLElement).dataset.exp as "txt" | "json" | "csv" | "copy");
+      void doExport((b as HTMLElement).dataset.exp as ExportKind);
     });
   });
   $("chk-dead").addEventListener("click", () => {

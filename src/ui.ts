@@ -38,7 +38,7 @@ export async function askChoice(message: string, yes: string, no: string): Promi
   }
 }
 
-export function askText(title: string, value = ""): Promise<string | null> {
+export function askText(title: string, value = "", maxLength = 40): Promise<string | null> {
   const overlay = document.getElementById("text-modal");
   const input = document.getElementById("text-modal-input") as HTMLInputElement | null;
   const ok = document.getElementById("text-modal-ok") as HTMLButtonElement | null;
@@ -46,6 +46,7 @@ export function askText(title: string, value = ""): Promise<string | null> {
   const titleEl = document.getElementById("text-modal-title");
   if (!overlay || !input || !ok || !cancel || !titleEl) return Promise.resolve(null);
   titleEl.textContent = title;
+  input.maxLength = maxLength;
   input.value = value;
   overlay.classList.remove("hidden");
   input.focus();

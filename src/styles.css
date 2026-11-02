@@ -473,3 +473,4 @@ tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--red); }
   border-color: var(--red);
   box-shadow: 0 0 0 1px var(--red), 0 0 24px rgba(255, 30, 45, .25);
 }
+.menu-sep { height: 1px; margin: 5px 4px; background: var(--line); }

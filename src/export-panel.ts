@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { buildCsv, buildJson, buildTxt } from "./export.ts";
+import { buildClash, buildPac, buildProxifier, buildSingBox, buildTemplate } from "./export-configs.ts";
 import type { ProxyResult } from "./types.ts";
 
-export type ExportKind = "txt" | "json" | "csv" | "copy";
+export type ExportKind = "txt" | "json" | "csv" | "copy" | "clash" | "singbox" | "proxifier" | "pac" | "template";
 type Notify = (key: string, params?: Record<string, string | number>) => void;
 
 type Deps = {
@@ -10,6 +11,8 @@ type Deps = {
   notify: Notify;
   /** Dead proxies are part of the list: the file must not claim "alive". */
   includeDead: boolean;
+  /** Asks for the line template; null cancels. */
+  askTemplate?: () => Promise<string | null>;
 };
 
 function browserDownload(name: string, text: string, mime = "text/plain;charset=utf-8") {
@@ -76,6 +79,18 @@ export async function exportList(
     await saveViaDialog(name, buildTxt(list), [{ name: "Text", extensions: ["txt"] }], deps);
   } else if (kind === "json") {
     await saveViaDialog("proxpulse.json", buildJson(list), [{ name: "JSON", extensions: ["json"] }], deps);
+  } else if (kind === "clash") {
+    await saveViaDialog("proxpulse-clash.yaml", buildClash(list), [{ name: "YAML", extensions: ["yaml", "yml"] }], deps);
+  } else if (kind === "singbox") {
+    await saveViaDialog("proxpulse-sing-box.json", buildSingBox(list), [{ name: "JSON", extensions: ["json"] }], deps);
+  } else if (kind === "proxifier") {
+    await saveViaDialog("proxpulse.ppx", buildProxifier(list), [{ name: "Proxifier", extensions: ["ppx"] }], deps);
+  } else if (kind === "pac") {
+    await saveViaDialog("proxpulse.pac", buildPac(list), [{ name: "PAC", extensions: ["pac"] }], deps);
+  } else if (kind === "template") {
+    const template = await deps.askTemplate?.();
+    if (!template) return;
+    await saveViaDialog("proxpulse.txt", buildTemplate(list, template), [{ name: "Text", extensions: ["txt"] }], deps);
   } else {
     await saveViaDialog("proxpulse.csv", buildCsv(list), [{ name: "CSV", extensions: ["csv"] }], deps);
   }

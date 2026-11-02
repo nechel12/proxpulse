@@ -18,6 +18,7 @@ export const SETTINGS_KEYS = [
   "pp-webhook-creds",
   "pp-ipapi-key",
   "pp-ipapi-pro",
+  "pp-export-template",
 ] as const;
 
 const MAX_VALUE_CHARS = 1024 * 1024;
