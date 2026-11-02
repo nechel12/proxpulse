@@ -29,6 +29,19 @@ All notable changes to ProxPulse. The format follows
   for local clients (HTTP Basic and SOCKS5 username/password).
 - Notifications when a scheduled check leaves fewer proxies than a threshold,
   and once when scheduled checks find no network.
+- Signed judge answers: a judge with `SIGNING_KEY` signs each `/judge` answer
+  with a per-request nonce and your direct IP. ProxPulse fetches the judge's
+  key directly and marks an answer that fails the check as modified,
+  dropping its anonymity verdict.
+
+### Changed
+
+- The judge address is entered without a scheme, with **HTTPS** and **HTTP**
+  boxes. With both (the default), liveness, ping and geo use HTTPS and a
+  second plain-HTTP request gives anonymity and integrity, so the built-in
+  judge reports anonymity again. Saved settings with an `http://` judge keep
+  HTTP only.
+- Fewer explanations in the UI; the details are in the README.
 
 ## [0.5.0] — 2026-11-01
 

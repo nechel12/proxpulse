@@ -120,18 +120,35 @@ through every proxy: `google`/`cloudflare` `generate_204` (fastest),
 that will actually be requested is shown under the list.
 
 The **ProxPulse Judge** mode uses a [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge)
-instance: the built-in public one at `https://proxycheck.lmtunnel.com` or a
-custom server. **Fast** requests `/generate_204`; **Full** requests `/judge`,
-which returns geo, IP type, anonymity and a content hash in one response and
-replaces the deep checks.
+instance: the built-in public one (`proxycheck.lmtunnel.com`) or your own
+server, entered as a host (`judge.example.com`, optionally with a port or a
+path). **Fast** checks liveness only (`/generate_204`); **Full** asks `/judge`
+for geo, IP type, anonymity and a content hash and replaces the deep checks.
+The **HTTPS** and **HTTP** boxes decide how the judge is reached:
+
+| Choice | Through each proxy | Result |
+|---|---|---|
+| HTTPS + HTTP (default) | `https://…/judge`, then `http://…/judge` | liveness, ping and geo over HTTPS; anonymity and integrity over HTTP |
+| HTTPS | `https://…/judge` | liveness, ping and geo; no anonymity or integrity |
+| HTTP | `http://…/judge` | everything over HTTP; proxies limited to port 443 look dead |
 
 > [!IMPORTANT]
-> **An HTTPS judge cannot detect anonymity or integrity.** A request to an
-> `https://` URL travels inside a TLS tunnel, where the proxy can neither add
-> headers nor alter the response, so every proxy would look `elite`. Anonymity
-> and integrity therefore stay empty with an HTTPS judge, and it does not
-> receive your real IP (`direct_ip`). A self-hosted judge reached over `http://` detects
-> both; it receives `direct_ip` to recognize proxies that forward it.
+> **Anonymity needs plain HTTP.** Inside an HTTPS tunnel the proxy can neither
+> add headers nor alter the answer, so every proxy would look `elite`. Over
+> HTTP the proxy sees the request, and could also rewrite the answer. A judge
+> with `SIGNING_KEY` set signs each `/judge` answer together with a random
+> nonce and your direct IP; ProxPulse fetches the judge's key directly, not
+> through a proxy (over HTTPS when the judge serves it), and an answer that
+> fails the check is marked `?mod` and its anonymity verdict is dropped.
+> Judges without a key are used unsigned. Your direct IP (`direct_ip`) goes
+> only into HTTP requests. A judge that redirects HTTP to HTTPS (such as
+> Render) and proxies that allow only port 443 give no anonymity; the proxy
+> stays alive.
+
+A self-hosted judge for anonymity must answer over plain HTTP (for example
+`docker run -p 80:8000 -e TRUST_PROXY=0 -e SIGNING_KEY=… ghcr.io/nechel12/proxpulse-judge`
+on a server with a public IP: proxies connect to it from the internet). See
+the [judge README](https://github.com/nechel12/proxpulse-judge#signed-answers).
 
 > [!NOTE]
 > **ip-api: free tier and Pro.** The free endpoint is HTTP-only and limited to
@@ -189,7 +206,7 @@ skipped instead of waiting and marked **limit**. The geo cache (2000 entries,
 | | `anon` | The proxy reveals itself (`Via`, its own `X-Forwarded-For` entries, `Forwarded`, `X-Real-IP`, `Proxy-*`) but not your IP. |
 | | `transp` | Your direct IP appears in a forwarded header: the proxy leaks it. |
 | TLS | `ok` / `mod` / `n/v` | The certificate matches / differs or is rejected / the handshake failed for another reason. |
-| Info | `?mod`, `?tls` | The page through the proxy differs from the direct one / the TLS certificate differs. The row tooltip lists every result. |
+| Info | `?mod`, `?tls` | The page through the proxy differs from the direct one or fails the judge's signature / the TLS certificate differs. The row tooltip lists every result. |
 | Anon, Geo, TLS | `—` | Not checked: off, unsupported by the proxy, or an HTTPS judge. |
 | Anon, Geo, TLS | `limit` | Skipped at a concurrency limit; running the check again fills it. |
 
@@ -361,7 +378,7 @@ Stored locally:
 
 | Symptom | Cause and fix |
 |---|---|
-| Anon is `—` and the integrity result is missing in Judge mode | The judge is reached over HTTPS, where a proxy cannot add headers or change the body. A self-hosted judge over `http://` is required for these results. |
+| Anon is `—` and the integrity result is missing in Judge mode | **HTTP** is off, the judge does not answer over plain HTTP (it redirects to HTTPS), or the proxy allows only port 443. Anonymity needs a plain-HTTP request through the proxy. |
 | Anon is `—` for working proxies | The proxy allows only CONNECT to port 443, so the plain-HTTP probes fail. Expected for HTTPS-only proxies. |
 | **limit** in Geo, Anon or TLS | The concurrency limit or the ip-api 429 cooldown was hit. Fewer threads or a second run fill the gaps. |
 | Many alive proxies without geo on free ip-api | The free tier allows 45 requests per minute. ip-api Pro or the judge removes the limit; the geo cache helps on repeated runs. |

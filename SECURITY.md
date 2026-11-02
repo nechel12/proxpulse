@@ -38,6 +38,8 @@ In scope:
   targets, DNS rebinding, redirects.
 - The local dispatcher: request parsing, upstream handling, header and
   credential forwarding, the optional login for local clients.
+- Judge answer signatures: fetching the judge's key and verifying signed
+  answers.
 - Handling of proxy credentials, webhook URLs and the ip-api key: exports,
   webhook payloads, logs, the diagnostics report, the settings file.
 - The WebView: CSP, Tauri capabilities and commands, injection through proxy
@@ -63,7 +65,12 @@ Out of scope:
 
 ProxPulse is a desktop tool that trusts its local user. Checked proxies, their
 responses, imported lists and judge responses are untrusted input: response
-bodies are size-capped and rendered escaped. User-supplied URLs may reach only
+bodies are size-capped and rendered escaped. A signing judge's key is fetched
+directly, never through a checked proxy, over HTTPS when the judge serves it
+and otherwise over plain HTTP; an answer through a proxy that fails the
+signature is treated as modified. The key protects against the checked
+proxies, not against someone on your own network path to an HTTP-only
+judge. User-supplied URLs may reach only
 public hosts, with DNS pinned per request: webhooks do not follow redirects,
 and every redirect of a URL import is checked like the original URL, so
 neither can be pointed at local services. Proxy credentials are sent to
