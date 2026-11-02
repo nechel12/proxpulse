@@ -126,4 +126,11 @@ describe("settings export and import", () => {
     clearSettings(target, ["main", "p1", "p2"]);
     expect(target.data.size).toBe(0);
   });
+
+  it("keeps the pool API switch and port", () => {
+    const file = collectSettings(memoryStorage(), { poolApi: { enabled: true, port: 1090 } });
+    expect(parseSettingsFile(JSON.stringify(file))?.prefs.poolApi).toEqual({ enabled: true, port: 1090 });
+    const bad = { ...file, prefs: { poolApi: { enabled: "yes", port: 70000 } } };
+    expect(parseSettingsFile(JSON.stringify(bad))?.prefs.poolApi).toBeUndefined();
+  });
 });

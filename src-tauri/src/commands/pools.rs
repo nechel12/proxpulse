@@ -29,6 +29,12 @@ pub(crate) struct PoolsState {
     list: Mutex<Vec<PoolMeta>>,
 }
 
+impl PoolsState {
+    pub(crate) fn snapshot(&self) -> Vec<PoolMeta> {
+        lock(&self.list).clone()
+    }
+}
+
 fn lock(m: &Mutex<Vec<PoolMeta>>) -> MutexGuard<'_, Vec<PoolMeta>> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }

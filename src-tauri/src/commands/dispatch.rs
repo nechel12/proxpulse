@@ -371,7 +371,7 @@ pub(crate) async fn is_self_upstream_async(
     is_self
 }
 
-fn country_matches(up: &Upstream, countries: &[String]) -> bool {
+pub(crate) fn country_matches(up: &Upstream, countries: &[String]) -> bool {
     countries.is_empty()
         || up
             .country
@@ -491,13 +491,18 @@ fn same_secret(a: &[u8], b: &[u8]) -> bool {
 
 /// Whether the request head carries the expected `Proxy-Authorization`.
 pub(crate) fn http_auth_ok(head: &str, user: &str, pass: &str) -> bool {
+    basic_auth_ok(head, "proxy-authorization", user, pass)
+}
+
+/// Whether the request head carries the expected Basic login in `header`.
+pub(crate) fn basic_auth_ok(head: &str, header: &str, user: &str, pass: &str) -> bool {
     use base64::Engine;
     let expected = format!("{user}:{pass}");
     head.split("\r\n").skip(1).any(|line| {
         let Some((k, v)) = line.split_once(':') else {
             return false;
         };
-        if !k.trim().eq_ignore_ascii_case("proxy-authorization") {
+        if !k.trim().eq_ignore_ascii_case(header) {
             return false;
         }
         let mut parts = v.trim().splitn(2, ' ');

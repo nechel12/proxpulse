@@ -33,6 +33,9 @@ use commands::dispatch::{
 use commands::export::export_text_file;
 use commands::history::{clear_history, history_size, load_history, proxy_history, HistoryState};
 use commands::import::{fetch_url_text, parse_proxy_text};
+use commands::pool_api::{
+    pool_api_status, start_pool_api, start_saved_pool_api, stop_pool_api, PoolApiState,
+};
 use commands::pools::{
     create_pool, delete_pool, list_pools, load_pools, rename_pool, restore_pools, PoolsState,
 };
@@ -305,6 +308,7 @@ pub fn run() {
         .manage(PrefsState::default())
         .manage(HistoryState::default())
         .manage(PoolsState::default())
+        .manage(PoolApiState::default())
         .invoke_handler(tauri::generate_handler![
             check_proxies,
             check_busy,
@@ -341,6 +345,9 @@ pub fn run() {
             rename_pool,
             delete_pool,
             restore_pools,
+            start_pool_api,
+            stop_pool_api,
+            pool_api_status,
             history_size,
             clear_history
         ])
@@ -436,6 +443,7 @@ pub fn run() {
                 }
             }
             tauri::async_runtime::spawn(start_saved_dispatcher(app.handle().clone()));
+            tauri::async_runtime::spawn(start_saved_pool_api(app.handle().clone()));
             // Scheduling and webhooks run in Rust, so hiding the window or
             // a throttled WebView does not stop scheduled checks.
             let auto_handle = app.handle().clone();

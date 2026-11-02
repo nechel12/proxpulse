@@ -21,6 +21,7 @@ import { SettingsPanel } from "./settings-panel.ts";
 import { initUpdater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
 import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
+import { PoolApiPanel } from "./pool-api.ts";
 import { AutoSettingsStore, storedAutoConfig } from "./auto-settings.ts";
 import { MAIN_POOL, MAX_POOLS, forgetPoolSettings, poolLabel, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
@@ -73,6 +74,7 @@ let pools: PoolMeta[] = [{ id: MAIN_POOL, name: "" }];
 let currentPool = loadCurrentPool();
 /** Pool sizes after the last scheduled check, for the low-pool warning. */
 const poolCounts = new Map<string, number>();
+const poolApi = new PoolApiPanel({ t, setStatusText, pool: () => currentPool });
 
 function loadCurrentPool(): string {
   try {
@@ -160,6 +162,7 @@ function applyI18n() {
   dispatchMonitor.renderPill(t);
   webhooks.renderFormat(t);
   renderPoolSwitchers();
+  poolApi.render();
   void updateTray();
 }
 
@@ -433,6 +436,7 @@ async function switchPool(id: string): Promise<void> {
   setStatusText("srv-status", () => "-");
   showDispatchOptions();
   renderPoolSwitchers();
+  poolApi.render();
   pool.set([]);
   renderPool();
   updateCounts();
@@ -1131,6 +1135,13 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   ($("srv-listener") as HTMLSelectElement).addEventListener("change", updateBrowserHint);
   initDispatchOptions();
+  poolApi.init();
+  ($("btn-api-copy") as HTMLButtonElement).addEventListener("click", async (e) => {
+    try {
+      await navigator.clipboard.writeText(poolApi.exampleUrl());
+      flashLabel(e.currentTarget as HTMLElement, t("copied"));
+    } catch { /* ignore */ }
+  });
   ($("btn-srv-start") as HTMLButtonElement).addEventListener("click", async () => {
     const port = Math.max(1, Math.min(65535, Number(($("srv-port") as HTMLInputElement).value) || 1080));
     const mode = ($("srv-mode") as HTMLSelectElement).value;

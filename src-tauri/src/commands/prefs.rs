@@ -5,6 +5,7 @@ use crate::commands::dispatch::{
     normalize_listener, normalize_mode, start_proxy_inner, write_private_file, DispatchOptions,
     DispatchState, MAIN_POOL,
 };
+use crate::commands::pool_api::PoolApiPrefs;
 use crate::commands::tray::refresh_tray_menu;
 use crate::http::truncate_utf8;
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,7 @@ pub(crate) struct AppPrefs {
     pub(crate) dispatcher: DispatcherPrefs,
     /// The same for every named pool, by pool id.
     pub(crate) pool_dispatchers: HashMap<String, DispatcherPrefs>,
+    pub(crate) pool_api: PoolApiPrefs,
 }
 
 impl Default for AppPrefs {
@@ -79,6 +81,7 @@ impl Default for AppPrefs {
             start_dispatcher: false,
             dispatcher: DispatcherPrefs::default(),
             pool_dispatchers: HashMap::new(),
+            pool_api: PoolApiPrefs::default(),
         }
     }
 }
@@ -93,6 +96,7 @@ pub(crate) struct AppPrefsUpdate {
     pub(crate) dispatcher: Option<DispatcherPrefs>,
     /// Named pools' dispatchers; replaces the whole map when given.
     pub(crate) pool_dispatchers: Option<HashMap<String, DispatcherPrefs>>,
+    pub(crate) pool_api: Option<PoolApiPrefs>,
 }
 
 impl AppPrefs {
@@ -115,6 +119,9 @@ impl AppPrefs {
                 .filter(|(id, _)| crate::commands::pools::valid_pool_id(id) && id != MAIN_POOL)
                 .map(|(id, d)| (id, d.sanitized()))
                 .collect();
+        }
+        if let Some(api) = update.pool_api {
+            self.pool_api = api.sanitized();
         }
     }
 }
@@ -156,6 +163,7 @@ pub(crate) fn read_prefs_file(path: &Path) -> AppPrefs {
                 .into_iter()
                 .map(|(id, d)| (id, d.sanitized()))
                 .collect();
+            p.pool_api = std::mem::take(&mut p.pool_api).sanitized();
             p
         })
         .unwrap_or_default()
@@ -175,7 +183,10 @@ pub(crate) fn load_prefs(app: &AppHandle) -> AppPrefs {
     prefs
 }
 
-async fn update_prefs(app: &AppHandle, update: AppPrefsUpdate) -> Result<AppPrefs, String> {
+pub(crate) async fn update_prefs(
+    app: &AppHandle,
+    update: AppPrefsUpdate,
+) -> Result<AppPrefs, String> {
     let prefs = {
         let state = app.state::<PrefsState>();
         let mut prefs = lock(&state.prefs);

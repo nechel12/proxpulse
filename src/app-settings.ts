@@ -28,7 +28,18 @@ type Deps = {
 /** Backend preferences (`prefs.rs`). */
 type BackendPrefs = Required<PrefsUpdate>;
 
-const DEFAULT_PREFS: PrefsUpdate = { closeToTray: false, startMinimized: true, startDispatcher: false };
+const DEFAULT_PREFS: PrefsUpdate = {
+  closeToTray: false,
+  startMinimized: true,
+  startDispatcher: false,
+  poolApi: { enabled: false, port: 1090 },
+};
+
+/** Start or stop the pool API as the preferences say. */
+async function applyPoolApi(api: PrefsUpdate["poolApi"]): Promise<void> {
+  if (api?.enabled) await invoke("start_pool_api", { port: api.port });
+  else await invoke("stop_pool_api");
+}
 
 export function readFlag(key: string, fallback: boolean): boolean {
   try {
@@ -247,7 +258,9 @@ export class AppSettings {
     const ids = new Set([...this.deps.pools().map((p) => p.id), ...parsed.pools.map((p) => p.meta.id)]);
     applySettings(localStorage, parsed.storage, [...ids]);
     try {
-      await invoke("set_app_prefs", { prefs: { ...DEFAULT_PREFS, ...parsed.prefs } });
+      const prefs = { ...DEFAULT_PREFS, ...parsed.prefs };
+      await invoke("set_app_prefs", { prefs });
+      await applyPoolApi(prefs.poolApi).catch(() => { /* the port may be taken */ });
       if (parsed.pool) await invoke("set_dispatch_pool", { items: parsed.pool });
       if (parsed.pools.length) {
         const restored = await invoke<PoolMeta[]>("restore_pools", { pools: parsed.pools.map((p) => p.meta) });
@@ -267,6 +280,7 @@ export class AppSettings {
     clearSettings(localStorage, this.deps.pools().map((p) => p.id));
     try {
       await invoke("set_app_prefs", { prefs: DEFAULT_PREFS });
+      await applyPoolApi(DEFAULT_PREFS.poolApi);
       await invoke("set_autostart", { enabled: false });
     } catch { /* browser preview or older backend */ }
     location.reload();

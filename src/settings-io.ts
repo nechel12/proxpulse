@@ -47,6 +47,8 @@ export type PrefsUpdate = {
   dispatcher?: DispatcherPrefs;
   /** The dispatchers of the named pools, by pool id. */
   poolDispatchers?: Record<string, DispatcherPrefs>;
+  /** The local pool API (`PoolApiPrefs` in pool_api.rs). */
+  poolApi?: { enabled: boolean; port: number };
 };
 
 /** `DispatchOptions` in dispatch.rs. */
@@ -168,6 +170,13 @@ function pickPrefs(raw: unknown): PrefsUpdate {
       if (picked) map[id] = picked;
     }
     if (Object.keys(map).length) out.poolDispatchers = map;
+  }
+  const api = src.poolApi as Record<string, unknown> | undefined;
+  if (
+    api && typeof api === "object" && typeof api.enabled === "boolean" &&
+    Number.isInteger(api.port) && (api.port as number) >= 1 && (api.port as number) <= 65535
+  ) {
+    out.poolApi = { enabled: api.enabled, port: api.port as number };
   }
   return out;
 }

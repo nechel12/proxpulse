@@ -315,6 +315,17 @@
           <div id="srv-status" class="status-line">—</div>
           <div class="hint" id="browser-hint" data-i18n="browser_hint">Укажите в браузере HTTP- или SOCKS5-прокси: 127.0.0.1 и порт выше.</div>
           <div class="panel-head" style="margin-top:14px">
+            <span class="ph-title" data-i18n="api_title">▸ API пула</span>
+            <span id="api-pill" class="pill dead">OFF</span>
+          </div>
+          <div class="checks end">
+            <label class="fld" style="flex:1"><span data-i18n="srv_port">Порт</span><input id="api-port" type="number" value="1090" min="1" max="65535" /></label>
+            <button id="btn-api-toggle" class="btn ghost">Включить</button>
+          </div>
+          <div class="srv-addr"><code id="api-example">http://127.0.0.1:1090/random</code><button id="btn-api-copy" class="btn ghost" data-i18n="btn_copy">Копировать</button></div>
+          <div id="api-status" class="status-line">—</div>
+          <div class="hint" data-i18n="api_hint">Живые прокси для скриптов: /random, /fastest, /list, /pools. Параметры — в README.</div>
+          <div class="panel-head" style="margin-top:14px">
             <span class="ph-title" data-i18n="disp_auto_title">▸ Автопроверка</span>
           </div>
           <div id="disp-auto-status" class="status-line">—</div>

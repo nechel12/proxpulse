@@ -5,6 +5,7 @@ pub(crate) mod dispatch;
 pub(crate) mod export;
 pub(crate) mod history;
 pub(crate) mod import;
+pub(crate) mod pool_api;
 pub(crate) mod pools;
 pub(crate) mod prefs;
 pub(crate) mod speed;
