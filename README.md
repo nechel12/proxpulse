@@ -15,8 +15,10 @@
 
 Desktop proxy checker for Windows, Linux and macOS. It checks HTTP, HTTPS,
 SOCKS4 and SOCKS5 proxies for liveness, latency, geolocation, anonymity,
-content and TLS integrity, runs a local rotating HTTP/SOCKS5 dispatcher over
-the alive pool, re-checks the pool on a schedule and posts it to webhooks.
+content and TLS integrity and IP blocklists, keeps the alive ones in named
+pools, runs a local rotating HTTP/SOCKS5 dispatcher per pool, hands proxies to
+scripts over a local API, re-checks the pools on a schedule and posts them to
+webhooks.
 
 Stack: **Tauri 2 + Rust (tokio, reqwest, rustls) + Vite + TypeScript**. All
 network work, parsing and scheduling run in the Rust backend; the UI is a thin
@@ -35,7 +37,8 @@ first launch; dark and light themes.
   [Check settings](#check-settings) · [Deep checks](#deep-checks) ·
   [How verdicts are decided](#how-verdicts-are-decided) · [Results table](#results-table) ·
   [Export](#export)
-- [Dispatcher](#dispatcher) · [Scheduled checks and webhooks](#scheduled-checks-and-webhooks) ·
+- [Dispatcher](#dispatcher) · [Named pools](#named-pools) · [Pool API](#pool-api) ·
+  [Scheduled checks and webhooks](#scheduled-checks-and-webhooks) ·
   [Settings, tray and updates](#settings-tray-and-updates)
 - [Privacy and local data](#privacy-and-local-data) ·
   [Troubleshooting](#troubleshooting) · [Limitations](#limitations) ·
@@ -193,10 +196,21 @@ Discord, ChatGPT or your own hosts and URLs, up to 8) through every alive
 proxy, also in Judge mode. Any HTTP answer counts as reachable; the **Sites**
 column shows how many opened and the tooltip lists each with its time.
 
+**Blocklists (DNSBL)**, off by default (**IP blocklists (DNSBL)** under
+**Site access**), look the exit IP up in Spamhaus ZEN, Barracuda, SpamCop and
+DroneBL, also in Judge mode (IPv4 only, cached for an hour). Scheduled checks
+skip them. `bl N` in the Info column means N lists have it; the tooltip names
+them, and a filter shows clean or listed proxies. The lookups go through your
+DNS resolver, so the list operators see the exit IPs you check. A list that
+does not answer within 4 s counts as unknown. Spamhaus refuses queries from
+large public resolvers (Google, Cloudflare, Quad9): with such a DNS its answer
+counts as unknown, not clean.
+
 At most 8 geo lookups and 64 of each other deep check run at once, and geo
 pauses for a minute after ip-api answers 429. A check that hits a limit is
-skipped instead of waiting and marked **limit**. The geo cache (2000 entries,
-6-hour TTL) avoids repeated lookups for unchanged exit IPs.
+skipped instead of waiting and marked **limit** (a skipped blocklist lookup
+shows only in the row tooltip). The geo cache (2000 entries, 6-hour TTL)
+avoids repeated lookups for unchanged exit IPs.
 
 ### How verdicts are decided
 
@@ -207,6 +221,7 @@ skipped instead of waiting and marked **limit**. The geo cache (2000 entries,
 | | `transp` | Your direct IP appears in a forwarded header: the proxy leaks it. |
 | TLS | `ok` / `mod` / `n/v` | The certificate matches / differs or is rejected / the handshake failed for another reason. |
 | Info | `?mod`, `?tls` | The page through the proxy differs from the direct one or fails the judge's signature / the TLS certificate differs. The row tooltip lists every result. |
+| Info | `bl N` | The exit IP is on N blocklists; the tooltip names them. |
 | Anon, Geo, TLS | `—` | Not checked: off, unsupported by the proxy, or an HTTPS judge. |
 | Anon, Geo, TLS | `limit` | Skipped at a concurrency limit; running the check again fills it. |
 
@@ -243,7 +258,9 @@ dead** checks only the dead proxies again and updates their rows in place.
 ### Export
 
 **Export** saves `.txt` (normalized proxy URLs), `.json` (full results) or
-`.csv` (table with the original line and URL) through the system dialog, or
+`.csv` (table with the original line and URL; the `dnsbl` column holds the
+lists that have the exit IP, `clean`, or nothing when not checked) through the
+system dialog, or
 copies the list. Configs for proxy clients are exported too, fastest first:
 Clash (`url-test` group; no SOCKS4), sing-box (`urltest` outbound), a
 Proxifier profile whose default rule uses the fastest proxy (no HTTPS
@@ -285,9 +302,63 @@ start:
 - **Login** — local clients must authenticate: HTTP `Proxy-Authorization:
   Basic` (the browser asks) or SOCKS5 username/password.
 
+### Named pools
+
+The menu at the top of the **Dispatcher** and **Auto** tabs switches between
+up to ten pools, for example one for scraping and one for work; **+**, **✎**
+and **✕** create, rename and delete them. Each pool has its own proxies,
+dispatcher (port, mode, filter, sessions and login), schedule, max ping,
+subscriptions and webhooks.
+
+- Alive proxies from a manual check go to the pool that is shown.
+- Every pool's schedule runs whichever pool is shown. One check runs at a
+  time: pools due together take turns.
+- Each pool's dispatcher needs its own port. A dispatcher never uses another
+  pool's dispatcher as an upstream.
+- **Start the dispatcher** at launch starts every pool's dispatcher that was
+  started before. The tray shows and controls the main pool.
+- Deleting a pool stops its dispatcher and removes its schedule and proxies.
+
+### Pool API
+
+**Pool API** on the Dispatcher tab hands live proxies to scripts over HTTP on
+`127.0.0.1:1090` (the port can be changed). Once on, it starts with the app.
+
+| Request | Answer |
+|---|---|
+| `GET /random` | a random proxy |
+| `GET /fastest` | the proxy with the lowest ping |
+| `GET /list` | every matching proxy, one per line |
+| `GET /pools` | the pools: id, name and size, tab-separated |
+| `GET /` | a short help |
+
+| Parameter | Meaning |
+|---|---|
+| `pool` | pool id or name (any case); the main pool by default |
+| `country` | codes or names as shown in the pool, comma-separated |
+| `proto` | `http`, `https`, `socks4`, `socks5` or `socks` (both SOCKS) |
+| `limit` | 1–20000 proxies from `/list` (all by default); `/random` and `/fastest` ignore it |
+| `format` | `txt` (default) or `json`: objects with `url`, `scheme`, `host`, `port`, `country`, `latency` |
+
+```sh
+curl "http://127.0.0.1:1090/random?country=DE&proto=socks5"
+curl -u user:pass "http://127.0.0.1:1090/list?pool=work&format=json&limit=20"
+```
+
+- Proxies come as URLs **with their usernames and passwords**.
+- A pool with a dispatcher login answers only with the same login (HTTP
+  Basic, `curl -u`), and `/pools` lists it only then. Without one, any local
+  process can read it.
+- Upstreams paused after a failure are left out unless nothing else matches.
+- Errors: `400` for a bad parameter, `404` for no match or an unknown pool or
+  path, `405` for a method other than `GET`.
+- Requests whose `Host` is not `127.0.0.1` or `localhost` are refused, so a
+  web page cannot read the pool through DNS rebinding.
+
 ## Scheduled checks and webhooks
 
-The **Auto** tab re-checks the shared pool every N minutes:
+The **Auto** tab re-checks the pool every N minutes; each
+[named pool](#named-pools) has its own schedule:
 
 - Scheduled checks are light: liveness, ping and country; geo is requested
   only for entries without a country.
@@ -329,10 +400,13 @@ The **Settings** tab holds the app-wide options:
 - **Updates and notifications**: the version and **Check for updates**, a
   quiet check at launch, and system notifications while the window is hidden:
   a scheduled webhook delivery failed, the pool fell below a threshold,
-  scheduled checks found no network, an update is out.
+  scheduled checks found no network, an update is out. With several pools the
+  title names the pool.
 - **Data**: export, import and reset of the settings as a JSON file (it holds
-  webhook URLs, the ip-api key and the dispatcher login, and the pool with its
-  credentials only when you choose so on export); **Copy** puts a diagnostics
+  webhook URLs, the ip-api key, the dispatcher logins and the named pools'
+  settings, and the pools with their credentials only when you choose so on
+  export; import adds the file's pools up to ten in total); **Copy** puts a
+  diagnostics
   report (version, OS, install type, counters, recent errors) on the clipboard
   for bug reports; the error log; clearing the proxy history.
 
@@ -353,7 +427,8 @@ baselines — your IP and the example.com reference — and a connectivity check
 when a scheduled check finds no alive proxy; the selected judge; GitHub
 Releases (update check, also at launch unless turned off); configured
 webhooks; URL imports and subscriptions; the chosen sites through each alive
-proxy; `speed.cloudflare.com` through the proxies of a speed test.
+proxy; `speed.cloudflare.com` through the proxies of a speed test; your DNS
+resolver and the four blocklists with the exit IPs when DNSBL is on.
 
 Proxy credentials go to the proxy itself (HTTP `Proxy-Authorization` or SOCKS
 authentication), into exports, and to webhooks only with **Send credentials**.
@@ -366,9 +441,10 @@ Stored locally:
 - In `pool.json` in the app data directory (`%APPDATA%\com.nechel12.proxpulse`,
   `~/.local/share/com.nechel12.proxpulse`,
   `~/Library/Application Support/com.nechel12.proxpulse`): the pool **with
-  usernames and passwords**, owner-only on Linux and macOS. **Clear pool**
-  clears it. `prefs.json` next to it holds the startup options and the
-  dispatcher settings, including its login password, and `history.json` the
+  usernames and passwords**, owner-only on Linux and macOS (named pools:
+  `pool-<id>.json`, their names in `pools.json`). **Clear pool** clears it.
+  `prefs.json` next to it holds the startup options, the pool API port and
+  the dispatcher settings, including login passwords, and `history.json` the
   per-proxy history (URLs without credentials).
 - Starting with the system adds a login item: the `Run` registry key on
   Windows, a LaunchAgent on macOS, a `.desktop` file in `~/.config/autostart`
@@ -390,6 +466,10 @@ Stored locally:
 | The dispatcher starts on 1081, 1082, … | The requested port is busy; the next free one is used and shown. |
 | The browser gets `502 All upstreams failed` | Every tried upstream failed; the dispatcher status shows the last error. Re-checking the pool or switching to failover helps. |
 | `Webhook error: http 4xx/5xx` | The receiver rejected the POST. Local and private hosts are blocked, and redirects are not followed. |
+| DNSBL: Spamhaus is unknown for every proxy | Your DNS is a large public resolver, which Spamhaus refuses. Another resolver (for example your provider's) gets its answers. |
+| The pool API answers `401` | The pool has a dispatcher login: send it, for example `curl -u user:pass`. |
+| The pool API answers `403` | The `Host` header is not `127.0.0.1` or `localhost`. |
+| The pool API does not start | The port is taken, for example by a dispatcher: choose another. |
 | macOS: "the app is damaged" | The build is unsigned: `xattr -cr ProxPulse.app`, then open it again. |
 
 ## Limitations
@@ -403,8 +483,10 @@ Stored locally:
   rotation) is reported as `mod`.
 - ip-api and httpbin.org are shared public services with rate limits and
   outages; for regular use a self-hosted judge is more reliable.
-- The dispatcher listens on `127.0.0.1` without authentication: any local
-  process can use the pool.
+- The dispatchers and the pool API listen on `127.0.0.1`; without a login
+  any local process can use a pool.
+- Blocklists list IPs for spam and abuse: shared and residential exits can be
+  listed because of other users.
 - Webhook URLs, the ip-api key and the pool are stored unencrypted.
 - Builds are not code-signed; macOS builds are compile-checked only.
 
@@ -471,6 +553,7 @@ src/results*.ts, virtual-rows.ts    # results table: sorting, filters, selection
 src/format.ts                       # cell formatting
 src/export*.ts, csv.ts              # TXT/JSON/CSV export
 src/pool.ts, dispatch-monitor.ts    # pool view and dispatcher status
+src/pools.ts, pool-api.ts           # named pools, pool API panel
 src/auto-*.ts, webhooks.ts          # schedule, its status and webhooks
 src/app-settings.ts, settings-io.ts # Settings tab, settings export/import
 src/theme.ts, notify.ts             # theme and system notifications
@@ -489,6 +572,8 @@ src-tauri/src/http.rs               # HTTP clients, body limits, deep-check prob
 src-tauri/src/transport.rs          # SOCKS/HTTP CONNECT and TLS to proxies
 src-tauri/src/tls.rs                # TLS config and certificate fingerprints
 src-tauri/src/netguard.rs           # guard for user-supplied URLs
+src-tauri/src/dnsbl.rs              # blocklist lookups
+src-tauri/src/judge_sig.rs          # judge answer signatures
 src-tauri/src/tests/*.rs            # backend tests
 .github/workflows/ci.yml            # checks on every push and PR
 .github/workflows/release.yml       # tagged release builds

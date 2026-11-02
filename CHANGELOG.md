@@ -33,6 +33,19 @@ All notable changes to ProxPulse. The format follows
   with a per-request nonce and your direct IP. ProxPulse fetches the judge's
   key directly and marks an answer that fails the check as modified,
   dropping its anonymity verdict.
+- Blocklist check (DNSBL), off by default: the exit IP is looked up in
+  Spamhaus ZEN, Barracuda, SpamCop and DroneBL; `bl N` in the Info column, a
+  filter and a `dnsbl` column in CSV exports. Scheduled checks skip it.
+- Named pools: up to ten pools, each with its own proxies, dispatcher,
+  schedule, subscriptions and webhooks, switched on the Dispatcher and Auto
+  tabs. The settings file carries the named pools, and with **Start the
+  dispatcher** every pool's dispatcher that was started before starts at
+  launch.
+- Pool API, off by default: `GET 127.0.0.1:1090/random`, `/fastest`, `/list`
+  and `/pools` hand live proxies to scripts, filtered by pool, country and
+  protocol, as text or JSON. A pool with a dispatcher login needs the same
+  login, and requests for other host names are refused against DNS
+  rebinding. The settings file carries its state.
 
 ### Changed
 
