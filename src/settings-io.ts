@@ -37,8 +37,27 @@ export type PrefsUpdate = {
   closeToTray?: boolean;
   startMinimized?: boolean;
   startDispatcher?: boolean;
-  dispatcher?: { port: number; mode: string; listener: string };
+  dispatcher?: { port: number; mode: string; listener: string; options?: DispatcherOptions };
 };
+
+/** `DispatchOptions` in dispatch.rs. */
+export type DispatcherOptions = { countries: string[]; stickyMin: number; authUser: string; authPass: string };
+
+function pickOptions(raw: unknown): DispatcherOptions | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 255) : "");
+  return {
+    countries: Array.isArray(o.countries)
+      ? o.countries.filter((c): c is string => typeof c === "string").slice(0, 50)
+      : [],
+    stickyMin: typeof o.stickyMin === "number" && Number.isFinite(o.stickyMin)
+      ? Math.max(0, Math.min(1440, Math.floor(o.stickyMin)))
+      : 0,
+    authUser: str(o.authUser),
+    authPass: str(o.authPass),
+  };
+}
 
 /** A dispatcher pool entry (`DispatchPoolItem` in dispatch.rs). */
 export type PoolEntry = { raw: string; url: string; latency: number | null; country: string | null };
@@ -99,7 +118,8 @@ function pickPrefs(raw: unknown): PrefsUpdate {
     Number.isInteger(d.port) && (d.port as number) >= 1 && (d.port as number) <= 65535 &&
     typeof d.mode === "string" && typeof d.listener === "string"
   ) {
-    out.dispatcher = { port: d.port as number, mode: d.mode, listener: d.listener };
+    const options = pickOptions(d.options);
+    out.dispatcher = { port: d.port as number, mode: d.mode, listener: d.listener, ...(options ? { options } : {}) };
   }
   return out;
 }

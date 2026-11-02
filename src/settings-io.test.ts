@@ -65,6 +65,17 @@ describe("settings export and import", () => {
     expect(SETTINGS_KEYS).not.toContain("pp-geocache");
   });
 
+  it("keeps the dispatcher options", () => {
+    const options = { countries: ["DE"], stickyMin: 10, authUser: "me", authPass: "secret" };
+    const file = collectSettings(memoryStorage(), { dispatcher: { port: 1080, mode: "failover", listener: "both", options } });
+    expect(parseSettingsFile(JSON.stringify(file))?.prefs.dispatcher?.options).toEqual(options);
+
+    const messy = { ...file, prefs: { dispatcher: { port: 1080, mode: "x", listener: "y", options: { countries: [1, "NL"], stickyMin: 1e9 } } } };
+    expect(parseSettingsFile(JSON.stringify(messy))?.prefs.dispatcher?.options).toEqual({
+      countries: ["NL"], stickyMin: 1440, authUser: "", authPass: "",
+    });
+  });
+
   it("carries the pool only when asked and validates its entries", () => {
     const storage = memoryStorage();
     expect(collectSettings(storage, {}).pool).toBeUndefined();

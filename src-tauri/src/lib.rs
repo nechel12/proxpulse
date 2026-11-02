@@ -25,8 +25,8 @@ use commands::app::{
 use commands::auto::{auto_scheduler_loop, run_auto_now, set_auto_config, AutoState};
 use commands::check::{cancel_check, check_busy, check_direct, check_proxies, CheckState};
 use commands::dispatch::{
-    get_dispatch_pool, load_pool, local_proxy_status, set_dispatch_pool, start_local_proxy,
-    start_proxy_inner, stop_local_proxy, stop_proxy_inner, DispatchState,
+    get_dispatch_pool, load_pool, local_proxy_status, set_dispatch_options, set_dispatch_pool,
+    start_local_proxy, start_proxy_inner, stop_local_proxy, stop_proxy_inner, DispatchState,
 };
 use commands::export::export_text_file;
 use commands::history::{clear_history, history_size, load_history, proxy_history, HistoryState};
@@ -323,6 +323,7 @@ pub fn run() {
             notify,
             speed_test,
             proxy_history,
+            set_dispatch_options,
             history_size,
             clear_history
         ])

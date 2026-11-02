@@ -2,7 +2,8 @@
 //! tray, starting hidden from autostart, and starting the dispatcher.
 
 use crate::commands::dispatch::{
-    normalize_listener, normalize_mode, start_proxy_inner, write_private_file, DispatchState,
+    normalize_listener, normalize_mode, start_proxy_inner, write_private_file, DispatchOptions,
+    DispatchState,
 };
 use crate::commands::tray::refresh_tray_menu;
 use crate::http::truncate_utf8;
@@ -26,6 +27,7 @@ pub(crate) struct DispatcherPrefs {
     pub(crate) port: u16,
     pub(crate) mode: String,
     pub(crate) listener: String,
+    pub(crate) options: DispatchOptions,
 }
 
 impl Default for DispatcherPrefs {
@@ -34,6 +36,7 @@ impl Default for DispatcherPrefs {
             port: 1080,
             mode: "round-robin".to_string(),
             listener: "both".to_string(),
+            options: DispatchOptions::default(),
         }
     }
 }
@@ -45,6 +48,7 @@ impl DispatcherPrefs {
             port: if self.port == 0 { 1080 } else { self.port },
             mode: normalize_mode(&self.mode),
             listener: normalize_listener(&self.listener),
+            options: self.options.sanitized(),
         }
     }
 }
@@ -180,6 +184,12 @@ pub(crate) async fn remember_dispatcher(app: &AppHandle, dispatcher: DispatcherP
     let _ = update_prefs(app, update).await;
 }
 
+pub(crate) async fn remember_dispatch_options(app: &AppHandle, options: DispatchOptions) {
+    let mut dispatcher = app.state::<PrefsState>().get().dispatcher;
+    dispatcher.options = options;
+    remember_dispatcher(app, dispatcher).await;
+}
+
 /// Closing the main window hides it instead when the user chose so and the
 /// tray icon exists to bring it back.
 pub(crate) fn close_to_tray(app: &AppHandle) -> bool {
@@ -201,6 +211,7 @@ pub(crate) async fn start_saved_dispatcher(app: AppHandle) {
     *disp.inner.port.lock().await = d.port;
     *disp.inner.mode.lock().await = d.mode.clone();
     *disp.inner.listener.lock().await = d.listener.clone();
+    *disp.inner.options.lock().await = d.options.clone();
     if !prefs.start_dispatcher || disp.inner.pool.lock().await.is_empty() {
         return;
     }

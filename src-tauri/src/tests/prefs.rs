@@ -58,6 +58,7 @@ fn partial_updates_change_only_the_given_fields() {
             port: 3128,
             mode: "failover".to_string(),
             listener: "http".to_string(),
+            options: Default::default(),
         }),
         ..AppPrefsUpdate::default()
     });

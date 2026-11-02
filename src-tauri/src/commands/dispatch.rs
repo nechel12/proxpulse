@@ -1,4 +1,4 @@
-use crate::commands::prefs::{remember_dispatcher, DispatcherPrefs};
+use crate::commands::prefs::{remember_dispatch_options, remember_dispatcher, DispatcherPrefs};
 use crate::transport::{
     close_after_response, connect_to_http_proxy, connect_via, find_header_end, parse_upstream_url,
     prepare_forward_request, read_exact_t, strip_header, write_all_t, Upstream,
@@ -31,6 +31,46 @@ pub(crate) struct DispatchItem {
     pub(crate) country: Option<String>,
 }
 
+/// Dispatcher options that can change while it runs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct DispatchOptions {
+    /// Only upstreams from these countries (codes or names); empty = all.
+    pub(crate) countries: Vec<String>,
+    /// Keep one upstream per destination host for this many minutes; 0 = off.
+    pub(crate) sticky_min: u64,
+    /// Login local clients must send; empty = no login.
+    pub(crate) auth_user: String,
+    pub(crate) auth_pass: String,
+}
+
+impl DispatchOptions {
+    pub(crate) fn sanitized(mut self) -> Self {
+        self.countries = self
+            .countries
+            .iter()
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty() && c.len() <= 64)
+            .take(50)
+            .collect();
+        self.sticky_min = self.sticky_min.min(1440);
+        self.auth_user = self.auth_user.trim().chars().take(255).collect();
+        self.auth_pass = self.auth_pass.chars().take(255).collect();
+        if self.auth_user.is_empty() {
+            self.auth_pass.clear();
+        }
+        self
+    }
+
+    fn auth(&self) -> Option<(&str, &str)> {
+        (!self.auth_user.is_empty()).then_some((self.auth_user.as_str(), self.auth_pass.as_str()))
+    }
+}
+
+/// A failed upstream is skipped for this long.
+pub(crate) const COOLDOWN: Duration = Duration::from_secs(60);
+const STICKY_MAX: usize = 10_000;
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct DispatchStatus {
     running: bool,
@@ -38,6 +78,8 @@ pub(crate) struct DispatchStatus {
     mode: String,
     listener: String,
     upstreams: usize,
+    /// Upstreams skipped for a minute after a failure.
+    cooling: usize,
     current: Option<String>,
     requests: u64,
     errors: u64,
@@ -93,6 +135,11 @@ pub(crate) struct DispatchInner {
     pub(crate) fails: Mutex<HashMap<String, u32>>,
     /// Serializes writes of the persisted pool file.
     pub(crate) save_lock: Mutex<()>,
+    pub(crate) options: Mutex<DispatchOptions>,
+    /// Destination host -> upstream URL and when the binding expires.
+    pub(crate) sticky: Mutex<HashMap<String, (String, Instant)>>,
+    /// Upstream URL -> end of its cooldown after a failure.
+    pub(crate) cooldown: Mutex<HashMap<String, Instant>>,
 }
 
 const MAX_CONNECTIONS: usize = 1024;
@@ -122,6 +169,9 @@ impl Default for DispatchState {
                 conn_sem: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
                 fails: Mutex::new(HashMap::new()),
                 save_lock: Mutex::new(()),
+                options: Mutex::new(DispatchOptions::default()),
+                sticky: Mutex::new(HashMap::new()),
+                cooldown: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -241,16 +291,78 @@ pub(crate) async fn is_self_upstream_async(
     is_self
 }
 
-async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
+fn country_matches(up: &Upstream, countries: &[String]) -> bool {
+    countries.is_empty()
+        || up
+            .country
+            .as_deref()
+            .is_some_and(|c| countries.iter().any(|w| w.eq_ignore_ascii_case(c)))
+}
+
+/// Upstream order for one request: only the chosen countries, without
+/// upstreams in cooldown unless no other is left, and the host's sticky
+/// upstream first.
+pub(crate) fn plan_upstreams(
+    pool: &[Upstream],
+    mode: &str,
+    rr: &AtomicUsize,
+    countries: &[String],
+    cooling: &HashSet<String>,
+    sticky: Option<&str>,
+    limit: usize,
+) -> Vec<Upstream> {
+    let allowed: Vec<usize> = (0..pool.len())
+        .filter(|&i| country_matches(&pool[i], countries))
+        .collect();
+    let ready: Vec<usize> = allowed
+        .iter()
+        .copied()
+        .filter(|&i| !cooling.contains(&pool[i].url))
+        .collect();
+    let ready = if ready.is_empty() { allowed } else { ready };
+    let mut order: Vec<usize> = pick_order(ready.len(), mode, rr, limit)
+        .into_iter()
+        .map(|i| ready[i])
+        .collect();
+    if let Some(url) = sticky {
+        if let Some(&i) = ready.iter().find(|&&i| pool[i].url == url) {
+            order.retain(|&j| j != i);
+            order.insert(0, i);
+            order.truncate(limit);
+        }
+    }
+    order.into_iter().map(|i| pool[i].clone()).collect()
+}
+
+async fn take_upstreams(st: &Arc<DispatchInner>, host: &str) -> Vec<Upstream> {
     let port = *st.port.lock().await;
     let mode = st.mode.lock().await.clone();
+    let countries = st.options.lock().await.countries.clone();
+    let now = Instant::now();
+    let cooling: HashSet<String> = {
+        let mut c = st.cooldown.lock().await;
+        c.retain(|_, until| *until > now);
+        c.keys().cloned().collect()
+    };
+    let sticky = {
+        let mut s = st.sticky.lock().await;
+        s.retain(|_, (_, until)| *until > now);
+        s.get(host).map(|(url, _)| url.clone())
+    };
     let candidates: Vec<Upstream> = {
         let pool = st.pool.lock().await;
         if pool.is_empty() {
             return vec![];
         }
-        let order = pick_order(pool.len(), &mode, &st.rr, MAX_UPSTREAM_ATTEMPTS + 4);
-        order.iter().map(|&i| pool[i].clone()).collect()
+        plan_upstreams(
+            &pool,
+            &mode,
+            &st.rr,
+            &countries,
+            &cooling,
+            sticky.as_deref(),
+            MAX_UPSTREAM_ATTEMPTS + 4,
+        )
     };
     let mut out = Vec::new();
     for up in candidates {
@@ -263,6 +375,69 @@ async fn take_upstreams(st: &Arc<DispatchInner>) -> Vec<Upstream> {
         out.push(up);
     }
     out
+}
+
+/// Remember the upstream that served `host` when sessions are sticky.
+async fn note_success(st: &Arc<DispatchInner>, host: &str, url: &str) {
+    let minutes = st.options.lock().await.sticky_min;
+    if minutes == 0 {
+        return;
+    }
+    let mut s = st.sticky.lock().await;
+    if s.len() >= STICKY_MAX {
+        s.clear();
+    }
+    s.insert(
+        host.to_ascii_lowercase(),
+        (
+            url.to_string(),
+            Instant::now() + Duration::from_secs(minutes * 60),
+        ),
+    );
+}
+
+/// Skip an upstream that could not connect for a while.
+async fn note_failure(st: &Arc<DispatchInner>, url: &str) {
+    st.cooldown
+        .lock()
+        .await
+        .insert(url.to_string(), Instant::now() + COOLDOWN);
+}
+
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    // Compare in constant time for equal lengths.
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Whether the request head carries the expected `Proxy-Authorization`.
+pub(crate) fn http_auth_ok(head: &str, user: &str, pass: &str) -> bool {
+    use base64::Engine;
+    let expected = format!("{user}:{pass}");
+    head.split("\r\n").skip(1).any(|line| {
+        let Some((k, v)) = line.split_once(':') else {
+            return false;
+        };
+        if !k.trim().eq_ignore_ascii_case("proxy-authorization") {
+            return false;
+        }
+        let mut parts = v.trim().splitn(2, ' ');
+        let scheme = parts.next().unwrap_or("");
+        let token = parts.next().unwrap_or("").trim();
+        scheme.eq_ignore_ascii_case("basic")
+            && base64::engine::general_purpose::STANDARD
+                .decode(token)
+                .is_ok_and(|d| same_secret(&d, expected.as_bytes()))
+    })
+}
+
+/// RFC 1929 username/password sub-negotiation body (after the version byte
+/// pair has been read): returns user and password.
+pub(crate) fn parse_socks_auth(body: &[u8]) -> Option<(&[u8], &[u8])> {
+    let ulen = *body.first()? as usize;
+    let user = body.get(1..1 + ulen)?;
+    let plen = *body.get(1 + ulen)? as usize;
+    let pass = body.get(2 + ulen..2 + ulen + plen)?;
+    Some((user, pass))
 }
 
 pub(crate) struct CountingIo<T> {
@@ -364,7 +539,22 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
     };
     let is_connect = method.eq_ignore_ascii_case("CONNECT");
 
-    let order = take_upstreams(&st).await;
+    let auth = st
+        .options
+        .lock()
+        .await
+        .auth()
+        .map(|(u, p)| (u.to_string(), p.to_string()));
+    if let Some((user, pass)) = auth {
+        if !http_auth_ok(&head, &user, &pass) {
+            let _ = client
+                .write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"ProxPulse\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+            return;
+        }
+    }
+
+    let order = take_upstreams(&st, &t_host).await;
     if order.is_empty() {
         let _ = client.write_all(b"HTTP/1.1 502 No upstreams\r\n\r\n").await;
         return;
@@ -390,6 +580,7 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
             Ok(mut ups) => {
                 *st.current.lock().await = Some(strip_credentials(&up.url));
                 st.requests.fetch_add(1, Ordering::Relaxed);
+                note_success(&st, &t_host, &up.url).await;
                 if is_connect {
                     // The client already received 200 before the tunnel
                     // starts, so a failure here cannot be retried.
@@ -446,6 +637,7 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                 return;
             }
             Err(e) => {
+                note_failure(&st, &up.url).await;
                 last_err = e.to_string();
                 continue;
             }
@@ -478,12 +670,63 @@ pub(crate) async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>)
     if read_exact_t(&mut client, &mut methods, d).await.is_err() {
         return;
     }
-    if !methods.contains(&0x00) {
-        let _ = write_all_t(&mut client, &[0x05, 0xFF], d).await;
-        return;
-    }
-    if write_all_t(&mut client, &[0x05, 0x00], d).await.is_err() {
-        return;
+    let auth = st
+        .options
+        .lock()
+        .await
+        .auth()
+        .map(|(u, p)| (u.to_string(), p.to_string()));
+    match &auth {
+        Some((user, pass)) => {
+            // Username/password (RFC 1929) is the only accepted method.
+            if !methods.contains(&0x02) {
+                let _ = write_all_t(&mut client, &[0x05, 0xFF], d).await;
+                return;
+            }
+            if write_all_t(&mut client, &[0x05, 0x02], d).await.is_err() {
+                return;
+            }
+            let mut ver = [0u8; 1];
+            if read_exact_t(&mut client, &mut ver, d).await.is_err() || ver[0] != 0x01 {
+                return;
+            }
+            let mut body = vec![0u8; 1];
+            if read_exact_t(&mut client, &mut body, d).await.is_err() {
+                return;
+            }
+            let mut user_and_len = vec![0u8; body[0] as usize + 1];
+            if read_exact_t(&mut client, &mut user_and_len, d)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            body.extend_from_slice(&user_and_len);
+            let mut pass_buf = vec![0u8; *body.last().unwrap_or(&0) as usize];
+            if read_exact_t(&mut client, &mut pass_buf, d).await.is_err() {
+                return;
+            }
+            body.extend_from_slice(&pass_buf);
+            let ok = parse_socks_auth(&body).is_some_and(|(u, p)| {
+                same_secret(u, user.as_bytes()) & same_secret(p, pass.as_bytes())
+            });
+            if write_all_t(&mut client, &[0x01, if ok { 0x00 } else { 0x01 }], d)
+                .await
+                .is_err()
+                || !ok
+            {
+                return;
+            }
+        }
+        None => {
+            if !methods.contains(&0x00) {
+                let _ = write_all_t(&mut client, &[0x05, 0xFF], d).await;
+                return;
+            }
+            if write_all_t(&mut client, &[0x05, 0x00], d).await.is_err() {
+                return;
+            }
+        }
     }
     let mut rh = [0u8; 4];
     if read_exact_t(&mut client, &mut rh, d).await.is_err() {
@@ -536,7 +779,7 @@ pub(crate) async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>)
         }
     };
 
-    let order = take_upstreams(&st).await;
+    let order = take_upstreams(&st, &t_host).await;
     if order.is_empty() {
         let _ = write_all_t(&mut client, &[0x05, 0x02, 0, 1, 0, 0, 0, 0, 0, 0], d).await;
         return;
@@ -547,6 +790,7 @@ pub(crate) async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>)
             Ok(mut u) => {
                 *st.current.lock().await = Some(strip_credentials(&up.url));
                 st.requests.fetch_add(1, Ordering::Relaxed);
+                note_success(&st, &t_host, &up.url).await;
                 if write_all_t(&mut client, &[0x05, 0x00, 0x00, 1, 0, 0, 0, 0, 0, 0], d)
                     .await
                     .is_err()
@@ -563,6 +807,7 @@ pub(crate) async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>)
                 return;
             }
             Err(e) => {
+                note_failure(&st, &up.url).await;
                 last_err = e.to_string();
             }
         }
@@ -899,16 +1144,34 @@ pub(crate) async fn start_local_proxy(
     let mode = normalize_mode(&mode);
     let addr = start_proxy_inner(&state.inner, port, mode.clone(), listener.clone()).await?;
     // The dispatcher started at launch reuses the last configuration.
+    let options = state.inner.options.lock().await.clone();
     remember_dispatcher(
         &app,
         DispatcherPrefs {
             port,
             mode,
             listener,
+            options,
         },
     )
     .await;
     Ok(addr)
+}
+
+/// Apply dispatcher options at once, running or not, and keep them for the
+/// next start.
+#[tauri::command]
+pub(crate) async fn set_dispatch_options(
+    app: tauri::AppHandle,
+    options: DispatchOptions,
+    state: State<'_, DispatchState>,
+) -> Result<DispatchOptions, String> {
+    let options = options.sanitized();
+    *state.inner.options.lock().await = options.clone();
+    // Bindings made under the old countries may point at excluded upstreams.
+    state.inner.sticky.lock().await.clear();
+    remember_dispatch_options(&app, options.clone()).await;
+    Ok(options)
 }
 
 #[tauri::command]
@@ -935,6 +1198,17 @@ pub(crate) async fn local_proxy_status(
         mode: state.inner.mode.lock().await.clone(),
         listener: state.inner.listener.lock().await.clone(),
         upstreams: pool_n,
+        cooling: {
+            let now = Instant::now();
+            state
+                .inner
+                .cooldown
+                .lock()
+                .await
+                .values()
+                .filter(|u| **u > now)
+                .count()
+        },
         current: state.inner.current.lock().await.clone(),
         requests: state.inner.requests.load(Ordering::SeqCst),
         errors: state.inner.errors.load(Ordering::SeqCst),

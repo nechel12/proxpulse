@@ -594,6 +594,45 @@ async function askTemplate(): Promise<string | null> {
   return value;
 }
 
+type DispatchOptions = { countries: string[]; stickyMin: number; authUser: string; authPass: string };
+
+/** Dispatcher filter, sticky sessions and login: applied at once, kept by the backend. */
+function initDispatchOptions(): void {
+  const countries = $<HTMLInputElement>("srv-countries");
+  const sticky = $<HTMLInputElement>("srv-sticky");
+  const user = $<HTMLInputElement>("srv-user");
+  const pass = $<HTMLInputElement>("srv-pass");
+  const show = (o: DispatchOptions) => {
+    countries.value = o.countries.join(", ");
+    sticky.value = String(o.stickyMin);
+    user.value = o.authUser;
+    pass.value = o.authPass;
+  };
+  void invoke<{ dispatcher?: { options?: DispatchOptions } }>("get_app_prefs")
+    .then((p) => { if (p.dispatcher?.options) show(p.dispatcher.options); })
+    .catch(() => { /* browser preview or older backend */ });
+  let timer: number | undefined;
+  const apply = () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(async () => {
+      const options: DispatchOptions = {
+        countries: countries.value.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
+        stickyMin: Math.max(0, Math.min(1440, Math.floor(Number(sticky.value) || 0))),
+        authUser: user.value.trim(),
+        authPass: pass.value,
+      };
+      try {
+        await invoke("set_dispatch_options", { options });
+        setStatusText("srv-opts-status", () => t("srv_opts_saved"));
+      } catch (e) {
+        const msg = String(e).slice(0, 120);
+        setStatusText("srv-opts-status", () => t("srv_err", { e: msg }));
+      }
+    }, 400);
+  };
+  for (const el of [countries, sticky, user, pass]) el.addEventListener("input", apply);
+}
+
 /** The dispatcher hint names the protocols the selected listener accepts. */
 function updateBrowserHint(): void {
   const hint = document.getElementById("browser-hint");
@@ -870,6 +909,7 @@ window.addEventListener("DOMContentLoaded", () => {
     } catch { /* ignore */ }
   });
   ($("srv-listener") as HTMLSelectElement).addEventListener("change", updateBrowserHint);
+  initDispatchOptions();
   ($("btn-srv-start") as HTMLButtonElement).addEventListener("click", async () => {
     const port = Math.max(1, Math.min(65535, Number(($("srv-port") as HTMLInputElement).value) || 1080));
     const mode = ($("srv-mode") as HTMLSelectElement).value;

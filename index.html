@@ -279,6 +279,19 @@
               <option value="socks5" data-i18n="lis_socks">Только SOCKS5</option>
             </select>
           </label>
+          <details class="adv" id="srv-options" style="margin-top:8px">
+            <summary data-i18n="srv_opts_title">Фильтр, сессии и вход</summary>
+            <div class="adv-body">
+              <label class="fld"><span data-i18n="srv_countries">Страны апстримов</span><input id="srv-countries" spellcheck="false" data-i18n-ph="srv_countries_ph" placeholder="DE, NL — пусто: все" /></label>
+              <label class="fld"><span data-i18n="srv_sticky">Липкая сессия на сайт, мин</span><input id="srv-sticky" type="number" min="0" max="1440" value="0" data-i18n-ph="srv_sticky_ph" placeholder="0 — выкл" /></label>
+              <div class="grid2">
+                <label class="fld"><span data-i18n="srv_user">Логин на вход</span><input id="srv-user" autocomplete="off" spellcheck="false" /></label>
+                <label class="fld"><span data-i18n="srv_pass">Пароль</span><input id="srv-pass" type="password" autocomplete="new-password" /></label>
+              </div>
+              <div class="hint" data-i18n="srv_opts_hint">Применяется сразу. Апстрим, к которому не удалось подключиться, пропускается минуту. С логином браузеру нужен адрес user:pass@127.0.0.1:порт; пароль хранится в prefs.json.</div>
+              <div id="srv-opts-status" class="status-line"></div>
+            </div>
+          </details>
           <div class="actions">
             <button id="btn-srv-start" class="btn primary" data-i18n="srv_start">Включить</button>
             <button id="btn-srv-stop" class="btn danger" data-i18n="srv_stop" disabled>Выключить</button>
@@ -286,6 +299,7 @@
           <div class="srv-addr"><code id="srv-addr">127.0.0.1:1080</code><button id="btn-srv-copy" class="btn ghost" data-i18n="btn_copy">Копировать</button></div>
           <div class="srv-stats">
             <div><label data-i18n="stat_req">Запросы</label><b id="srv-req">0</b></div>
+            <div><label data-i18n="stat_cooling" data-i18n-title="stat_cooling_t">Пауза</label><b id="srv-cooling">0</b></div>
             <div><label data-i18n="stat_err">Ошибки</label><b id="srv-err">0</b></div>
           </div>
           <div class="fld"><span data-i18n="stat_cur">Текущий апстрим</span><div id="srv-cur" class="mono-box">—</div></div>

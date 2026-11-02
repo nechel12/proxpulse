@@ -1,11 +1,12 @@
 use crate::commands::dispatch::{
-    abort_connections, handle_http, handle_socks5, is_self_literal, is_self_upstream,
-    is_self_upstream_async, parse_target, pick_order, pool_items, read_pool_file, store_pool,
-    upstream_from_item, write_pool_file, CountingIo, DispatchItem, DispatchPoolItem,
+    abort_connections, handle_http, handle_socks5, http_auth_ok, is_self_literal, is_self_upstream,
+    is_self_upstream_async, parse_socks_auth, parse_target, pick_order, plan_upstreams, pool_items,
+    read_pool_file, store_pool, upstream_from_item, write_pool_file, CountingIo, DispatchItem,
+    DispatchOptions, DispatchPoolItem,
 };
 use crate::transport::Upstream;
 use crate::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -410,4 +411,150 @@ async fn http_forward_uses_absolute_form_and_proxy_auth() {
     // must not be reused for the next one.
     assert!(captured.contains("Connection: close\r\n"));
     assert!(String::from_utf8_lossy(&resp).contains("200 OK"));
+}
+
+fn with_country(host: &str, country: &str) -> Upstream {
+    Upstream {
+        country: Some(country.to_string()),
+        ..mk_upstream(host, 80)
+    }
+}
+
+fn hosts(v: &[Upstream]) -> Vec<&str> {
+    v.iter().map(|u| u.host.as_str()).collect()
+}
+
+#[test]
+fn upstream_plan_filters_countries_cools_down_and_sticks() {
+    let pool = vec![
+        with_country("a", "DE"),
+        with_country("b", "NL"),
+        with_country("c", "de"),
+        mk_upstream("d", 80),
+    ];
+    let rr = AtomicUsize::new(0);
+    let none = HashSet::new();
+    let de = vec!["DE".to_string()];
+    assert_eq!(
+        hosts(&plan_upstreams(&pool, "failover", &rr, &de, &none, None, 5)),
+        vec!["a", "c"]
+    );
+
+    // An upstream in cooldown is skipped while another one is left.
+    let cooling: HashSet<String> = ["http://a:80".to_string()].into();
+    assert_eq!(
+        hosts(&plan_upstreams(
+            &pool, "failover", &rr, &de, &cooling, None, 5
+        )),
+        vec!["c"]
+    );
+    let all: HashSet<String> = ["http://a:80".to_string(), "http://c:80".to_string()].into();
+    assert_eq!(
+        hosts(&plan_upstreams(&pool, "failover", &rr, &de, &all, None, 5)),
+        vec!["a", "c"]
+    );
+
+    // The sticky upstream of the host comes first, unless it is cooling down.
+    let plan = plan_upstreams(&pool, "failover", &rr, &[], &none, Some("http://d:80"), 2);
+    assert_eq!(hosts(&plan), vec!["d", "a"]);
+    let cooling_d: HashSet<String> = ["http://d:80".to_string()].into();
+    let plan = plan_upstreams(
+        &pool,
+        "failover",
+        &rr,
+        &[],
+        &cooling_d,
+        Some("http://d:80"),
+        2,
+    );
+    assert_eq!(hosts(&plan), vec!["a", "b"]);
+
+    let fr = vec!["FR".to_string()];
+    assert!(plan_upstreams(&pool, "failover", &rr, &fr, &none, None, 5).is_empty());
+}
+
+#[test]
+fn dispatcher_login_checks() {
+    let head = "GET http://x/ HTTP/1.1\r\nHost: x\r\nProxy-Authorization: Basic dTpwYXNz\r\n\r\n";
+    assert!(http_auth_ok(head, "u", "pass"));
+    assert!(!http_auth_ok(head, "u", "other"));
+    assert!(!http_auth_ok(
+        "GET http://x/ HTTP/1.1\r\nHost: x\r\n\r\n",
+        "u",
+        "pass"
+    ));
+    assert!(!http_auth_ok(
+        "GET http://x/ HTTP/1.1\r\nProxy-Authorization: Bearer dTpwYXNz\r\n\r\n",
+        "u",
+        "pass"
+    ));
+
+    assert_eq!(
+        parse_socks_auth(&[1, b'u', 2, b'p', b'w']),
+        Some((&b"u"[..], &b"pw"[..]))
+    );
+    assert_eq!(parse_socks_auth(&[3, b'u']), None);
+
+    let o = DispatchOptions {
+        countries: vec![" DE ".into(), String::new()],
+        sticky_min: 5000,
+        auth_user: "  ".into(),
+        auth_pass: "secret".into(),
+    }
+    .sanitized();
+    assert_eq!(o.countries, vec!["DE"]);
+    assert_eq!(o.sticky_min, 1440);
+    assert!(
+        o.auth_pass.is_empty(),
+        "a password without a login is dropped"
+    );
+}
+
+#[tokio::test]
+async fn dispatcher_requires_the_configured_login() {
+    let st = DispatchState::default();
+    *st.inner.options.lock().await = DispatchOptions {
+        auth_user: "u".into(),
+        auth_pass: "pass".into(),
+        ..DispatchOptions::default()
+    };
+
+    // HTTP without credentials gets 407.
+    let proxy = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = proxy.local_addr().unwrap().port();
+    let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let (server, _) = proxy.accept().await.unwrap();
+    let inner = st.inner.clone();
+    tokio::spawn(async move { handle_http(server, inner).await });
+    client
+        .write_all(b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
+        .await
+        .unwrap();
+    let mut buf = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut buf)).await;
+    assert!(String::from_utf8_lossy(&buf).starts_with("HTTP/1.1 407"));
+
+    // SOCKS5 offers only "no auth": refused; a wrong password: rejected.
+    let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let (server, _) = proxy.accept().await.unwrap();
+    let inner = st.inner.clone();
+    tokio::spawn(async move { handle_socks5(server, inner).await });
+    client.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+    let mut reply = [0u8; 2];
+    client.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x05, 0xFF]);
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let (server, _) = proxy.accept().await.unwrap();
+    let inner = st.inner.clone();
+    tokio::spawn(async move { handle_socks5(server, inner).await });
+    client.write_all(&[0x05, 0x02, 0x00, 0x02]).await.unwrap();
+    client.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x05, 0x02]);
+    client
+        .write_all(&[0x01, 1, b'u', 3, b'b', b'a', b'd'])
+        .await
+        .unwrap();
+    client.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x01, 0x01]);
 }

@@ -6,6 +6,8 @@ export type DispatchStatus = {
   mode: string;
   listener: string;
   upstreams: number;
+  /** Upstreams skipped for a minute after a failure. */
+  cooling: number;
   current: string | null;
   requests: number;
   errors: number;
@@ -39,6 +41,8 @@ export class DispatchMonitor {
       const s = await invoke<DispatchStatus>("local_proxy_status");
       const req = document.getElementById("srv-req");
       if (req) req.textContent = String(s.requests);
+      const cooling = document.getElementById("srv-cooling");
+      if (cooling) cooling.textContent = String(s.cooling ?? 0);
       const err = document.getElementById("srv-err");
       if (err) err.textContent = String(s.errors);
       const cur = document.getElementById("srv-cur");
