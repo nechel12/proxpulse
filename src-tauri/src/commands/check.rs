@@ -919,29 +919,26 @@ pub(crate) async fn run_checks(
         // Stop must abort in-flight requests immediately instead of waiting
         // for the first task to finish its own timeout.
         tokio::select! {
-            maybe = set.join_next_with_id() => match maybe {
-                Some(Ok((id, v))) => {
-                    task_raw.remove(&id);
-                    if let Some(ch) = on_result {
-                        let _ = ch.send(CheckEvent::Result(Box::new(v.clone())));
+            maybe = set.join_next_with_id() => {
+                let r = match maybe {
+                    Some(Ok((id, v))) => {
+                        task_raw.remove(&id);
+                        v
                     }
-                    out.push(v);
-                }
-                Some(Err(e)) => {
-                    let id = e.id();
-                    let raw = task_raw.remove(&id).unwrap_or_else(|| "?".to_string());
-                    if e.is_cancelled() {
-                        continue;
+                    Some(Err(e)) => {
+                        let raw = task_raw.remove(&e.id()).unwrap_or_else(|| "?".to_string());
+                        if e.is_cancelled() {
+                            continue;
+                        }
+                        dead_result(raw, "?".to_string(), 0, short_error(&e.to_string()))
                     }
-                    out.push(dead_result(
-                        raw,
-                        "?".to_string(),
-                        0,
-                        short_error(&e.to_string()),
-                    ));
+                    None => break,
+                };
+                if let Some(ch) = on_result {
+                    let _ = ch.send(CheckEvent::Result(Box::new(r.clone())));
                 }
-                None => break,
-            },
+                out.push(r);
+            }
             _ = tokio::time::sleep(Duration::from_millis(50)) => {
                 if cancel.load(Ordering::Relaxed) {
                     set.abort_all();

@@ -503,6 +503,8 @@ pub(crate) async fn stop_pool_api(app: AppHandle) -> Result<(), String> {
         h.abort();
         let _ = h.await;
     }
+    // An earlier failed start is not the state of a stopped API.
+    *state.last_error.lock().await = None;
     let port = app.state::<PrefsState>().get().pool_api.port;
     remember(&app, false, port).await;
     Ok(())
