@@ -31,6 +31,8 @@ pub(crate) fn is_disallowed_ip(ip: IpAddr) -> bool {
                 || v6.is_multicast()
                 || (s[0] & 0xFE00) == 0xFC00
                 || (s[0] & 0xFFC0) == 0xFE80
+                // deprecated site-local fec0::/10, still routed by some stacks
+                || (s[0] & 0xFFC0) == 0xFEC0
                 // documentation 2001:db8::/32 and local-use NAT64 64:ff9b:1::/48
                 || (s[0] == 0x2001 && s[1] == 0x0db8)
                 || (s[0] == 0x0064 && s[1] == 0xff9b && s[2] == 0x0001)
@@ -148,6 +150,7 @@ mod tests {
             "::1",
             "fd00::1",
             "fe80::1",
+            "fec0::1",
             "::ffff:127.0.0.1",
             // 0.0.0.0/8, not only 0.0.0.0
             "0.1.2.3",
