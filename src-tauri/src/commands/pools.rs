@@ -102,6 +102,21 @@ fn save(app: &AppHandle, list: &[PoolMeta]) -> Result<(), String> {
     write_private_file(&path, &json).map_err(|e| e.to_string())
 }
 
+/// Change the registry and save it; when the change or the save fails, the
+/// registry stays as it was. Returns the change's result and the new list.
+fn change_registry<T>(
+    app: &AppHandle,
+    change: impl FnOnce(&mut Vec<PoolMeta>) -> Result<T, String>,
+) -> Result<(T, Vec<PoolMeta>), String> {
+    let state = app.state::<PoolsState>();
+    let mut list = lock(&state.list);
+    let mut next = list.clone();
+    let out = change(&mut next)?;
+    save(app, &next)?;
+    *list = next;
+    Ok((out, list.clone()))
+}
+
 /// Read the registry and create the runtime of every named pool, with its
 /// saved proxies; called once during setup.
 pub(crate) async fn load_pools(app: &AppHandle) {
@@ -139,36 +154,32 @@ pub(crate) fn list_pools(state: State<'_, PoolsState>) -> Vec<PoolMeta> {
 
 #[tauri::command]
 pub(crate) async fn create_pool(app: AppHandle, name: String) -> Result<PoolMeta, String> {
-    let meta = {
-        let state = app.state::<PoolsState>();
-        let mut list = lock(&state.list);
+    let (meta, _) = change_registry(&app, |list| {
         if list.len() >= MAX_POOLS {
             return Err(format!("at most {MAX_POOLS} pools"));
         }
         let meta = PoolMeta {
-            id: new_id(&list),
+            id: new_id(list),
             name: clean_name(&name),
         };
         list.push(meta.clone());
-        save(&app, &list)?;
-        meta
-    };
+        Ok(meta)
+    })?;
     add_runtime(&app, &meta.id).await;
     Ok(meta)
 }
 
 #[tauri::command]
 pub(crate) fn rename_pool(app: AppHandle, id: String, name: String) -> Result<PoolMeta, String> {
-    let state = app.state::<PoolsState>();
-    let mut list = lock(&state.list);
-    let meta = list
-        .iter_mut()
-        .find(|p| p.id == id)
-        .ok_or_else(|| "unknown pool".to_string())?;
-    meta.name = clean_name(&name);
-    let out = meta.clone();
-    save(&app, &list)?;
-    Ok(out)
+    let (meta, _) = change_registry(&app, |list| {
+        let meta = list
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or_else(|| "unknown pool".to_string())?;
+        meta.name = clean_name(&name);
+        Ok(meta.clone())
+    })?;
+    Ok(meta)
 }
 
 /// Delete a named pool: its dispatcher stops, its schedule ends and its
@@ -178,21 +189,19 @@ pub(crate) async fn delete_pool(app: AppHandle, id: String) -> Result<(), String
     if id == MAIN_POOL {
         return Err("the main pool cannot be deleted".to_string());
     }
-    {
-        let state = app.state::<PoolsState>();
-        let mut list = lock(&state.list);
+    change_registry(&app, |list| {
         let before = list.len();
         list.retain(|p| p.id != id);
         if list.len() == before {
             return Err("unknown pool".to_string());
         }
-        save(&app, &list)?;
-    }
+        Ok(())
+    })?;
     if let Some(inner) = app.state::<DispatchState>().remove(&id) {
         stop_proxy_inner(&inner).await;
+        delete_pool_file(&app, &inner).await;
     }
     app.state::<AutoState>().remove(&id);
-    delete_pool_file(&app, &id);
     forget_pool(&app, &id).await;
     Ok(())
 }
@@ -224,13 +233,7 @@ pub(crate) async fn restore_pools(
     app: AppHandle,
     pools: Vec<PoolMeta>,
 ) -> Result<Vec<PoolMeta>, String> {
-    let (list, added) = {
-        let state = app.state::<PoolsState>();
-        let mut list = lock(&state.list);
-        let added = merge_pools(&mut list, pools);
-        save(&app, &list)?;
-        (list.clone(), added)
-    };
+    let (added, list) = change_registry(&app, |list| Ok(merge_pools(list, pools)))?;
     for id in added {
         add_runtime(&app, &id).await;
     }

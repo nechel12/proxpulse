@@ -1050,8 +1050,11 @@ fn pool_path(app: &tauri::AppHandle, id: &str) -> Option<PathBuf> {
         .map(|d| d.join(pool_file_name(id)))
 }
 
-pub(crate) fn delete_pool_file(app: &tauri::AppHandle, id: &str) {
-    if let Some(path) = pool_path(app, id) {
+/// Remove a deleted pool's file once the pool left the registry: a save in
+/// progress finishes first, and later saves see that the pool is gone.
+pub(crate) async fn delete_pool_file(app: &tauri::AppHandle, inner: &DispatchInner) {
+    let _guard = inner.save_lock.lock().await;
+    if let Some(path) = pool_path(app, &inner.id) {
         let _ = std::fs::remove_file(path);
     }
 }
@@ -1105,6 +1108,11 @@ pub(crate) async fn save_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>
         return;
     };
     let _guard = inner.save_lock.lock().await;
+    // A pool deleted while its scheduled check ran must not get its file
+    // (with credentials) back.
+    if app.state::<DispatchState>().pool(Some(&inner.id)).is_err() {
+        return;
+    }
     let items = pool_items(inner).await;
     let _ = tauri::async_runtime::spawn_blocking(move || write_pool_file(&path, &items)).await;
 }
