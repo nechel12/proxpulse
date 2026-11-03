@@ -6,6 +6,24 @@ use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 
 #[test]
+fn upstream_credentials_are_percent_decoded() {
+    // reqwest decodes the login of the checked URL; the dispatcher, the speed
+    // test and the TLS check must send the same one.
+    let (_, host, port, user, pass) =
+        parse_upstream_url("http://us%40er:p%3Ass%2F%zz@1.2.3.4:8080").unwrap();
+    assert_eq!((host.as_str(), port), ("1.2.3.4", 8080));
+    assert_eq!(user.as_deref(), Some("us@er"));
+    assert_eq!(pass.as_deref(), Some("p:ss/%zz"));
+    // Unescaped input keeps working: the last `@` ends the login.
+    let (_, _, _, user, pass) = parse_upstream_url("socks5://plain:p@ss@h:1").unwrap();
+    assert_eq!(
+        (user.as_deref(), pass.as_deref()),
+        (Some("plain"), Some("p@ss"))
+    );
+    assert_eq!(percent_decode("%+1%4"), "%+1%4");
+}
+
+#[test]
 fn socks4_ipv6_policy() {
     assert!(build_socks4_request("2001:db8::1", 443, None, false).is_err());
     let req = build_socks4_request("2001:db8::1", 443, None, true).unwrap();

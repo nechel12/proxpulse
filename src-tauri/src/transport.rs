@@ -27,14 +27,35 @@ pub(crate) struct Upstream {
 
 pub(crate) type UpstreamParts = (String, String, u16, Option<String>, Option<String>);
 
+/// Decode `%XX` escapes in URL credentials the way reqwest does for the
+/// checks, so the dispatcher sends the same login. Other `%` stay as they are.
+pub(crate) fn percent_decode(s: &str) -> String {
+    let hex = |b: Option<&u8>| b.and_then(|&c| (c as char).to_digit(16));
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            if let (Some(h), Some(l)) = (hex(b.get(i + 1)), hex(b.get(i + 2))) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 pub(crate) fn parse_upstream_url(url: &str) -> Option<UpstreamParts> {
     let (scheme, rest) = url.split_once("://")?;
     let after = rest.rsplit('@').next()?;
-    let userinfo = rest.rsplit_once('@').map(|(u, _)| u.to_string());
+    let userinfo = rest.rsplit_once('@').map(|(u, _)| u);
     let (user, pass) = match userinfo {
         Some(u) => match u.split_once(':') {
-            Some((a, b)) => (Some(a.to_string()), Some(b.to_string())),
-            None => (Some(u), None),
+            Some((a, b)) => (Some(percent_decode(a)), Some(percent_decode(b))),
+            None => (Some(percent_decode(u)), None),
         },
         None => (None, None),
     };
