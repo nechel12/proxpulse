@@ -187,10 +187,20 @@ pub(crate) async fn update_prefs(
     app: &AppHandle,
     update: AppPrefsUpdate,
 ) -> Result<AppPrefs, String> {
+    modify_prefs(app, |p| p.apply(update)).await
+}
+
+/// Change the preferences under their lock and save them. A change that
+/// reads a value to write it back must happen here, or two pools saving at
+/// once could each drop the other's change.
+async fn modify_prefs(
+    app: &AppHandle,
+    change: impl FnOnce(&mut AppPrefs),
+) -> Result<AppPrefs, String> {
     let prefs = {
         let state = app.state::<PrefsState>();
         let mut prefs = lock(&state.prefs);
-        prefs.apply(update);
+        change(&mut prefs);
         prefs.clone()
     };
     let handle = app.clone();
@@ -222,21 +232,17 @@ pub(crate) fn pool_dispatcher(prefs: &AppPrefs, pool: &str) -> DispatcherPrefs {
     }
 }
 
-pub(crate) async fn remember_dispatcher(app: &AppHandle, pool: &str, dispatcher: DispatcherPrefs) {
-    let update = if pool == MAIN_POOL {
-        AppPrefsUpdate {
-            dispatcher: Some(dispatcher),
-            ..AppPrefsUpdate::default()
-        }
+fn set_pool_dispatcher(prefs: &mut AppPrefs, pool: &str, dispatcher: DispatcherPrefs) {
+    let dispatcher = dispatcher.sanitized();
+    if pool == MAIN_POOL {
+        prefs.dispatcher = dispatcher;
     } else {
-        let mut map = app.state::<PrefsState>().get().pool_dispatchers;
-        map.insert(pool.to_string(), dispatcher);
-        AppPrefsUpdate {
-            pool_dispatchers: Some(map),
-            ..AppPrefsUpdate::default()
-        }
-    };
-    let _ = update_prefs(app, update).await;
+        prefs.pool_dispatchers.insert(pool.to_string(), dispatcher);
+    }
+}
+
+pub(crate) async fn remember_dispatcher(app: &AppHandle, pool: &str, dispatcher: DispatcherPrefs) {
+    let _ = modify_prefs(app, |p| set_pool_dispatcher(p, pool, dispatcher)).await;
 }
 
 pub(crate) async fn remember_dispatch_options(
@@ -244,20 +250,35 @@ pub(crate) async fn remember_dispatch_options(
     pool: &str,
     options: DispatchOptions,
 ) {
-    let mut dispatcher = pool_dispatcher(&app.state::<PrefsState>().get(), pool);
-    dispatcher.options = options;
-    remember_dispatcher(app, pool, dispatcher).await;
+    let _ = modify_prefs(app, |p| {
+        let mut dispatcher = pool_dispatcher(p, pool);
+        dispatcher.options = options;
+        set_pool_dispatcher(p, pool, dispatcher);
+    })
+    .await;
 }
 
 /// Drop what a deleted pool left in the preferences.
 pub(crate) async fn forget_pool(app: &AppHandle, pool: &str) {
-    let mut map = app.state::<PrefsState>().get().pool_dispatchers;
-    if map.remove(pool).is_some() {
-        let update = AppPrefsUpdate {
-            pool_dispatchers: Some(map),
-            ..AppPrefsUpdate::default()
-        };
-        let _ = update_prefs(app, update).await;
+    let _ = modify_prefs(app, |p| {
+        p.pool_dispatchers.remove(pool);
+    })
+    .await;
+}
+
+/// Give every dispatcher the filter, sessions and login the preferences
+/// hold. A settings import or reset changes them, and a running dispatcher
+/// must not keep serving without the imported login until a restart.
+pub(crate) async fn apply_dispatch_options(disp: &DispatchState, prefs: &AppPrefs) {
+    for inner in disp.all() {
+        let options = pool_dispatcher(prefs, &inner.id).options;
+        let mut current = inner.options.lock().await;
+        if *current != options {
+            *current = options;
+            drop(current);
+            // Bindings made under the old countries may point at excluded upstreams.
+            inner.sticky.lock().await.clear();
+        }
     }
 }
 
@@ -316,7 +337,12 @@ pub(crate) async fn set_app_prefs(
     app: AppHandle,
     prefs: AppPrefsUpdate,
 ) -> Result<AppPrefs, String> {
-    update_prefs(&app, prefs).await
+    let dispatchers = prefs.dispatcher.is_some() || prefs.pool_dispatchers.is_some();
+    let saved = update_prefs(&app, prefs).await?;
+    if dispatchers {
+        apply_dispatch_options(&app.state::<DispatchState>(), &saved).await;
+    }
+    Ok(saved)
 }
 
 #[tauri::command]

@@ -6,7 +6,7 @@ use crate::commands::auto::AutoState;
 use crate::commands::dispatch::{
     delete_pool_file, load_pool, stop_proxy_inner, write_private_file, DispatchState, MAIN_POOL,
 };
-use crate::commands::prefs::forget_pool;
+use crate::commands::prefs::{forget_pool, pool_dispatcher, PrefsState};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -116,6 +116,9 @@ pub(crate) async fn load_pools(app: &AppHandle) {
 
 async fn add_runtime(app: &AppHandle, id: &str) {
     let inner = app.state::<DispatchState>().add(id);
+    // A pool restored from a settings file keeps its filter and login: the
+    // dispatcher's first start would otherwise save empty ones over them.
+    *inner.options.lock().await = pool_dispatcher(&app.state::<PrefsState>().get(), id).options;
     app.state::<AutoState>().add(id);
     load_pool(app, &inner).await;
 }

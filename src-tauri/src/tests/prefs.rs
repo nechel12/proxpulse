@@ -1,5 +1,6 @@
-use crate::commands::dispatch::MAIN_POOL;
+use crate::commands::dispatch::{DispatchOptions, DispatchState, MAIN_POOL};
 use crate::commands::prefs::*;
+use std::time::{Duration, Instant};
 
 fn temp_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("proxpulse-test-{}-{name}", std::process::id()))
@@ -92,4 +93,36 @@ fn only_started_named_dispatchers_start_at_launch() {
     let old: DispatcherPrefs =
         serde_json::from_str(r#"{"port":1081,"mode":"fastest","listener":"both"}"#).unwrap();
     assert!(!old.started);
+}
+
+#[tokio::test]
+async fn saved_options_reach_running_dispatchers() {
+    let disp = DispatchState::default();
+    let named = disp.add("p1");
+    *named.options.lock().await = DispatchOptions {
+        sticky_min: 5,
+        ..DispatchOptions::default()
+    };
+    named.sticky.lock().await.insert(
+        "example.com".into(),
+        (
+            "http://1.2.3.4:80".into(),
+            Instant::now() + Duration::from_secs(60),
+        ),
+    );
+    // An imported file with a login for the main pool only.
+    let login = DispatchOptions {
+        auth_user: "u".into(),
+        auth_pass: "p".into(),
+        ..DispatchOptions::default()
+    };
+    let mut prefs = AppPrefs::default();
+    prefs.dispatcher.options = login.clone();
+    apply_dispatch_options(&disp, &prefs).await;
+
+    assert_eq!(*disp.inner.options.lock().await, login);
+    // A pool the preferences do not name gets the defaults, and its sticky
+    // bindings made under the old options are dropped.
+    assert_eq!(*named.options.lock().await, DispatchOptions::default());
+    assert!(named.sticky.lock().await.is_empty());
 }

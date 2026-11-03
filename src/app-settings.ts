@@ -28,10 +28,17 @@ type Deps = {
 /** Backend preferences (`prefs.rs`). */
 type BackendPrefs = Required<PrefsUpdate>;
 
+/**
+ * What a reset sets, and an import for what its file leaves out. The
+ * dispatchers' filters and logins are included: the backend applies them to
+ * running dispatchers at once.
+ */
 const DEFAULT_PREFS: PrefsUpdate = {
   closeToTray: false,
   startMinimized: true,
   startDispatcher: false,
+  dispatcher: { port: 1080, mode: "round-robin", listener: "both" },
+  poolDispatchers: {},
   poolApi: { enabled: false, port: 1090 },
 };
 
