@@ -67,10 +67,11 @@ pub(crate) fn history_key(url: &str) -> String {
     strip_credentials(url)
 }
 
-/// Count every finished check; stopped checks are not results.
+/// Count every finished check; stopped checks and lines that are not proxies
+/// are not results.
 pub(crate) fn record(map: &mut HashMap<String, HistEntry>, results: &[ProxyResult], now: u64) {
     for r in results {
-        if r.error.as_deref() == Some("cancelled") {
+        if r.error.as_deref() == Some("cancelled") || r.proto == "BAD" {
             continue;
         }
         let e = map.entry(history_key(&r.url)).or_default();

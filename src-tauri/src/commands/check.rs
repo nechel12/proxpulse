@@ -290,7 +290,8 @@ async fn check_candidate(
     let budget = candidate_budget(timeout, repeats, &flags);
     let raw_fb = raw.clone();
     let proto_fb = proto.clone();
-    match tokio::time::timeout(
+    let url_fb = url.clone();
+    let mut r = match tokio::time::timeout(
         budget,
         check_candidate_inner(
             raw, url, proto, test_url, timeout, repeats, flags, baseline, geo_cache, cancel,
@@ -300,7 +301,11 @@ async fn check_candidate(
     {
         Ok(r) => r,
         Err(_) => dead_result(raw_fb, proto_fb, 0, "timeout".to_string()),
-    }
+    };
+    // Dead results keep the normalized URL as well: the history keys a proxy
+    // by it, so `1.2.3.4:80` alive and dead must land on one entry.
+    r.url = url_fb;
+    r
 }
 
 #[allow(clippy::too_many_arguments)]

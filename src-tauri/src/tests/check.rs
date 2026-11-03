@@ -405,6 +405,39 @@ fn dnsbl_names_and_answers() {
 }
 
 #[tokio::test]
+async fn dead_results_keep_the_normalized_url() {
+    // A closed local port: the precheck fails without any outside request.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let cfg = CheckConfig {
+        test_url: "http://127.0.0.1:9/".to_string(),
+        with_geo: false,
+        with_anonymity: false,
+        with_tamper: false,
+        with_tls: false,
+        ..CheckConfig::default()
+    };
+    let raw = format!("127.0.0.1:{port}");
+    let out = crate::commands::check::run_checks(
+        vec![raw.clone()],
+        cfg,
+        Vec::new(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.len(), 1);
+    assert!(!out[0].alive);
+    assert_eq!(out[0].proxy, raw);
+    // The history keys alive results by this URL; dead ones must match.
+    assert_eq!(out[0].url, format!("http://127.0.0.1:{port}"));
+}
+
+#[tokio::test]
 async fn dnsbl_skips_ipv6_and_garbage() {
     assert!(crate::dnsbl::check_ip("2001:db8::1").await.is_none());
     assert!(crate::dnsbl::check_ip("not an ip").await.is_none());

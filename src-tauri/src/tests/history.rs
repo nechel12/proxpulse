@@ -29,8 +29,11 @@ fn history_counts_checks_and_smooths_ping() {
         "cancelled".into(),
     );
     record(&mut map, &[cancelled], 40);
+    let garbage = dead_result("not a proxy".into(), "BAD".into(), 0, "bad format".into());
+    record(&mut map, &[garbage], 50);
 
-    // Credentials are not part of the key, and a stopped check is not counted.
+    // Credentials are not part of the key; a stopped check and a line that
+    // is not a proxy are not counted.
     let e = &map["http://1.2.3.4:80"];
     assert_eq!(map.len(), 1);
     assert_eq!((e.checks, e.alive), (3, 2));
