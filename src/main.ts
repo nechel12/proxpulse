@@ -28,6 +28,7 @@ import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
 import { AppSettings, readFlag, writeFlag } from "./app-settings.ts";
+import type { DispatcherOptions, PrefsUpdate } from "./settings-io.ts";
 import { applyTheme, loadThemePref } from "./theme.ts";
 import { Notifier } from "./notify.ts";
 import { formatWebhookResults } from "./webhooks.ts";
@@ -234,7 +235,6 @@ function mergePool(items: { raw: string; url?: string | null; latency: number | 
 }
 
 let maxPingMs = 0;
-
 
 function loadMaxPing(): void {
   try {
@@ -794,20 +794,17 @@ async function askTemplate(): Promise<string | null> {
   return value;
 }
 
-type DispatchOptions = { countries: string[]; stickyMin: number; authUser: string; authPass: string };
-type DispatcherPrefs = { options?: DispatchOptions };
-
 /** Show the dispatcher filter, sessions and login of the shown pool. */
 function showDispatchOptions(): void {
   const id = currentPool;
-  const show = (o: DispatchOptions) => {
+  const show = (o: DispatcherOptions) => {
     $<HTMLInputElement>("srv-countries").value = o.countries.join(", ");
     $<HTMLInputElement>("srv-sticky").value = String(o.stickyMin);
     $<HTMLInputElement>("srv-user").value = o.authUser;
     $<HTMLInputElement>("srv-pass").value = o.authPass;
   };
   show({ countries: [], stickyMin: 0, authUser: "", authPass: "" });
-  void invoke<{ dispatcher?: DispatcherPrefs; poolDispatchers?: Record<string, DispatcherPrefs> }>("get_app_prefs")
+  void invoke<PrefsUpdate>("get_app_prefs")
     .then((p) => {
       if (id !== currentPool) return;
       const options = id === MAIN_POOL ? p.dispatcher?.options : p.poolDispatchers?.[id]?.options;
@@ -828,7 +825,7 @@ function initDispatchOptions(): void {
     window.clearTimeout(timer);
     // Read now: the pool may be switched before the debounce ends.
     const target = currentPool;
-    const options: DispatchOptions = {
+    const options: DispatcherOptions = {
       countries: countries.value.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
       stickyMin: Math.max(0, Math.min(1440, Math.floor(Number(sticky.value) || 0))),
       authUser: user.value.trim(),
@@ -856,8 +853,6 @@ function updateBrowserHint(): void {
   hint.dataset.i18n = key;
   hint.textContent = t(key);
 }
-
-// ---------- dispatcher ----------
 
 // ---------- diagnostics + updates ----------
 

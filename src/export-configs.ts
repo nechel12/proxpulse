@@ -148,8 +148,6 @@ export function buildPac(list: ProxyResult[], max = 50): string {
   ].join("\n");
 }
 
-export const TEMPLATE_FIELDS = ["url", "scheme", "host", "port", "user", "pass", "country", "ping", "ip"] as const;
-
 /** One line per proxy; `{field}` placeholders are filled, others kept. */
 export function buildTemplate(list: ProxyResult[], template: string): string {
   return list

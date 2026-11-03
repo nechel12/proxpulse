@@ -46,7 +46,6 @@ export function migrateLegacySchedule(store: KeyStore): void {
   store.removeItem("pp-disp-auto-min");
 }
 
-/** The single pool schedule, mirrored to the Rust scheduler. */
 /**
  * A pool's schedule as stored, for pools not shown in the UI. The shown
  * pool's schedule is read from the form instead.
@@ -69,6 +68,7 @@ export function storedAutoConfig(store: Pick<Storage, "getItem">, pool: string, 
   };
 }
 
+/** The shown pool's schedule, mirrored to the Rust scheduler. */
 export class AutoSettingsStore {
   /** The pool shown in the Auto tab. */
   pool = MAIN_POOL;

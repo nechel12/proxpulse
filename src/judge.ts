@@ -2,8 +2,6 @@
 // a host, optionally with a path; the schemes come from the HTTPS and HTTP
 // choices.
 
-export const JUDGE_SUFFIX_RE = /\/(judge|generate_204)$/;
-
 export type JudgeSchemes = { https: boolean; http: boolean };
 
 /** Host and path as typed, without a scheme or trailing slashes. */
