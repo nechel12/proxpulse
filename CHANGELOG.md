@@ -26,7 +26,9 @@ All notable changes to ProxPulse. The format follows
   delivery after scheduled checks, and two retries for scheduled deliveries.
 - Dispatcher: an upstream country filter, sticky sessions per site, a
   one-minute pause for upstreams that fail to connect, and an optional login
-  for local clients (HTTP Basic and SOCKS5 username/password).
+  for local clients (HTTP Basic and SOCKS5 username/password). The settings
+  file carries them; an import or reset applies them to running dispatchers
+  at once.
 - Notifications when a scheduled check leaves fewer proxies than a threshold,
   and once when scheduled checks find no network.
 - Signed judge answers: a judge with `SIGNING_KEY` signs each `/judge` answer
@@ -55,6 +57,14 @@ All notable changes to ProxPulse. The format follows
   judge reports anonymity again. Saved settings with an `http://` judge keep
   HTTP only.
 - Fewer explanations in the UI; the details are in the README.
+
+### Fixed
+
+- Logins and passwords with `%` escapes (`p%40ss`) now reach the proxy
+  decoded through the dispatcher, the speed test and the TLS check as well,
+  as they already did in the check itself.
+- URL imports, subscriptions and webhooks also refuse deprecated site-local
+  IPv6 addresses (`fec0::/10`).
 
 ## [0.5.0] — 2026-11-01
 

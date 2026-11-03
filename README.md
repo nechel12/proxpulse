@@ -405,10 +405,11 @@ The **Settings** tab holds the app-wide options:
 - **Data**: export, import and reset of the settings as a JSON file (it holds
   webhook URLs, the ip-api key, the dispatcher logins and the named pools'
   settings, and the pools with their credentials only when you choose so on
-  export; import adds the file's pools up to ten in total); **Copy** puts a
-  diagnostics
-  report (version, OS, install type, counters, recent errors) on the clipboard
-  for bug reports; the error log; clearing the proxy history.
+  export; import adds the file's pools up to ten in total; running
+  dispatchers take an imported or reset login and country filter at once);
+  **Copy** puts a diagnostics report (version, OS, install type, counters,
+  recent errors) on the clipboard for bug reports; the error log; clearing
+  the proxy history.
 
 **⇲** hides the window to the tray. The tray menu shows or hides the window,
 toggles the dispatcher and shows the next scheduled check and the webhook
@@ -548,7 +549,8 @@ index.html                          # screen markup
 src/main.ts                         # UI wiring
 src/check-client.ts                 # check runs over a Tauri channel
 src/source-panel.ts, parse-runner.ts # list input, import, backend parsing
-src/settings-panel.ts, profiles*.ts # check settings and presets
+src/settings-panel.ts, judge.ts     # check settings, judge URLs
+src/profiles*.ts                    # presets
 src/results*.ts, virtual-rows.ts    # results table: sorting, filters, selection, virtual rows
 src/format.ts                       # cell formatting
 src/export*.ts, csv.ts              # TXT/JSON/CSV export
