@@ -52,6 +52,7 @@ body:
       options:
         - Check
         - Dispatcher
+        - Named pools / pool API
         - Scheduled checks / webhooks
         - Import / export
         - Updates / tray

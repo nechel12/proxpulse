@@ -4,7 +4,7 @@
 
 ## Testing
 
-- [ ] `npm run build`, `npm test`, `npm run lint`
+- [ ] `npm run build`, `npm test`, `npm run lint`, `npm run check:versions`
 - [ ] `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`
 - [ ] `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
 - [ ] `cargo test --manifest-path src-tauri/Cargo.toml --lib`
