@@ -1,6 +1,6 @@
 use crate::commands::dispatch::DispatchItem;
 use crate::http::{read_body_capped, short_error, BODY_LIMIT_WEBHOOK};
-use crate::netguard::{guarded_client_builder, resolve_public_target};
+use crate::netguard::build_guarded_client;
 use crate::{epoch_secs, is_http_url, strip_credentials, WebhookResult};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -299,11 +299,7 @@ async fn send_webhook_one(
         return Err("https required when sending proxy credentials".to_string());
     }
     // Webhook URLs are user-supplied but must not reach local services.
-    let mut builder = guarded_client_builder(Duration::from_secs(15));
-    if let Some((host, addr)) = resolve_public_target(&parsed).await? {
-        builder = builder.resolve(&host, addr);
-    }
-    let client = builder.build().map_err(|e| e.to_string())?;
+    let client = build_guarded_client(&parsed, Duration::from_secs(15)).await?;
     send_webhook_request(&client, &url, opts, items, changes).await
 }
 
@@ -454,6 +450,7 @@ pub(crate) async fn send_webhook(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::netguard::guarded_client_builder;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
