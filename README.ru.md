@@ -595,6 +595,7 @@ src-tauri/src/netguard.rs           # защита пользовательск�
 src-tauri/src/dnsbl.rs              # проверка по чёрным спискам
 src-tauri/src/judge_sig.rs          # подписи ответов Judge
 src-tauri/src/tests/*.rs            # тесты бэкенда
+scripts/*.mjs                       # проверка версий, описание релиза
 .github/workflows/ci.yml            # проверки на каждый push и PR
 .github/workflows/release.yml       # релизные сборки по тегу
 ```

@@ -85,7 +85,8 @@ and the pool API listen on loopback only, and the API refuses requests for
 other host names. Updates are verified with the minisign public key
 embedded in the app. Release tags are protected against being moved or
 deleted and, from 0.6.0 on, signed with the SSH key in
-[`docs/proxpulse-release.pub`](docs/proxpulse-release.pub).
+[`docs/proxpulse-release.pub`](docs/proxpulse-release.pub); the release
+workflow rejects a tag without that signature or outside `main`.
 
 ## Safe harbor
 

@@ -7,7 +7,8 @@ publishes the GitHub release with `latest.json` for the built-in updater.
 1. **Prepare**
    - Update `CHANGELOG.md`: rename `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD`,
      add a fresh empty `[Unreleased]`, and update the compare links at the
-     bottom.
+     bottom. The release description is built from this section;
+     `check:versions` fails without it or its link.
    - Bump the version in `package.json`, `src-tauri/tauri.conf.json` and
      `src-tauri/Cargo.toml`; run `cargo check --manifest-path src-tauri/Cargo.toml`
      so `Cargo.lock` follows, then `npm run check:versions`.
@@ -29,26 +30,25 @@ publishes the GitHub release with `latest.json` for the built-in updater.
      uses the same key. One-time setup: `git config gpg.format ssh` and
      `git config user.signingkey /path/to/proxpulse-release` (the private key,
      or its `.pub` when the private key lies next to it or is in `ssh-agent`).
-     The workflow does not check the signature; step 3 does.
 
    - The tag triggers `.github/workflows/release.yml`:
+     - `tag` rejects a tag that is not on `main` or not signed with the
+       release key;
      - `verify` runs the CI checks and `cargo audit`, and
        `check:versions` rejects a tag that does not match the project
        version;
      - `release` builds Windows (NSIS, MSI, portable), Linux (AppImage, deb,
        rpm) and macOS (Apple Silicon, Intel) with `tauri-action`, signing the
        updater artifacts with the `TAURI_SIGNING_PRIVATE_KEY` secret;
-     - `notes` writes the file-to-platform map into the release description
-       and uploads `SHA256SUMS.txt`.
-   - The release description lists the files only; the changelog section can
-     be added to it by hand.
+     - `notes` writes the changelog section and the file-to-platform map into
+       the release description and uploads `SHA256SUMS.txt`.
 
    `v*` tags are protected by a repository ruleset: they cannot be moved or
    deleted. A broken release is fixed with a new patch version, not by
    re-tagging.
 
 3. **Verify the release**
-   - The tag's signature is valid:
+   - The tag's signature is valid (anyone can check this):
 
      ```sh
      printf 'proxpulse-release namespaces="git" %s\n' \

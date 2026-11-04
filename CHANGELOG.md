@@ -6,6 +6,15 @@ All notable changes to ProxPulse. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The release workflow rejects a tag that is not on `main` or not signed with
+  the release key.
+
+### Changed
+
+- Release descriptions include the version's changelog section automatically.
+
 ## [0.6.0] — 2026-11-04
 
 ### Security
