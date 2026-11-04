@@ -136,8 +136,8 @@ jobs:
           cp src-tauri/target/release/proxpulse.exe "$NAME"
           gh release upload "$GITHUB_REF_NAME" "$NAME" --clobber
 
-  # Replaces the placeholder body with an exact file → platform map
-  # (filenames contain the version, so it is generated here, not static).
+  # Replaces the placeholder body with the changelog section and an exact
+  # file → platform map (filenames contain the version, so it is generated).
   # Runs after every platform job (tauri-action must not overwrite after).
   notes:
     needs: release
@@ -146,11 +146,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      # gh resolves the repo via git, so checkout is required even though
-      # no files are used.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
 
       # Checksums for manual downloads (the updater verifies its own
       # signatures). Every platform job has uploaded its files by now.
@@ -165,30 +166,10 @@ jobs:
           (cd assets && sha256sum -- * > ../SHA256SUMS.txt)
           gh release upload "$GITHUB_REF_NAME" SHA256SUMS.txt --clobber
 
-      - env:
+      - name: Write the release description
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VER="${GITHUB_REF_NAME#v}"
-          TAG="$GITHUB_REF_NAME"
-          gh release edit "$TAG" --notes "## What to download
-
-          **Windows (x64)**
-          - \`ProxPulse_${VER}_x64-setup.exe\` — NSIS installer (recommended, auto-updates)
-          - \`ProxPulse_${VER}_x64_en-US.msi\` — MSI installer (manual updates)
-          - \`ProxPulse_${VER}_x64-portable.exe\` — portable, no install (manual updates)
-
-          **Linux (x64)**
-          - \`ProxPulse_${VER}_amd64.AppImage\` — portable (auto-updates)
-          - \`ProxPulse_${VER}_amd64.deb\` — Debian/Ubuntu package (update via apt/dpkg)
-          - \`ProxPulse-${VER}-1.x86_64.rpm\` — Fedora/openSUSE package (update via rpm/dnf)
-
-          **macOS (Apple Silicon)** — unsigned, see README for Gatekeeper steps
-          - \`ProxPulse_${VER}_aarch64.dmg\`
-
-          **macOS (Intel)** — unsigned and untested
-          - \`ProxPulse_${VER}_x64.dmg\`
-
-          Linux auto-update is AppImage-only. \`latest.json\` and \`.sig\` files
-          are for the built-in updater; you do not need to download them.
-          \`SHA256SUMS.txt\` lists the SHA-256 checksum of every file:
-          \`sha256sum --ignore-missing -c SHA256SUMS.txt\`."
+          set -euo pipefail
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/notes.md"
+          gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

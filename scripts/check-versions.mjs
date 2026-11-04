@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { releaseNotes } from "./release-notes.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(join(root, path), "utf8");
@@ -46,6 +47,15 @@ const version = [...unique][0];
 const tag = process.env.GITHUB_REF_NAME;
 if (tag?.startsWith("v") && tag.slice(1) !== version) {
   console.error(`Tag ${tag} does not match project version ${version}`);
+  process.exit(1);
+}
+
+// The release description comes from the changelog. CI catches a missing
+// section here, before a tag exists: release tags cannot be moved.
+try {
+  releaseNotes(read("CHANGELOG.md"), version);
+} catch (e) {
+  console.error(e.message);
   process.exit(1);
 }
 
