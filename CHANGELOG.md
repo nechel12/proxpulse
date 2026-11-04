@@ -6,6 +6,8 @@ All notable changes to ProxPulse. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-04
+
 ### Security
 
 - Release tags are signed with an SSH key from this version on. The public
@@ -219,7 +221,8 @@ All notable changes to ProxPulse. The format follows
 
 - First tagged version: Windows installer and portable build.
 
-[Unreleased]: https://github.com/nechel12/proxpulse/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/nechel12/proxpulse/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/nechel12/proxpulse/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/nechel12/proxpulse/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/nechel12/proxpulse/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/nechel12/proxpulse/compare/v0.4.2...v0.4.3
