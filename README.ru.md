@@ -60,8 +60,10 @@ SOCKS4- и SOCKS5-прокси на доступность, задержку, г
 | | `…_amd64.deb`, `…x86_64.rpm` | пакетным менеджером |
 | macOS | `…_aarch64.dmg` (Apple Silicon), `…_x64.dmg` (Intel) | встроенное |
 
-В `SHA256SUMS.txt` — контрольные суммы всех файлов (начиная со следующего
-релиза); `latest.json` и `.sig` нужны встроенному обновлению.
+В `SHA256SUMS.txt` — контрольные суммы всех файлов; `latest.json` и `.sig`
+нужны встроенному обновлению. Теги релизов начиная с 0.6.0 подписаны SSH-ключом
+из [`docs/proxpulse-release.pub`](docs/proxpulse-release.pub); как проверить
+подпись, описано в [RELEASING.md](RELEASING.md).
 
 > [!NOTE]
 > **Windows:** сборки не подписаны сертификатом Authenticode, поэтому

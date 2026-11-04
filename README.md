@@ -60,8 +60,10 @@ Builds for every platform are attached to each
 | | `…_amd64.deb`, `…x86_64.rpm` | package manager |
 | macOS | `…_aarch64.dmg` (Apple Silicon), `…_x64.dmg` (Intel) | built-in |
 
-`SHA256SUMS.txt` lists the checksum of every file (from the next release on);
-`latest.json` and `.sig` files serve the built-in updater.
+`SHA256SUMS.txt` lists the checksum of every file; `latest.json` and `.sig`
+files serve the built-in updater. Release tags from 0.6.0 on are signed with
+the SSH key in [`docs/proxpulse-release.pub`](docs/proxpulse-release.pub);
+[RELEASING.md](RELEASING.md) shows how to check one.
 
 > [!NOTE]
 > **Windows:** builds are not Authenticode-signed, so SmartScreen may show

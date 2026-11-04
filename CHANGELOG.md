@@ -6,6 +6,11 @@ All notable changes to ProxPulse. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Release tags are signed with an SSH key from this version on. The public
+  half is `docs/proxpulse-release.pub`; RELEASING.md shows how to check a tag.
+
 ### Added
 
 - Exports for proxy clients: Clash (YAML), sing-box (JSON), a Proxifier
