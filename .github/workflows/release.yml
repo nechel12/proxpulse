@@ -15,8 +15,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A release is a tag on main signed with the docs/proxpulse-release.pub key.
+  # Checked first: nothing else runs for a tag that fails this.
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the check needs origin/main
+          persist-credentials: false
+      - name: Verify release tag
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$tag does not point to a commit on main"
+            exit 1
+          fi
+          # checkout may leave a lightweight ref on the tag: take the annotated object
+          git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
+          printf 'proxpulse-release namespaces="git" %s\n' \
+            "$(cut -d' ' -f1,2 docs/proxpulse-release.pub)" > "$RUNNER_TEMP/allowed_signers"
+          if ! git -c gpg.ssh.allowedSignersFile="$RUNNER_TEMP/allowed_signers" tag -v "$tag"; then
+            echo "::error::$tag is not signed with the release key"
+            exit 1
+          fi
+
   # A tag may only be published after the same checks CI runs on main.
   verify:
+    needs: tag
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
