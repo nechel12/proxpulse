@@ -140,20 +140,26 @@ The **HTTPS** and **HTTP** boxes decide how the judge is reached:
 > [!IMPORTANT]
 > **Anonymity needs plain HTTP.** Inside an HTTPS tunnel the proxy can neither
 > add headers nor alter the answer, so every proxy would look `elite`. Over
-> HTTP the proxy sees the request, and could also rewrite the answer. A judge
-> with `SIGNING_KEY` set signs each `/judge` answer together with a random
-> nonce and your direct IP; ProxPulse fetches the judge's key directly, not
-> through a proxy (over HTTPS when the judge serves it), and an answer that
-> fails the check is marked `?mod` and its anonymity verdict is dropped.
-> Judges without a key are used unsigned. Your direct IP (`direct_ip`) goes
+> HTTP the proxy sees the request, and could also rewrite the answer. The
+> judge signs each `/judge` answer together with a random nonce and your direct
+> IP; ProxPulse fetches the judge's key directly, not through a proxy (over
+> HTTPS when the judge serves it, otherwise over HTTP). An answer that fails the
+> check is marked `?mod` and its anonymity verdict is dropped; before that,
+> ProxPulse fetches the key once more per run, in case the judge restarted with
+> a new one. A judge without `/key` is used unsigned. If the key could not be
+> fetched, answers get no integrity result. Your direct IP (`direct_ip`) goes
 > only into HTTP requests. A judge that redirects HTTP to HTTPS (such as
 > Render) and proxies that allow only port 443 give no anonymity; the proxy
 > stays alive.
 
 A self-hosted judge for anonymity must answer over plain HTTP (for example
-`docker run -p 80:8000 -e TRUST_PROXY=0 -e SIGNING_KEY=… ghcr.io/nechel12/proxpulse-judge`
-on a server with a public IP: proxies connect to it from the internet). See
-the [judge README](https://github.com/nechel12/proxpulse-judge#signed-answers).
+`docker run -p 80:8000 -e TRUST_PROXY=0 ghcr.io/nechel12/proxpulse-judge`
+on a server with a public IP: proxies connect to it from the internet). It
+signs with a key generated at startup; `SIGNING_KEY` is needed only to share one
+key between replicas or keep it across restarts. Serve `/key` over HTTPS too if
+you can: anyone on your own path to the judge can replace a key fetched over
+plain HTTP. See the
+[judge README](https://github.com/nechel12/proxpulse-judge#signed-answers).
 
 > [!NOTE]
 > **ip-api: free tier and Pro.** The free endpoint is HTTP-only and limited to

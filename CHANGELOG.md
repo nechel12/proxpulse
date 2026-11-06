@@ -10,10 +10,22 @@ All notable changes to ProxPulse. The format follows
 
 - The release workflow rejects a tag that is not on `main` or not signed with
   the release key.
+- When a judge's key cannot be fetched, its answers no longer count as
+  verified: integrity stays empty instead of `ok`, because a proxy can keep the
+  content hash and rewrite the verdict.
 
 ### Changed
 
 - Release descriptions include the version's changelog section automatically.
+
+### Fixed
+
+- The HTTP judge mode no longer reports anonymity from a judge that redirects
+  HTTP to HTTPS, such as Render. It took the verdict from the HTTPS answer,
+  usually a false `elite`, with integrity `ok`.
+- A judge restarting with a new key during a check no longer marks the rest of
+  the run `?mod`: ProxPulse fetches the key once more before treating an answer
+  as rewritten.
 
 ## [0.6.0] — 2026-11-04
 
