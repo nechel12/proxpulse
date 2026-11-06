@@ -111,6 +111,15 @@ function setStatusT(key: string, params?: Record<string, string | number>) {
   $("status-line").textContent = t(key, params);
 }
 
+/** The last run verified answers with a judge key that came over plain HTTP. */
+let keyOverHttp = false;
+
+function renderKeyNote(): void {
+  const note = $("status-note");
+  note.hidden = !keyOverHttp;
+  note.textContent = keyOverHttp ? t("st_key_http") : "";
+}
+
 const netStatus = new NetStatus();
 
 function renderNet(): void {
@@ -153,6 +162,7 @@ function applyI18n() {
   });
   updateBrowserHint();
   $("status-line").textContent = t(lastStatus.key, lastStatus.params);
+  renderKeyNote();
   render();
   renderPool();
   profiles.render(t);
@@ -630,6 +640,8 @@ async function startInner() {
 async function runList(list: string[], opts: { recheck: boolean; truncated: boolean }) {
   running = true;
   stopFlag = false;
+  keyOverHttp = false;
+  renderKeyNote();
   // A re-check keeps the other entries and replaces the re-checked ones.
   const base = opts.recheck ? results : null;
   if (!base) {
@@ -656,6 +668,9 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
       setProgress(done, total);
     }, (live) => {
       results = base ? mergeResults(base, live) : live;
+    }, () => {
+      keyOverHttp = true;
+      renderKeyNote();
     });
     results = base ? defaultOrder(mergeResults(base, fresh)) : fresh;
   } catch (e) {
@@ -995,6 +1010,8 @@ window.addEventListener("DOMContentLoaded", () => {
     render(); updateCounts(); setProgress(0, 1);
     lastStatus = { key: "st_cleared" };
     $("status-line").textContent = t("st_cleared");
+    keyOverHttp = false;
+    renderKeyNote();
   });
 
   $("btn-direct").addEventListener("click", async () => {

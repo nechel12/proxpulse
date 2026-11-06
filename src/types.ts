@@ -52,4 +52,4 @@ export type SpeedResult = {
 };
 
 /** Messages on the check channel (`CheckEvent` in check.rs). */
-export type CheckEvent = (ProxyResult & { kind: "result" }) | { kind: "done" };
+export type CheckEvent = (ProxyResult & { kind: "result" }) | { kind: "keyOverHttp" } | { kind: "done" };

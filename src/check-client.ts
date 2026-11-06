@@ -66,6 +66,7 @@ export async function runCheckList(
   geoCache: (GeoEntry & { proxy: string })[],
   onProgress?: (done: number, total: number) => void,
   onLive?: (live: ProxyResult[]) => void,
+  onKeyOverHttp?: () => void,
 ): Promise<ProxyResult[]> {
   if (!/^https?:\/\//i.test(settings.testUrl)) throw new Error("badurl");
   const out: ProxyResult[] = [];
@@ -96,6 +97,10 @@ export async function runCheckList(
     if (finished) return;
     if (ev.kind === "done") {
       finishDone();
+      return;
+    }
+    if (ev.kind === "keyOverHttp") {
+      onKeyOverHttp?.();
       return;
     }
     const { kind: _kind, ...r } = ev;

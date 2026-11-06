@@ -17,6 +17,8 @@ pub(crate) const SIGNATURE_HEADER: &str = "x-judge-signature";
 pub(crate) struct JudgeKey {
     pub(crate) id: String,
     pub(crate) public: Vec<u8>,
+    /// Delivered over HTTPS, so TLS vouches for it.
+    pub(crate) over_tls: bool,
 }
 
 /// What a direct `/key` request found.
@@ -59,6 +61,7 @@ pub(crate) fn parse_key(body: &str) -> Option<JudgeKey> {
             .unwrap_or("")
             .to_string(),
         public,
+        over_tls: false,
     })
 }
 
@@ -131,8 +134,9 @@ pub(crate) fn key_url(judge_url: &str) -> Option<String> {
 
 /// Fetch the judge's public key directly (never through a checked proxy),
 /// over HTTPS when the judge serves it. Plain HTTP stays as a fallback for
-/// judges without TLS; such a key is only as trustworthy as the direct path.
-pub(crate) async fn fetch_key(judge_url: &str, timeout: Duration) -> KeyLookup {
+/// judges without TLS, unless `https_only`; such a key is only as trustworthy
+/// as the direct path.
+pub(crate) async fn fetch_key(judge_url: &str, timeout: Duration, https_only: bool) -> KeyLookup {
     let Some(url) = key_url(judge_url) else {
         return KeyLookup::NotSigned;
     };
@@ -140,7 +144,9 @@ pub(crate) async fn fetch_key(judge_url: &str, timeout: Duration) -> KeyLookup {
     if let Some(rest) = url.strip_prefix("http://") {
         tries.push(format!("https://{rest}"));
     }
-    tries.push(url);
+    if !https_only || url.starts_with("https://") {
+        tries.push(url);
+    }
     let Ok(client) = build_client(None, timeout, true) else {
         return KeyLookup::Unavailable;
     };
@@ -149,13 +155,17 @@ pub(crate) async fn fetch_key(judge_url: &str, timeout: Duration) -> KeyLookup {
         let Ok(r) = client.get(&u).send().await else {
             continue;
         };
+        let over_tls = r.url().scheme() == "https";
+        if https_only && !over_tls {
+            continue;
+        }
         let status = r.status();
         if status.is_success() {
             let Ok(body) = read_body_capped(r, BODY_LIMIT_SMALL).await else {
                 continue;
             };
             match parse_key(&body) {
-                Some(key) => return KeyLookup::Key(key),
+                Some(key) => return KeyLookup::Key(JudgeKey { over_tls, ..key }),
                 None => found = KeyLookup::NotSigned,
             }
         } else if status == reqwest::StatusCode::NOT_FOUND {
@@ -163,6 +173,11 @@ pub(crate) async fn fetch_key(judge_url: &str, timeout: Duration) -> KeyLookup {
         }
     }
     found
+}
+
+/// Whether this lookup found a key that came over plain HTTP.
+pub(crate) fn key_over_http(lookup: &KeyLookup) -> bool {
+    matches!(lookup, KeyLookup::Key(key) if !key.over_tls)
 }
 
 /// Check an answer's signature with the key from the start of the run. When

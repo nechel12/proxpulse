@@ -349,6 +349,10 @@ fn check_events_are_tagged() {
         serde_json::to_value(CheckEvent::Done).unwrap(),
         serde_json::json!({ "kind": "done" })
     );
+    assert_eq!(
+        serde_json::to_value(CheckEvent::KeyOverHttp).unwrap(),
+        serde_json::json!({ "kind": "keyOverHttp" })
+    );
 }
 
 #[test]

@@ -192,6 +192,8 @@ pub(crate) fn dead_result(raw: String, proto: String, attempts: u32, err: String
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum CheckEvent {
     Result(Box<ProxyResult>),
+    /// The judge's key came over plain HTTP, sent at most once per run.
+    KeyOverHttp,
     Done,
 }
 
@@ -595,7 +597,8 @@ pub(crate) fn apply_judge_integrity(
 }
 
 /// The signature check of a judge answer. All checks of a run share one more
-/// `/key` request, which a failed check starts.
+/// `/key` request, which a failed check starts. A key that came over HTTPS is
+/// only replaced over HTTPS: anyone on the direct path could force plain HTTP.
 pub(crate) async fn check_answer_signature(
     baseline: &Baseline,
     nonce: &str,
@@ -603,9 +606,10 @@ pub(crate) async fn check_answer_signature(
     body: &[u8],
     signature: Option<&str>,
 ) -> judge_sig::SignatureCheck {
+    let https_only = matches!(&baseline.judge_key, judge_sig::KeyLookup::Key(key) if key.over_tls);
     let refetch = baseline.judge_key_retry.get_or_init(|| async {
         match &baseline.judge_key_source {
-            Some((url, timeout)) => judge_sig::fetch_key(url, *timeout).await,
+            Some((url, timeout)) => judge_sig::fetch_key(url, *timeout, https_only).await,
             None => judge_sig::KeyLookup::NotSigned,
         }
     });
@@ -852,7 +856,7 @@ pub(crate) async fn run_checks(
                 match &judge_url {
                     Some(u) => tokio::join!(
                         fetch_direct_judge_sha(u, timeout),
-                        judge_sig::fetch_key(u, timeout)
+                        judge_sig::fetch_key(u, timeout, false)
                     ),
                     None => (None, judge_sig::KeyLookup::NotSigned),
                 }
@@ -878,6 +882,12 @@ pub(crate) async fn run_checks(
     baseline_inner.judge_key = judge_key;
     baseline_inner.judge_key_source = judge_url.map(|u| (u, timeout));
     let baseline = Arc::new(baseline_inner);
+    let warned_key_over_http = judge_sig::key_over_http(&baseline.judge_key);
+    if warned_key_over_http {
+        if let Some(ch) = on_result {
+            let _ = ch.send(CheckEvent::KeyOverHttp);
+        }
+    }
 
     let sem = Arc::new(Semaphore::new(conc));
     let mut set = tokio::task::JoinSet::new();
@@ -998,6 +1008,16 @@ pub(crate) async fn run_checks(
     }
     if cancel.load(Ordering::Relaxed) {
         set.abort_all();
+    }
+    // The run's second `/key` request may have come back over plain HTTP.
+    let late_key_over_http = baseline
+        .judge_key_retry
+        .get()
+        .is_some_and(judge_sig::key_over_http);
+    if late_key_over_http && !warned_key_over_http {
+        if let Some(ch) = on_result {
+            let _ = ch.send(CheckEvent::KeyOverHttp);
+        }
     }
     out.sort_by(|a, b| {
         b.alive.cmp(&a.alive).then(

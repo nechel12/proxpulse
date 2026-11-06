@@ -31,6 +31,7 @@ fn old_key() -> JudgeKey {
     JudgeKey {
         id: "old".to_string(),
         public: vec![7; 32],
+        over_tls: false,
     }
 }
 
@@ -228,7 +229,7 @@ async fn key_lookup_tells_no_key_from_no_answer() {
         let body = body.to_string();
         async move {
             let (url, _) = key_server(status, body).await;
-            fetch_key(&url, t).await
+            fetch_key(&url, t, false).await
         }
     };
     assert_eq!(lookup("200 OK", &key_json()).await, KeyLookup::Key(key()));
@@ -250,7 +251,7 @@ async fn key_lookup_tells_no_key_from_no_answer() {
         .unwrap()
         .port();
     assert_eq!(
-        fetch_key(&format!("http://127.0.0.1:{port}/judge"), t).await,
+        fetch_key(&format!("http://127.0.0.1:{port}/judge"), t, false).await,
         KeyLookup::Unavailable
     );
 }
@@ -273,6 +274,38 @@ async fn a_run_makes_one_more_key_request_at_most() {
     assert_eq!(check(b"{}", Some(SIG)).await, SignatureCheck::Invalid);
     assert_eq!(check(BODY, None).await, SignatureCheck::Invalid);
     assert_eq!(requests.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_key_from_https_is_not_replaced_over_http() {
+    let (url, requests) = key_server("200 OK", key_json()).await;
+    let t = Duration::from_secs(5);
+    assert!(key_over_http(&fetch_key(&url, t, false).await));
+    assert_eq!(requests.swap(0, Ordering::SeqCst), 1);
+
+    assert_eq!(fetch_key(&url, t, true).await, KeyLookup::Unavailable);
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+
+    let baseline = Baseline {
+        direct_ip: None,
+        example_len: None,
+        example_hash: None,
+        example_cert_fp: None,
+        judge_content_sha: None,
+        judge_key: KeyLookup::Key(JudgeKey {
+            over_tls: true,
+            ..old_key()
+        }),
+        judge_key_source: Some((url, t)),
+        judge_key_retry: tokio::sync::OnceCell::new(),
+    };
+    // The answer really was signed by the key on offer, but that key only came
+    // over plain HTTP, so it cannot replace one that TLS vouched for.
+    assert_eq!(
+        check_answer_signature(&baseline, NONCE, DIRECT_IP, BODY, Some(SIG)).await,
+        SignatureCheck::Invalid
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
 }
 
 #[test]
