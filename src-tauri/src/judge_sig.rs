@@ -19,6 +19,29 @@ pub(crate) struct JudgeKey {
     pub(crate) public: Vec<u8>,
 }
 
+/// What a direct `/key` request found.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum KeyLookup {
+    /// The judge signs with this key.
+    Key(JudgeKey),
+    /// A clear answer that there is no key: an older or third-party judge.
+    NotSigned,
+    /// No clear answer (network error, 429, 5xx): the judge may well sign.
+    Unavailable,
+}
+
+/// What the signature says about a judge answer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SignatureCheck {
+    Valid,
+    /// Rewritten or replayed on the way.
+    Invalid,
+    /// The judge does not sign.
+    NotSigned,
+    /// The judge may sign, but its key could not be fetched.
+    Unchecked,
+}
+
 /// The `/key` answer: `{"alg": "ed25519", "key_id": .., "public_key": base64}`.
 pub(crate) fn parse_key(body: &str) -> Option<JudgeKey> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
@@ -107,44 +130,86 @@ pub(crate) fn key_url(judge_url: &str) -> Option<String> {
 }
 
 /// Fetch the judge's public key directly (never through a checked proxy),
-/// over HTTPS when the judge serves it. None: the judge does not sign.
-pub(crate) async fn fetch_key(judge_url: &str, timeout: Duration) -> Option<JudgeKey> {
-    let url = key_url(judge_url)?;
+/// over HTTPS when the judge serves it. Plain HTTP stays as a fallback for
+/// judges without TLS; such a key is only as trustworthy as the direct path.
+pub(crate) async fn fetch_key(judge_url: &str, timeout: Duration) -> KeyLookup {
+    let Some(url) = key_url(judge_url) else {
+        return KeyLookup::NotSigned;
+    };
     let mut tries = Vec::new();
     if let Some(rest) = url.strip_prefix("http://") {
         tries.push(format!("https://{rest}"));
     }
     tries.push(url);
-    let client = build_client(None, timeout, true).ok()?;
+    let Ok(client) = build_client(None, timeout, true) else {
+        return KeyLookup::Unavailable;
+    };
+    let mut found = KeyLookup::Unavailable;
     for u in tries {
         let Ok(r) = client.get(&u).send().await else {
             continue;
         };
-        if !r.status().is_success() {
-            continue;
-        }
-        if let Some(key) = read_body_capped(r, BODY_LIMIT_SMALL)
-            .await
-            .ok()
-            .and_then(|b| parse_key(&b))
-        {
-            return Some(key);
+        let status = r.status();
+        if status.is_success() {
+            let Ok(body) = read_body_capped(r, BODY_LIMIT_SMALL).await else {
+                continue;
+            };
+            match parse_key(&body) {
+                Some(key) => return KeyLookup::Key(key),
+                None => found = KeyLookup::NotSigned,
+            }
+        } else if status == reqwest::StatusCode::NOT_FOUND {
+            found = KeyLookup::NotSigned;
         }
     }
-    None
+    found
+}
+
+/// Check an answer's signature with the key from the start of the run. When
+/// that fails, or there was no key yet, `refetch` asks the judge once more: it
+/// may have restarted with a new key. `X-Judge-Key-Id` plays no part in this,
+/// as it is not signed and the proxy controls it.
+pub(crate) async fn check_signature<'a>(
+    first: &'a KeyLookup,
+    refetch: impl std::future::Future<Output = &'a KeyLookup>,
+    nonce: &str,
+    direct_ip: &str,
+    body: &[u8],
+    signature: Option<&str>,
+) -> SignatureCheck {
+    let holds = |key: &JudgeKey| verify(key, nonce, direct_ip, body, signature);
+    match first {
+        KeyLookup::NotSigned => return SignatureCheck::NotSigned,
+        KeyLookup::Key(key) if holds(key) => return SignatureCheck::Valid,
+        _ => {}
+    }
+    match (first, refetch.await) {
+        (_, KeyLookup::Key(key)) if holds(key) => SignatureCheck::Valid,
+        // This judge had a key, and the answer does not match it.
+        (_, KeyLookup::Key(_)) | (KeyLookup::Key(_), _) => SignatureCheck::Invalid,
+        (_, KeyLookup::NotSigned) => SignatureCheck::NotSigned,
+        (_, KeyLookup::Unavailable) => SignatureCheck::Unchecked,
+    }
 }
 
 /// Integrity of a judge answer: a signature decides when the judge signs;
 /// otherwise the content hash is compared with the direct answer.
 pub(crate) fn judge_tamper(
-    signed: Option<bool>,
+    check: SignatureCheck,
     base_sha: Option<&str>,
     proxy_sha: Option<&str>,
 ) -> Option<String> {
-    let verdict = match (signed, base_sha, proxy_sha) {
-        (Some(ok), _, _) => ok,
-        (None, Some(a), Some(b)) => a == b,
-        _ => return None,
+    let same_hash = base_sha.zip(proxy_sha).map(|(a, b)| a == b);
+    let verdict = match check {
+        SignatureCheck::Valid => true,
+        SignatureCheck::Invalid => false,
+        SignatureCheck::NotSigned => same_hash?,
+        // A proxy can keep the hash and rewrite the verdict, so here a matching
+        // hash proves nothing: only a mismatch is a result.
+        SignatureCheck::Unchecked => match same_hash {
+            Some(false) => false,
+            _ => return None,
+        },
     };
     Some(if verdict { "ok" } else { "modified" }.to_string())
 }

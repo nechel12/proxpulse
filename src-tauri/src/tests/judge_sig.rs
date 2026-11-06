@@ -1,6 +1,12 @@
-use crate::commands::check::{answered_in_clear, candidate_budget, wants_direct_ip, CheckConfig};
+use crate::commands::check::{
+    answered_in_clear, candidate_budget, check_answer_signature, wants_direct_ip, CheckConfig,
+};
 use crate::judge_sig::*;
+use crate::Baseline;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// The judge's own test vector (proxpulse-judge `sign::tests::known_vector`):
 /// a signature made by its Ed25519 implementation must verify here.
@@ -15,6 +21,49 @@ fn key() -> JudgeKey {
         r#"{{"alg":"ed25519","key_id":"56475aa7","public_key":"{PUBLIC}"}}"#
     ))
     .unwrap()
+}
+
+/// The direct IP the judge's test vector was signed with.
+const DIRECT_IP: &str = "203.0.113.7";
+
+/// A key that did not sign the test vector: the judge's before a restart.
+fn old_key() -> JudgeKey {
+    JudgeKey {
+        id: "old".to_string(),
+        public: vec![7; 32],
+    }
+}
+
+fn key_json() -> String {
+    format!(r#"{{"alg":"ed25519","key_id":"56475aa7","public_key":"{PUBLIC}"}}"#)
+}
+
+/// A local server that gives every HTTP request one answer and counts them.
+/// The HTTPS attempt that comes first fails, as on a judge without TLS.
+async fn key_server(status: &'static str, body: String) -> (String, Arc<AtomicUsize>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let counter = requests.clone();
+    tokio::spawn(async move {
+        while let Ok((mut conn, _)) = listener.accept().await {
+            let (counter, body) = (counter.clone(), body.clone());
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let n = conn.read(&mut buf).await.unwrap_or(0);
+                if !buf[..n].starts_with(b"GET /key") {
+                    return;
+                }
+                counter.fetch_add(1, Ordering::SeqCst);
+                let answer = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = conn.write_all(answer.as_bytes()).await;
+            });
+        }
+    });
+    (format!("http://127.0.0.1:{port}/judge"), requests)
 }
 
 #[test]
@@ -70,23 +119,154 @@ fn judge_keys_and_urls() {
 
 #[test]
 fn judge_integrity_prefers_the_signature() {
+    use SignatureCheck::*;
     assert_eq!(
-        judge_tamper(Some(true), Some("a"), Some("b")).as_deref(),
+        judge_tamper(Valid, Some("a"), Some("b")).as_deref(),
         Some("ok")
     );
     assert_eq!(
-        judge_tamper(Some(false), Some("a"), Some("a")).as_deref(),
+        judge_tamper(Invalid, Some("a"), Some("a")).as_deref(),
         Some("modified")
     );
     assert_eq!(
-        judge_tamper(None, Some("a"), Some("a")).as_deref(),
+        judge_tamper(NotSigned, Some("a"), Some("a")).as_deref(),
         Some("ok")
     );
     assert_eq!(
-        judge_tamper(None, Some("a"), Some("b")).as_deref(),
+        judge_tamper(NotSigned, Some("a"), Some("b")).as_deref(),
         Some("modified")
     );
-    assert_eq!(judge_tamper(None, None, Some("b")), None);
+    assert_eq!(judge_tamper(NotSigned, None, Some("b")), None);
+}
+
+#[test]
+fn unchecked_signature_never_reports_ok() {
+    use SignatureCheck::Unchecked;
+    // A proxy can keep the hash and rewrite the verdict.
+    assert_eq!(judge_tamper(Unchecked, Some("a"), Some("a")), None);
+    assert_eq!(
+        judge_tamper(Unchecked, Some("a"), Some("b")).as_deref(),
+        Some("modified")
+    );
+    assert_eq!(judge_tamper(Unchecked, None, Some("b")), None);
+}
+
+#[tokio::test]
+async fn signature_check_retries_only_when_needed() {
+    async fn no_second_request<'a>() -> &'a KeyLookup {
+        panic!("must not fetch the key again")
+    }
+    async fn run(first: KeyLookup) -> SignatureCheck {
+        check_signature(
+            &first,
+            no_second_request(),
+            NONCE,
+            DIRECT_IP,
+            BODY,
+            Some(SIG),
+        )
+        .await
+    }
+    assert_eq!(run(KeyLookup::Key(key())).await, SignatureCheck::Valid);
+    assert_eq!(run(KeyLookup::NotSigned).await, SignatureCheck::NotSigned);
+}
+
+#[tokio::test]
+async fn signature_check_after_a_second_key_request() {
+    use KeyLookup::{Key, NotSigned, Unavailable};
+    use SignatureCheck as S;
+
+    async fn run(first: KeyLookup, second: KeyLookup, body: &[u8], sig: Option<&str>) -> S {
+        check_signature(&first, async { &second }, NONCE, DIRECT_IP, body, sig).await
+    }
+    // The judge restarted with a new key.
+    assert_eq!(
+        run(Key(old_key()), Key(key()), BODY, Some(SIG)).await,
+        S::Valid
+    );
+    // The key is the same: rewritten, or the signature was stripped.
+    assert_eq!(
+        run(Key(key()), Key(key()), b"{}", Some(SIG)).await,
+        S::Invalid
+    );
+    assert_eq!(run(Key(key()), Key(key()), BODY, None).await, S::Invalid);
+    // This judge had a key: losing `/key` afterwards does not excuse an answer.
+    assert_eq!(
+        run(Key(old_key()), Unavailable, BODY, Some(SIG)).await,
+        S::Invalid
+    );
+    assert_eq!(
+        run(Key(old_key()), NotSigned, BODY, Some(SIG)).await,
+        S::Invalid
+    );
+    // No key at the start of the run, for example a judge still waking up.
+    assert_eq!(
+        run(Unavailable, Key(key()), BODY, Some(SIG)).await,
+        S::Valid
+    );
+    assert_eq!(
+        run(Unavailable, Key(key()), b"{}", Some(SIG)).await,
+        S::Invalid
+    );
+    assert_eq!(run(Unavailable, NotSigned, BODY, None).await, S::NotSigned);
+    assert_eq!(
+        run(Unavailable, Unavailable, BODY, Some(SIG)).await,
+        S::Unchecked
+    );
+}
+
+#[tokio::test]
+async fn key_lookup_tells_no_key_from_no_answer() {
+    let t = Duration::from_secs(5);
+    let lookup = |status, body: &str| {
+        let body = body.to_string();
+        async move {
+            let (url, _) = key_server(status, body).await;
+            fetch_key(&url, t).await
+        }
+    };
+    assert_eq!(lookup("200 OK", &key_json()).await, KeyLookup::Key(key()));
+    assert_eq!(lookup("404 Not Found", "").await, KeyLookup::NotSigned);
+    assert_eq!(lookup("200 OK", "<html>").await, KeyLookup::NotSigned);
+    assert_eq!(
+        lookup("500 Internal Server Error", "").await,
+        KeyLookup::Unavailable
+    );
+    assert_eq!(
+        lookup("429 Too Many Requests", "").await,
+        KeyLookup::Unavailable
+    );
+
+    // A closed port.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    assert_eq!(
+        fetch_key(&format!("http://127.0.0.1:{port}/judge"), t).await,
+        KeyLookup::Unavailable
+    );
+}
+
+#[tokio::test]
+async fn a_run_makes_one_more_key_request_at_most() {
+    let (url, requests) = key_server("200 OK", key_json()).await;
+    let baseline = Baseline {
+        direct_ip: None,
+        example_len: None,
+        example_hash: None,
+        example_cert_fp: None,
+        judge_content_sha: None,
+        judge_key: KeyLookup::Key(old_key()),
+        judge_key_source: Some((url, Duration::from_secs(5))),
+        judge_key_retry: tokio::sync::OnceCell::new(),
+    };
+    let check = |body, sig| check_answer_signature(&baseline, NONCE, DIRECT_IP, body, sig);
+    assert_eq!(check(BODY, Some(SIG)).await, SignatureCheck::Valid);
+    assert_eq!(check(b"{}", Some(SIG)).await, SignatureCheck::Invalid);
+    assert_eq!(check(BODY, None).await, SignatureCheck::Invalid);
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
 }
 
 #[test]

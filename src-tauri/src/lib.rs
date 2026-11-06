@@ -212,8 +212,12 @@ struct Baseline {
     example_hash: Option<u64>,
     example_cert_fp: Option<String>,
     judge_content_sha: Option<String>,
-    /// Public key of a judge that signs its answers.
-    judge_key: Option<judge_sig::JudgeKey>,
+    /// The judge's key at the start of the run.
+    judge_key: judge_sig::KeyLookup,
+    /// Where `judge_key` came from: the judge URL and the request timeout.
+    judge_key_source: Option<(String, Duration)>,
+    /// The one further `/key` request of a run, shared by all its checks.
+    judge_key_retry: tokio::sync::OnceCell<judge_sig::KeyLookup>,
 }
 
 #[derive(Default)]

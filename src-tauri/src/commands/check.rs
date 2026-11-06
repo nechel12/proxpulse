@@ -265,6 +265,12 @@ pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckF
     } else {
         Duration::ZERO
     };
+    // A check may wait for the run's second `/key` request: HTTPS, then HTTP.
+    let judge_key = if flags.judge {
+        timeout * 2
+    } else {
+        Duration::ZERO
+    };
     // DNS lookups of all lists run together, four seconds at most.
     let dnsbl = if flags.dnsbl {
         Duration::from_secs(5)
@@ -276,6 +282,7 @@ pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckF
         + deep
         + sites
         + judge_http
+        + judge_key
         + dnsbl
         + Duration::from_secs(5)
 }
@@ -445,10 +452,15 @@ async fn check_candidate_inner(
         if flags.judge {
             let proxy_sha = try_parse_judge_body(&mut res, &b);
             if first_in_clear {
-                let signed = baseline.judge_key.as_ref().map(|k| {
-                    judge_sig::verify(k, &nonce, direct_ip, b.as_bytes(), first_sig.as_deref())
-                });
-                apply_judge_integrity(&mut res, &baseline, signed, proxy_sha.as_deref());
+                let check = check_answer_signature(
+                    &baseline,
+                    &nonce,
+                    direct_ip,
+                    b.as_bytes(),
+                    first_sig.as_deref(),
+                )
+                .await;
+                apply_judge_integrity(&mut res, &baseline, check, proxy_sha.as_deref());
             } else {
                 // Inside a TLS tunnel the proxy can neither add headers nor
                 // change the body: "elite" would be a guess, not a result.
@@ -573,13 +585,39 @@ fn signature_header(r: &reqwest::Response) -> Option<String> {
 pub(crate) fn apply_judge_integrity(
     res: &mut ProxyResult,
     baseline: &Baseline,
-    signed: Option<bool>,
+    check: judge_sig::SignatureCheck,
     proxy_sha: Option<&str>,
 ) {
-    res.tamper = judge_sig::judge_tamper(signed, baseline.judge_content_sha.as_deref(), proxy_sha);
-    if signed == Some(false) {
+    res.tamper = judge_sig::judge_tamper(check, baseline.judge_content_sha.as_deref(), proxy_sha);
+    if check == judge_sig::SignatureCheck::Invalid {
         res.anonymity = None;
     }
+}
+
+/// The signature check of a judge answer. All checks of a run share one more
+/// `/key` request, which a failed check starts.
+pub(crate) async fn check_answer_signature(
+    baseline: &Baseline,
+    nonce: &str,
+    direct_ip: &str,
+    body: &[u8],
+    signature: Option<&str>,
+) -> judge_sig::SignatureCheck {
+    let refetch = baseline.judge_key_retry.get_or_init(|| async {
+        match &baseline.judge_key_source {
+            Some((url, timeout)) => judge_sig::fetch_key(url, *timeout).await,
+            None => judge_sig::KeyLookup::NotSigned,
+        }
+    });
+    judge_sig::check_signature(
+        &baseline.judge_key,
+        refetch,
+        nonce,
+        direct_ip,
+        body,
+        signature,
+    )
+    .await
 }
 
 /// With both schemes on, the HTTPS answer gives liveness and geo; this
@@ -613,11 +651,9 @@ async fn judge_over_http(
         .and_then(|a| a.as_str())
         .map(str::to_string);
     let proxy_sha = v.get("content_sha256").and_then(|s| s.as_str());
-    let signed = baseline
-        .judge_key
-        .as_ref()
-        .map(|k| judge_sig::verify(k, nonce, direct_ip, body.as_bytes(), sig.as_deref()));
-    apply_judge_integrity(res, baseline, signed, proxy_sha);
+    let check =
+        check_answer_signature(baseline, nonce, direct_ip, body.as_bytes(), sig.as_deref()).await;
+    apply_judge_integrity(res, baseline, check, proxy_sha);
 }
 
 /// Request every site through the proxy at once. Any HTTP answer, even an
@@ -741,7 +777,9 @@ async fn fetch_baseline(flags: CheckFlags, want_ip: bool) -> Baseline {
         example_hash: hash,
         example_cert_fp: cert,
         judge_content_sha: None,
-        judge_key: None,
+        judge_key: judge_sig::KeyLookup::NotSigned,
+        judge_key_source: None,
+        judge_key_retry: tokio::sync::OnceCell::new(),
     }
 }
 
@@ -816,7 +854,7 @@ pub(crate) async fn run_checks(
                         fetch_direct_judge_sha(u, timeout),
                         judge_sig::fetch_key(u, timeout)
                     ),
-                    None => (None, None),
+                    None => (None, judge_sig::KeyLookup::NotSigned),
                 }
             }
         )
@@ -832,10 +870,13 @@ pub(crate) async fn run_checks(
         example_hash: None,
         example_cert_fp: None,
         judge_content_sha: None,
-        judge_key: None,
+        judge_key: judge_sig::KeyLookup::NotSigned,
+        judge_key_source: None,
+        judge_key_retry: tokio::sync::OnceCell::new(),
     });
     baseline_inner.judge_content_sha = judge_sha;
     baseline_inner.judge_key = judge_key;
+    baseline_inner.judge_key_source = judge_url.map(|u| (u, timeout));
     let baseline = Arc::new(baseline_inner);
 
     let sem = Arc::new(Semaphore::new(conc));

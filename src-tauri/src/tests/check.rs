@@ -282,7 +282,7 @@ fn candidate_budget_covers_deep_tls() {
     };
     assert_eq!(
         candidate_budget(timeout, 1, &judge),
-        Duration::from_millis(16_500)
+        Duration::from_millis(26_500)
     );
 }
 
