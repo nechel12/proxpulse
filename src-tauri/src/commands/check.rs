@@ -235,6 +235,13 @@ pub(crate) fn is_tls_target(url: &str) -> bool {
         .is_some_and(|p| p.eq_ignore_ascii_case("https://"))
 }
 
+/// Whether the proxy could see a judge request and alter its answer. A
+/// redirect to HTTPS (some hosts force it) hides them again, so the final URL
+/// counts as well as the requested one.
+pub(crate) fn answered_in_clear(requested: &str, final_url: &str) -> bool {
+    !is_tls_target(requested) && !is_tls_target(final_url)
+}
+
 pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckFlags) -> Duration {
     // Main attempts: repeats × timeout. Deep stages run concurrently; the
     // slowest is TLS via an HTTPS proxy: TCP + CONNECT + handshake = 3×.
@@ -357,6 +364,7 @@ async fn check_candidate_inner(
     let mut latencies: Vec<u64> = Vec::new();
     let mut first_body: Option<String> = None;
     let mut first_sig: Option<String> = None;
+    let mut first_in_clear = false;
     let mut last_err: Option<String> = None;
 
     for _ in 0..repeats {
@@ -373,6 +381,7 @@ async fn check_candidate_inner(
                     latencies.push(ms);
                     if first_body.is_none() {
                         first_sig = signature_header(&r);
+                        first_in_clear = answered_in_clear(&req_url, r.url().as_str());
                         first_body = read_body_capped(r, BODY_LIMIT_PAGE).await.ok();
                     }
                     last_err = None;
@@ -435,15 +444,15 @@ async fn check_candidate_inner(
     if let Some(b) = first_body {
         if flags.judge {
             let proxy_sha = try_parse_judge_body(&mut res, &b);
-            if is_tls_target(&test_url) {
-                // Inside a TLS tunnel the proxy can neither add headers nor
-                // change the body: "elite" would be a guess, not a result.
-                res.anonymity = None;
-            } else {
+            if first_in_clear {
                 let signed = baseline.judge_key.as_ref().map(|k| {
                     judge_sig::verify(k, &nonce, direct_ip, b.as_bytes(), first_sig.as_deref())
                 });
                 apply_judge_integrity(&mut res, &baseline, signed, proxy_sha.as_deref());
+            } else {
+                // Inside a TLS tunnel the proxy can neither add headers nor
+                // change the body: "elite" would be a guess, not a result.
+                res.anonymity = None;
             }
         } else {
             try_parse_test_body(&mut res, &test_url, &b);
@@ -589,8 +598,7 @@ async fn judge_over_http(
     let Ok(r) = client.get(&url).send().await else {
         return;
     };
-    // A redirect to HTTPS (some hosts force it) hides the request again.
-    if !r.status().is_success() || r.url().scheme() != "http" {
+    if !r.status().is_success() || !answered_in_clear(&url, r.url().as_str()) {
         return;
     }
     let sig = signature_header(&r);

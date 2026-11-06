@@ -1,4 +1,4 @@
-use crate::commands::check::{candidate_budget, wants_direct_ip, CheckConfig};
+use crate::commands::check::{answered_in_clear, candidate_budget, wants_direct_ip, CheckConfig};
 use crate::judge_sig::*;
 use std::time::Duration;
 
@@ -87,6 +87,18 @@ fn judge_integrity_prefers_the_signature() {
         Some("modified")
     );
     assert_eq!(judge_tamper(None, None, Some("b")), None);
+}
+
+#[test]
+fn a_redirect_to_https_hides_the_request() {
+    assert!(answered_in_clear(
+        "http://j/judge?a=1",
+        "http://j/judge?a=1"
+    ));
+    assert!(!answered_in_clear("http://j/judge", "https://j/judge"));
+    assert!(!answered_in_clear("http://j/judge", "HTTPS://j/judge"));
+    assert!(!answered_in_clear("https://j/judge", "https://j/judge"));
+    assert!(!answered_in_clear("https://j/judge", "http://j/judge"));
 }
 
 #[test]
