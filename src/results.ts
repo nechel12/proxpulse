@@ -299,6 +299,7 @@ export class ResultsView {
     const tls = tlsShort(r.tls);
     const marks = [
       r.tamper === "modified" ? `<span class="anon-trans" title="tamper">?mod</span>` : "",
+      r.tamper === "unverified" ? `<span class="anon-anon" title="${escapeHtml(t("tamper_unverified_t"))}">?unv</span>` : "",
       r.tls === "modified" ? `<span class="anon-trans" title="tls">?tls</span>` : "",
       r.dnsbl?.listed.length
         ? `<span class="anon-trans" title="${escapeHtml(t("dnsbl_listed_t", { lists: r.dnsbl.listed.join(", ") }))}">bl ${r.dnsbl.listed.length}</span>`

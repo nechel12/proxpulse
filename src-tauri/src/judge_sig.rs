@@ -201,15 +201,24 @@ pub(crate) fn judge_tamper(
 ) -> Option<String> {
     let same_hash = base_sha.zip(proxy_sha).map(|(a, b)| a == b);
     let verdict = match check {
-        SignatureCheck::Valid => true,
-        SignatureCheck::Invalid => false,
-        SignatureCheck::NotSigned => same_hash?,
+        SignatureCheck::Valid => "ok",
+        SignatureCheck::Invalid => "modified",
+        SignatureCheck::NotSigned => {
+            if same_hash? {
+                "ok"
+            } else {
+                "modified"
+            }
+        }
         // A proxy can keep the hash and rewrite the verdict, so here a matching
         // hash proves nothing: only a mismatch is a result.
-        SignatureCheck::Unchecked => match same_hash {
-            Some(false) => false,
-            _ => return None,
-        },
+        SignatureCheck::Unchecked => {
+            if same_hash == Some(false) {
+                "modified"
+            } else {
+                "unverified"
+            }
+        }
     };
-    Some(if verdict { "ok" } else { "modified" }.to_string())
+    Some(verdict.to_string())
 }

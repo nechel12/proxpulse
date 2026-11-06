@@ -143,12 +143,18 @@ fn judge_integrity_prefers_the_signature() {
 fn unchecked_signature_never_reports_ok() {
     use SignatureCheck::Unchecked;
     // A proxy can keep the hash and rewrite the verdict.
-    assert_eq!(judge_tamper(Unchecked, Some("a"), Some("a")), None);
+    assert_eq!(
+        judge_tamper(Unchecked, Some("a"), Some("a")).as_deref(),
+        Some("unverified")
+    );
     assert_eq!(
         judge_tamper(Unchecked, Some("a"), Some("b")).as_deref(),
         Some("modified")
     );
-    assert_eq!(judge_tamper(Unchecked, None, Some("b")), None);
+    assert_eq!(
+        judge_tamper(Unchecked, None, Some("b")).as_deref(),
+        Some("unverified")
+    );
 }
 
 #[tokio::test]
