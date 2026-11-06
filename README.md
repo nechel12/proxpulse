@@ -147,7 +147,9 @@ The **HTTPS** and **HTTP** boxes decide how the judge is reached:
 > check is marked `?mod` and its anonymity verdict is dropped; before that,
 > ProxPulse fetches the key once more per run, in case the judge restarted with
 > a new one. A judge without `/key` is used unsigned. If the key could not be
-> fetched, answers get no integrity result. Your direct IP (`direct_ip`) goes
+> fetched, answers are marked `?unv`; a key that came over plain HTTP brings a
+> note under the status line, because it protects against the checked proxy but
+> not against anyone on your path to the judge. Your direct IP (`direct_ip`) goes
 > only into HTTP requests. A judge that redirects HTTP to HTTPS (such as
 > Render) and proxies that allow only port 443 give no anonymity; the proxy
 > stays alive.
@@ -229,6 +231,7 @@ avoids repeated lookups for unchanged exit IPs.
 | | `transp` | Your direct IP appears in a forwarded header: the proxy leaks it. |
 | TLS | `ok` / `mod` / `n/v` | The certificate matches / differs or is rejected / the handshake failed for another reason. |
 | Info | `?mod`, `?tls` | The page through the proxy differs from the direct one or fails the judge's signature / the TLS certificate differs. The row tooltip lists every result. |
+| Info | `?unv` | The judge's key could not be fetched, so the answer's signature was not checked. |
 | Info | `bl N` | The exit IP is on N blocklists; the tooltip names them. |
 | Anon, Geo, TLS | `—` | Not checked: off, unsupported by the proxy, or an HTTPS judge. |
 | Anon, Geo, TLS | `limit` | Skipped at a concurrency limit; running the check again fills it. |

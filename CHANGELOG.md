@@ -6,6 +6,17 @@ All notable changes to ProxPulse. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- A judge's key that came over HTTPS is only replaced over HTTPS during a run,
+  so nobody on the direct path can force plain HTTP on the second key request.
+
+### Added
+
+- Answers whose signature could not be checked, because the judge's key could
+  not be fetched, are marked `?unv`, with `unverified` in exports.
+- A note under the status line when the judge's key came over plain HTTP.
+
 ## [0.6.1] — 2026-11-07
 
 ### Security
