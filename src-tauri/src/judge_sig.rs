@@ -65,12 +65,14 @@ pub(crate) fn parse_key(body: &str) -> Option<JudgeKey> {
     })
 }
 
-pub(crate) fn message(nonce: &str, direct_ip: &str, body: &[u8]) -> Vec<u8> {
+/// The signed message. `challenge` is our `nonce` query value: data bound into
+/// the message to stop replays, not a cipher nonce (Ed25519 derives its own).
+pub(crate) fn message(challenge: &str, direct_ip: &str, body: &[u8]) -> Vec<u8> {
     let mut m = Vec::with_capacity(
-        SIGNATURE_CONTEXT.len() + nonce.len() + direct_ip.len() + body.len() + 2,
+        SIGNATURE_CONTEXT.len() + challenge.len() + direct_ip.len() + body.len() + 2,
     );
     m.extend_from_slice(SIGNATURE_CONTEXT);
-    m.extend_from_slice(nonce.as_bytes());
+    m.extend_from_slice(challenge.as_bytes());
     m.push(b'\n');
     m.extend_from_slice(direct_ip.as_bytes());
     m.push(b'\n');
@@ -81,7 +83,7 @@ pub(crate) fn message(nonce: &str, direct_ip: &str, body: &[u8]) -> Vec<u8> {
 /// Whether `signature` (base64, from the response header) signs this answer.
 pub(crate) fn verify(
     key: &JudgeKey,
-    nonce: &str,
+    challenge: &str,
     direct_ip: &str,
     body: &[u8],
     signature: Option<&str>,
@@ -94,7 +96,7 @@ pub(crate) fn verify(
         return false;
     };
     UnparsedPublicKey::new(&ED25519, &key.public)
-        .verify(&message(nonce, direct_ip, body), &sig)
+        .verify(&message(challenge, direct_ip, body), &sig)
         .is_ok()
 }
 
@@ -114,14 +116,14 @@ pub(crate) fn new_nonce() -> String {
 }
 
 /// A judge URL with our direct IP (when known) and the nonce in the query.
-pub(crate) fn judge_query(url: &str, direct_ip: Option<&str>, nonce: &str) -> String {
+pub(crate) fn judge_query(url: &str, direct_ip: Option<&str>, challenge: &str) -> String {
     let mut out = url.to_string();
     let mut sep = if url.contains('?') { '&' } else { '?' };
     if let Some(ip) = direct_ip.filter(|ip| !ip.is_empty()) {
         out.push_str(&format!("{sep}direct_ip={ip}"));
         sep = '&';
     }
-    out.push_str(&format!("{sep}nonce={nonce}"));
+    out.push_str(&format!("{sep}nonce={challenge}"));
     out
 }
 
@@ -187,12 +189,12 @@ pub(crate) fn key_over_http(lookup: &KeyLookup) -> bool {
 pub(crate) async fn check_signature<'a>(
     first: &'a KeyLookup,
     refetch: impl std::future::Future<Output = &'a KeyLookup>,
-    nonce: &str,
+    challenge: &str,
     direct_ip: &str,
     body: &[u8],
     signature: Option<&str>,
 ) -> SignatureCheck {
-    let holds = |key: &JudgeKey| verify(key, nonce, direct_ip, body, signature);
+    let holds = |key: &JudgeKey| verify(key, challenge, direct_ip, body, signature);
     match first {
         KeyLookup::NotSigned => return SignatureCheck::NotSigned,
         KeyLookup::Key(key) if holds(key) => return SignatureCheck::Valid,

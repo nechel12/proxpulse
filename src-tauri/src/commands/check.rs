@@ -601,7 +601,7 @@ pub(crate) fn apply_judge_integrity(
 /// only replaced over HTTPS: anyone on the direct path could force plain HTTP.
 pub(crate) async fn check_answer_signature(
     baseline: &Baseline,
-    nonce: &str,
+    challenge: &str,
     direct_ip: &str,
     body: &[u8],
     signature: Option<&str>,
@@ -616,7 +616,7 @@ pub(crate) async fn check_answer_signature(
     judge_sig::check_signature(
         &baseline.judge_key,
         refetch,
-        nonce,
+        challenge,
         direct_ip,
         body,
         signature,
