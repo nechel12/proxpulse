@@ -1,7 +1,7 @@
 {
   "name": "proxpulse",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Fast proxy checker",
   "author": "nechel12",
   "license": "Apache-2.0",
