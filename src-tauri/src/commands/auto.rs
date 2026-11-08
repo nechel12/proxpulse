@@ -213,6 +213,19 @@ pub(crate) fn new_entries(
     out
 }
 
+/// Whether a proxy line points into this machine or its local network. A
+/// subscription is someone else's list: its `127.0.0.1:7890` or
+/// `socks5://192.168.1.1:80` would get a connection and a request through it,
+/// and an answer would put it into the pool, the dispatcher and webhooks. The
+/// user's own lists are not limited.
+pub(crate) fn points_inside(entry: &str, default_proto: &str) -> bool {
+    normalize_candidates(entry, default_proto)
+        .iter()
+        .any(|(url, _)| {
+            reqwest::Url::parse(url).map_or(true, |u| crate::netguard::is_disallowed_url_host(&u))
+        })
+}
+
 async fn fetch_subscriptions(
     urls: &[String],
     default_proto: &str,
@@ -235,12 +248,13 @@ async fn fetch_subscriptions(
             }
         };
         let proto = default_proto.to_string();
-        let entries = tauri::async_runtime::spawn_blocking(move || {
+        let mut entries = tauri::async_runtime::spawn_blocking(move || {
             extract_proxies(&text, SUBSCRIPTION_NEW_MAX, &proto)
         })
         .await
         .unwrap_or_default();
         let found = entries.len();
+        entries.retain(|e| !points_inside(e, default_proto));
         let room = SUBSCRIPTION_NEW_MAX.saturating_sub(fresh.len());
         let added = new_entries(entries, default_proto, known, room);
         results.push(SubscriptionResult {
@@ -792,6 +806,29 @@ mod tests {
 
     fn urls(m: &AutoMerge) -> Vec<&str> {
         m.items.iter().map(|i| i.url.as_deref().unwrap()).collect()
+    }
+
+    #[test]
+    fn subscriptions_cannot_reach_into_the_local_network() {
+        for line in [
+            "127.0.0.1:7890",
+            "socks5://192.168.1.1:80",
+            "10.0.0.1:3128:user:pass",
+            "localhost:8080",
+            "http://router.local:3128",
+            "[::1]:1080",
+            "socks5://[fe80::1]:1080",
+            "0.0.0.0:3128",
+        ] {
+            assert!(points_inside(line, "http"), "{line}");
+        }
+        for line in [
+            "1.2.3.4:8080",
+            "socks5://proxy.example.com:1080",
+            "8.8.8.8:3128:u:p",
+        ] {
+            assert!(!points_inside(line, "http"), "{line}");
+        }
     }
 
     #[test]

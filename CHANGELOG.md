@@ -35,6 +35,9 @@ All notable changes to ProxPulse. The format follows
 - An answer whose signature fails loses its exit IP, country, city, ASN and IP
   type as well as its anonymity verdict, so forged geo no longer reaches the
   pool, the dispatcher's country filter, DNSBL or the geo cache.
+- Subscriptions can no longer add addresses on this machine or its local
+  network (`127.0.0.1`, `192.168.x.x`, `localhost`, …) to a pool; such lines
+  are skipped. Your own lists are not limited.
 
 ### Added
 
