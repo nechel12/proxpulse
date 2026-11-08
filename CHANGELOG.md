@@ -67,6 +67,11 @@ All notable changes to ProxPulse. The format follows
 
 ### Changed
 
+- The README is half as long and starts with who the app is for and a link to
+  the latest release, with a short FAQ. The check target, deep checks,
+  results table, export, dispatcher, pool API, schedules, webhooks, settings
+  and local data moved to `docs/`, each page in English and Russian; the
+  build dependencies and project structure moved to `CONTRIBUTING.md`.
 - The Info column, with the exit IP, the `?mod`, `?unv`, `?tls` and blocklist
   marks, and the reason a proxy is dead, follows Status instead of being the
   last column, off-screen in the default window. The row number and proxy
