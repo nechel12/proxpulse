@@ -533,7 +533,23 @@ pub(crate) async fn socks_target_host(
     }
 }
 
+/// A connection to `t_host:t_port` through the upstream. `timeout` bounds
+/// each step (DNS, TCP, TLS to the proxy, the SOCKS or CONNECT exchange), and
+/// the whole connection takes at most twice that: a SOCKS5 login took up to
+/// six steps' worth before.
 pub(crate) async fn connect_via(
+    up: &Upstream,
+    t_host: &str,
+    t_port: u16,
+    timeout: Duration,
+) -> std::io::Result<ProxyStream> {
+    match tokio::time::timeout(timeout * 2, connect_via_steps(up, t_host, t_port, timeout)).await {
+        Ok(r) => r,
+        Err(_) => Err(Error::new(ErrorKind::TimedOut, "upstream timeout")),
+    }
+}
+
+async fn connect_via_steps(
     up: &Upstream,
     t_host: &str,
     t_port: u16,

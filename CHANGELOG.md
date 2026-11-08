@@ -207,6 +207,11 @@ All notable changes to ProxPulse. The format follows
   default no longer gives `http://:@host:port` for proxies without a login
   (new `{auth}` placeholder), and its prompt no longer shows placeholders in
   capitals; Copy in the row menu gives the normalized URL, like Export → Copy.
+- A proxy measured alive no longer turns into a dead "timeout" with 0
+  attempts when the deep checks run out of its time: they are skipped (shown
+  as `limit`) and the result stays. A connection through a proxy for the TLS
+  check, the speed test and the dispatcher takes at most twice the timeout as
+  a whole, not one timeout per step.
 - Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
   and the odd releases 23 and 25 were accepted before.
 

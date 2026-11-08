@@ -220,6 +220,17 @@ impl<T> Deep<T> {
 }
 
 /// Resolves once Stop is pressed, so a long phase can be abandoned at once.
+/// A deep stage, skipped (as at a concurrency limit) when the proxy's time
+/// budget runs out before it ends.
+async fn within<T>(
+    deadline: tokio::time::Instant,
+    stage: impl std::future::Future<Output = Deep<T>>,
+) -> Deep<T> {
+    tokio::time::timeout_at(deadline, stage)
+        .await
+        .unwrap_or(Deep::Skipped)
+}
+
 pub(crate) async fn wait_cancelled(flag: &AtomicBool) {
     while !flag.load(Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -389,15 +400,19 @@ async fn check_candidate(
     geo_cache: Arc<HashMap<String, GeoCacheEntry>>,
     cancel: Arc<AtomicBool>,
 ) -> ProxyResult {
-    // absolute ceiling: a single proxy may never outlive the sum of its own timeouts
+    // The budget bounds the deep stages from inside (they are skipped when it
+    // runs out), so a proxy measured alive stays alive. The outer ceiling
+    // is only a safety net for a step that ignores its own timeout.
     let budget = candidate_budget(timeout, repeats, &flags);
+    let deadline = tokio::time::Instant::now() + budget;
     let raw_fb = raw.clone();
     let proto_fb = proto.clone();
     let url_fb = url.clone();
     let mut r = match tokio::time::timeout(
-        budget,
+        budget + timeout,
         check_candidate_inner(
             raw, url, proto, test_url, timeout, repeats, flags, baseline, geo_cache, cancel,
+            deadline,
         ),
     )
     .await
@@ -423,6 +438,7 @@ async fn check_candidate_inner(
     baseline: Arc<Baseline>,
     geo_cache: Arc<HashMap<String, GeoCacheEntry>>,
     cancel: Arc<AtomicBool>,
+    deadline: tokio::time::Instant,
 ) -> ProxyResult {
     // stage 1: fast tcp precheck
     if flags.precheck {
@@ -621,7 +637,7 @@ async fn check_candidate_inner(
         // waiting would eat the per-proxy budget and turn live proxies into
         // timeouts. A skip is reported, so an empty column is explained.
         let (geo_r, anon_r, tamper_r, tls_r) = tokio::join!(
-            async {
+            within(deadline, async {
                 if !need_geo {
                     return Deep::Ran(None);
                 }
@@ -632,8 +648,8 @@ async fn check_candidate_inner(
                     return Deep::Skipped;
                 };
                 Deep::Ran(fetch_geo(&client, flags.ipapi_key.as_deref()).await)
-            },
-            async {
+            }),
+            within(deadline, async {
                 if !want_anon {
                     return Deep::Ran(None);
                 }
@@ -641,8 +657,8 @@ async fn check_candidate_inner(
                     return Deep::Skipped;
                 };
                 Deep::Ran(detect_anonymity(&client, direct_ip.as_deref()).await)
-            },
-            async {
+            }),
+            within(deadline, async {
                 if !want_tamper {
                     return Deep::Ran(None);
                 }
@@ -650,8 +666,8 @@ async fn check_candidate_inner(
                     return Deep::Skipped;
                 };
                 Deep::Ran(detect_tamper(&client, ex_len, ex_hash).await)
-            },
-            async {
+            }),
+            within(deadline, async {
                 if !want_tls {
                     return Deep::Ran(None);
                 }
@@ -661,7 +677,7 @@ async fn check_candidate_inner(
                 Deep::Ran(Some(
                     tls_via_proxy(&url_c, timeout, cert_fp.as_deref()).await,
                 ))
-            },
+            }),
         );
         let mut skipped = Vec::new();
         if let Some(g) = geo_r.value("geo", &mut skipped) {
@@ -681,19 +697,32 @@ async fn check_candidate_inner(
     }
     if let Some(http_url) = flags.judge_http.as_deref() {
         if is_tls_target(&test_url) && !cancel.load(Ordering::Relaxed) {
-            judge_over_http(&client, http_url, &nonce, direct_ip, &baseline, &mut res).await;
+            let asked = judge_over_http(&client, http_url, &nonce, direct_ip, &baseline, &mut res);
+            if tokio::time::timeout_at(deadline, asked).await.is_err() {
+                res.skipped.push("anon".to_string());
+            }
         }
     }
     if !flags.sites.is_empty() && !cancel.load(Ordering::Relaxed) {
         match deep_semaphore(&SITES_SEM).try_acquire() {
-            Ok(_permit) => res.sites = probe_sites(&client, &flags.sites).await,
+            Ok(_permit) => {
+                match tokio::time::timeout_at(deadline, probe_sites(&client, &flags.sites)).await {
+                    Ok(sites) => res.sites = sites,
+                    Err(_) => res.skipped.push("sites".to_string()),
+                }
+            }
             Err(_) => res.skipped.push("sites".to_string()),
         }
     }
     if flags.dnsbl && !cancel.load(Ordering::Relaxed) {
         if let Some(ip) = res.ip.clone() {
             match deep_semaphore(&DNSBL_SEM).try_acquire() {
-                Ok(_permit) => res.dnsbl = crate::dnsbl::check_ip(&ip).await,
+                Ok(_permit) => {
+                    match tokio::time::timeout_at(deadline, crate::dnsbl::check_ip(&ip)).await {
+                        Ok(found) => res.dnsbl = found,
+                        Err(_) => res.skipped.push("dnsbl".to_string()),
+                    }
+                }
                 Err(_) => res.skipped.push("dnsbl".to_string()),
             }
         }
