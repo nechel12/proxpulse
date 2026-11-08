@@ -1,5 +1,5 @@
 use crate::commands::dispatch::DispatchItem;
-use crate::http::{read_body_capped, short_error, BODY_LIMIT_WEBHOOK};
+use crate::http::{read_body_capped, request_error, short_error, BODY_LIMIT_WEBHOOK};
 use crate::netguard::build_guarded_client;
 use crate::{epoch_secs, is_http_url, strip_credentials, WebhookResult};
 use std::collections::{HashMap, HashSet};
@@ -268,7 +268,7 @@ async fn send_webhook_request(
         .body(body)
         .send()
         .await
-        .map_err(|e| short_error(&e.to_string()))?;
+        .map_err(|e| request_error(&e))?;
     let status = r.status();
     let txt = read_body_capped(r, BODY_LIMIT_WEBHOOK)
         .await

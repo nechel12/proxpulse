@@ -2,7 +2,7 @@
 //! the proxy, the TLS handshake and the wait for the first byte.
 
 use crate::commands::check::{BusyGuard, CheckState};
-use crate::http::short_error;
+use crate::http::{io_error, short_error};
 use crate::tls::tls_client_config;
 use crate::transport::{connect_via, parse_upstream_url, Upstream};
 use serde::Serialize;
@@ -83,14 +83,14 @@ async fn download<S: AsyncRead + AsyncWrite + Unpin>(
     let sent = Instant::now();
     s.write_all(req.as_bytes())
         .await
-        .map_err(|e| short_error(&e.to_string()))?;
+        .map_err(|e| io_error(&e))?;
     let mut buf = vec![0u8; 64 * 1024];
     let mut head = Vec::new();
     let (mut body, status, length) = loop {
         let n = tokio::time::timeout(SPEED_TIMEOUT, s.read(&mut buf))
             .await
             .map_err(|_| "timeout".to_string())?
-            .map_err(|e| short_error(&e.to_string()))?;
+            .map_err(|e| io_error(&e))?;
         if n == 0 {
             return Err("connection closed".to_string());
         }
@@ -114,7 +114,7 @@ async fn download<S: AsyncRead + AsyncWrite + Unpin>(
         match tokio::time::timeout(SPEED_TIMEOUT, s.read(&mut buf)).await {
             Ok(Ok(0)) => break,
             Ok(Ok(n)) => body += n as u64,
-            Ok(Err(e)) => return Err(short_error(&e.to_string())),
+            Ok(Err(e)) => return Err(io_error(&e)),
             Err(_) => break,
         }
     }
@@ -158,7 +158,7 @@ async fn measure(proxy: String, url: String, bytes: u64) -> SpeedResult {
     let connector = tokio_rustls::TlsConnector::from(tls_client_config());
     let tls = match tokio::time::timeout(SPEED_TIMEOUT, connector.connect(name, stream)).await {
         Ok(Ok(t)) => t,
-        Ok(Err(e)) => return SpeedResult::failed(&proxy, short_error(&e.to_string())),
+        Ok(Err(e)) => return SpeedResult::failed(&proxy, io_error(&e)),
         Err(_) => return SpeedResult::failed(&proxy, "tls handshake timeout".to_string()),
     };
     result.tls_ms = Some(tls_start.elapsed().as_millis() as u64);

@@ -1,5 +1,5 @@
 use crate::extract::extract_proxies;
-use crate::http::{read_body_capped, short_error, BODY_LIMIT_IMPORT};
+use crate::http::{read_body_capped, request_error, short_error, BODY_LIMIT_IMPORT};
 use crate::netguard::build_guarded_client;
 use serde::Serialize;
 use std::time::Duration;
@@ -46,7 +46,7 @@ pub(crate) async fn fetch_url_text(url: String) -> Result<String, String> {
             .get(current.clone())
             .send()
             .await
-            .map_err(|e| short_error(&e.to_string()))?;
+            .map_err(|e| request_error(&e))?;
         if r.status().is_redirection() {
             let location = r
                 .headers()

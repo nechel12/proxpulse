@@ -22,18 +22,62 @@ pub(crate) fn truncate_utf8(s: &mut String, max: usize) {
     s.truncate(end);
 }
 
-pub(crate) fn short_error(e: &str) -> String {
-    // reqwest format: "error sending request for url (URL): cause".
-    // The URL (often with ?direct_ip=...) only hides the real cause — drop it.
-    let mut s = e.replace('\n', " ");
-    if s.starts_with("error sending request for url (") {
-        if let Some(pos) = s.find("): ") {
-            let after = s[pos + 3..].trim();
-            if !after.is_empty() {
-                s = after.to_string();
-            }
-        }
+/// A short, URL-free description of a failed request. reqwest's own text is
+/// "error sending request for url (URL)": it names the URL, which can carry an
+/// API key, a bot token or the user's IP, and leaves the cause out, which is
+/// only reachable through `source()`.
+pub(crate) fn request_error(e: &reqwest::Error) -> String {
+    if e.is_timeout() {
+        return "timeout".to_string();
     }
+    let mut cause = String::new();
+    let mut source = std::error::Error::source(e);
+    while let Some(s) = source {
+        if let Some(label) = s.downcast_ref::<std::io::Error>().and_then(io_label) {
+            return label.to_string();
+        }
+        if !cause.is_empty() {
+            cause.push_str(": ");
+        }
+        cause.push_str(&s.to_string());
+        source = s.source();
+    }
+    if !cause.is_empty() {
+        return short_error(&cause);
+    }
+    if e.is_redirect() {
+        "redirect error"
+    } else if e.is_connect() {
+        "connect error"
+    } else if e.is_body() || e.is_decode() {
+        "incomplete response"
+    } else {
+        "request error"
+    }
+    .to_string()
+}
+
+/// A socket error by its kind, which does not depend on the OS language
+/// (Windows says "actively refused", localized, for a refused connection).
+pub(crate) fn io_error(e: &std::io::Error) -> String {
+    io_label(e).map_or_else(|| short_error(&e.to_string()), str::to_string)
+}
+
+fn io_label(e: &std::io::Error) -> Option<&'static str> {
+    use std::io::ErrorKind::*;
+    Some(match e.kind() {
+        ConnectionRefused => "connection refused",
+        ConnectionReset | ConnectionAborted | BrokenPipe | UnexpectedEof => "connection reset",
+        TimedOut => "timeout",
+        HostUnreachable | NetworkUnreachable => "network unreachable",
+        _ => return None,
+    })
+}
+
+/// Maps an error text to a short label. Not for reqwest errors, whose text
+/// holds the URL and not the cause: those go through [`request_error`].
+pub(crate) fn short_error(e: &str) -> String {
+    let mut s = e.replace('\n', " ");
     let low = s.to_lowercase();
     if low.contains("timed out")
         || low.contains("timeout")
@@ -42,19 +86,21 @@ pub(crate) fn short_error(e: &str) -> String {
     {
         return "timeout".to_string();
     }
-    if low.contains("proxy authentication") || low.contains("407") {
+    if low.contains("proxy authentication")
+        || low.contains("proxy authorization")
+        || low.contains("407")
+    {
         return "proxy auth required".to_string();
     }
     if low.contains("connection refused") {
         return "connection refused".to_string();
     }
-    if low.contains("failed to lookup")
-        || low.contains("dns")
-        || low.contains("could not resolve")
-        || low.contains("no route to host")
-        || low.contains("network unreachable")
+    if low.contains("failed to lookup") || low.contains("dns") || low.contains("could not resolve")
     {
         return "dns error".to_string();
+    }
+    if low.contains("no route to host") || low.contains("network unreachable") {
+        return "network unreachable".to_string();
     }
     if low.contains("connection closed")
         || low.contains("connection reset")
@@ -70,7 +116,8 @@ pub(crate) fn short_error(e: &str) -> String {
     if low.contains("socks") {
         return "socks error".to_string();
     }
-    if low.contains("proxy") {
+    // "tunnel error: unsuccessful": the proxy refused the CONNECT.
+    if low.contains("proxy") || low.contains("tunnel") {
         return "proxy error".to_string();
     }
     if low.contains("certificate")
@@ -197,7 +244,7 @@ pub(crate) async fn read_body_capped(
         }
     }
     let mut body: Vec<u8> = Vec::new();
-    while let Some(chunk) = r.chunk().await.map_err(|e| short_error(&e.to_string()))? {
+    while let Some(chunk) = r.chunk().await.map_err(|e| request_error(&e))? {
         if body.len().saturating_add(chunk.len()) > max {
             return Err("response too big".to_string());
         }

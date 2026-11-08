@@ -346,7 +346,7 @@ async fn check_candidate_inner(
             let ok = matches!(r, Ok(Ok(_)));
             if !ok {
                 let err = match r {
-                    Ok(Err(e)) => short_error(&e.to_string()),
+                    Ok(Err(e)) => io_error(&e),
                     _ => "timeout".to_string(),
                 };
                 return dead_result(raw, proto, 0, err);
@@ -399,7 +399,7 @@ async fn check_candidate_inner(
                 }
             }
             Err(e) => {
-                last_err = Some(short_error(&e.to_string()));
+                last_err = Some(request_error(&e));
             }
         }
     }
@@ -681,7 +681,7 @@ pub(crate) async fn probe_sites(client: &reqwest::Client, sites: &[String]) -> V
                     ok: false,
                     ms: None,
                     status: None,
-                    error: Some(short_error(&e.to_string())),
+                    error: Some(request_error(&e)),
                 },
             };
             (i, probe)
@@ -1089,7 +1089,7 @@ pub(crate) async fn check_direct(test_url: String, timeout_ms: u64) -> Result<u6
         .get(test_url)
         .send()
         .await
-        .map_err(|e| short_error(&e.to_string()))?;
+        .map_err(|e| request_error(&e))?;
     if !r.status().is_success() {
         return Err(format!("http {}", r.status().as_u16()));
     }

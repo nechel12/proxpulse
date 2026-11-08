@@ -18,12 +18,22 @@ All notable changes to ProxPulse. The format follows
   instead of on your machine, which leaked every checked host name to your DNS
   resolver. A SOCKS5 server that refuses host names now shows as dead, as it
   would fail in the dispatcher, and the ping includes the proxy's own lookup.
+- Error texts no longer contain the requested URL, which could hold the ip-api
+  Pro key, a Telegram bot token, a subscription URL or your own IP, in the
+  table, CSV exports, the status line and notifications.
 
 ### Added
 
 - Answers whose signature could not be checked, because the judge's key could
   not be fetched, are marked `?unv`, with `unverified` in exports.
 - A note under the status line when the judge's key came over plain HTTP.
+
+### Fixed
+
+- Errors say what happened again (`timeout`, `connection refused`,
+  `proxy auth required`): with reqwest 0.13 the cause was lost, so with the
+  default judge every failure read "proxy error". A refused connection is
+  recognised on non-English Windows too.
 
 ## [0.6.1] — 2026-11-07
 

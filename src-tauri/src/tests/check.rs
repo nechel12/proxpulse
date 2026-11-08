@@ -119,26 +119,72 @@ fn tls_config_builds() {
 
 #[test]
 fn short_error_mapping() {
-    // reqwest URL prefix is stripped, the cause is mapped
+    // Texts of the causes reqwest and hyper-util report through source().
+    assert_eq!(short_error("operation timed out"), "timeout");
     assert_eq!(
-            short_error("error sending request for url (https://proxycheck.lmtunnel.com/judge?direct_ip=1.2.3.4): operation timed out"),
-            "timeout"
-        );
-    assert_eq!(
-        short_error(
-            "error sending request for url (https://example.com/): SOCKS5 connection refused"
-        ),
+        short_error("SOCKS5 connection refused"),
         "connection refused"
     );
     assert_eq!(
-        short_error("error sending request for url (https://example.com/): socks connect failed"),
+        short_error("SOCKS error: io error during SOCKS handshake"),
         "socks error"
     );
     assert_eq!(
-        short_error("error sending request for url (https://example.com/)"),
-        "error sending request for url (https://example.com/)"
+        short_error("tunnel error: proxy authorization required"),
+        "proxy auth required"
     );
+    assert_eq!(short_error("tunnel error: unsuccessful"), "proxy error");
     assert!(short_error(&"x".repeat(500)).len() <= 160);
+}
+
+/// A URL with a secret in it, as ip-api Pro, Telegram and the judge use.
+const SECRET_URL_PATH: &str =
+    "/bot123456:SECRET-token/sendMessage?key=SECRET&direct_ip=203.0.113.9";
+
+#[tokio::test]
+async fn request_errors_name_the_cause_not_the_url() {
+    // Nothing listens on a port that was just freed: the connection is refused.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let client = build_client(None, Duration::from_secs(5), true).unwrap();
+    let err = client
+        .get(format!("http://127.0.0.1:{port}{SECRET_URL_PATH}"))
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(request_error(&err), "connection refused");
+
+    // A server that accepts and never answers: the client timeout.
+    let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = silent.local_addr().unwrap();
+    let hold = tokio::spawn(async move {
+        let _conn = silent.accept().await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    });
+    let client = build_client(None, Duration::from_millis(300), true).unwrap();
+    let err = client
+        .get(format!("http://{addr}{SECRET_URL_PATH}"))
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(request_error(&err), "timeout");
+    assert!(!request_error(&err).contains("SECRET"));
+    hold.abort();
+}
+
+#[test]
+fn socket_errors_map_by_kind_not_by_text() {
+    // Windows words a refused connection differently, and localizes it.
+    let refused = Error::new(ErrorKind::ConnectionRefused, "Подключение не установлено");
+    assert_eq!(io_error(&refused), "connection refused");
+    assert_eq!(io_error(&Error::new(ErrorKind::TimedOut, "x")), "timeout");
+    assert_eq!(
+        io_error(&Error::new(ErrorKind::BrokenPipe, "x")),
+        "connection reset"
+    );
 }
 
 #[test]
