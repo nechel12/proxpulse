@@ -153,6 +153,9 @@ All notable changes to ProxPulse. The format follows
 - A fractional number in the check settings (2.5 threads) no longer makes
   every proxy dead with a raw error, and 0 no longer silently becomes the
   default: values are rounded and clamped, and the field shows what is used.
+- Esc closes an open menu first and does nothing while you type in a field;
+  before, closing the export menu with Esc stopped the check, which cannot be
+  resumed.
 
 ## [0.6.1] — 2026-11-07
 

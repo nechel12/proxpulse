@@ -1434,7 +1434,18 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       const b = $("btn-start") as HTMLButtonElement;
       if (!b.disabled) b.click();
-    } else if (e.key === "Escape" && onCheck && (running || autoStatus.running)) {
+    } else if (e.key === "Escape") {
+      // Esc closes an open menu first; typing in a field never stops a run,
+      // which cannot be resumed and whose results Start would replace.
+      const open = document.querySelectorAll<HTMLElement>(".menu:not(.hidden)");
+      if (open.length > 0) {
+        e.preventDefault();
+        open.forEach((m) => m.classList.add("hidden"));
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (!onCheck || !(running || autoStatus.running)) return;
       e.preventDefault();
       const b = $("btn-stop") as HTMLButtonElement;
       if (!b.disabled) b.click();
