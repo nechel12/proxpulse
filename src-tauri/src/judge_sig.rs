@@ -235,6 +235,9 @@ pub(crate) fn judge_tamper(
     let verdict = match check {
         SignatureCheck::Valid => "ok",
         SignatureCheck::Invalid => "modified",
+        // The direct answer had a hash and this one has none: something else
+        // answered in the judge's place.
+        SignatureCheck::NotSigned if base_sha.is_some() && proxy_sha.is_none() => "modified",
         SignatureCheck::NotSigned => {
             if same_hash? {
                 "ok"

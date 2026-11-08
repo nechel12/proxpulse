@@ -129,7 +129,12 @@ The **public server** mode requests a ready-made endpoint or a custom URL
 through every proxy: `google`/`cloudflare` `generate_204` (fastest),
 `api.ipify.org` and `httpbin.org/ip` (show the exit IP), `http://ip-api.com/json`
 (exit IP and geo in one request), `example.com`, or **Custom URL…**. The URL
-that will actually be requested is shown under the list.
+that will actually be requested is shown under the list. A proxy counts as
+alive only when a known address gives its own answer (`204` for
+`generate_204`, the JSON of ip-api, httpbin or the judge, the address from
+ipify, the example.com page), so a captive portal or a server that answers 200
+to everything is dead; a custom URL is taken on any 2xx. A judge's own "busy"
+answer (429, 503) still shows the proxy works, without a verdict.
 
 The **ProxPulse Judge** mode uses a [ProxPulse Judge](https://github.com/nechel12/proxpulse-judge)
 instance: the built-in public one (`proxycheck.lmtunnel.com`) or your own
@@ -210,8 +215,9 @@ allow only CONNECT to port 443 cannot be classified this way.
 
 **Site access** requests the chosen sites (Google, YouTube, Telegram,
 Discord, ChatGPT or your own hosts and URLs, up to 8) through every alive
-proxy, also in Judge mode. Any HTTP answer counts as reachable; the **Sites**
-column shows how many opened and the tooltip lists each with its time.
+proxy, also in Judge mode. A normal answer (2xx or a redirect) counts as
+reachable, a 403 or 451 does not; the **Sites** column shows how many opened
+and the tooltip lists each with its time or code.
 
 **Blocklists (DNSBL)**, off by default (**IP blocklists (DNSBL)** under
 **Site access**), look the exit IP up in Spamhaus ZEN, Barracuda, SpamCop and

@@ -243,6 +243,90 @@ pub(crate) fn is_tls_target(url: &str) -> bool {
 /// Whether the proxy could see a judge request and alter its answer. A
 /// redirect to HTTPS (some hosts force it) hides them again, so the final URL
 /// counts as well as the requested one.
+/// What a check URL must answer for the proxy to count as working. A known
+/// address has a known answer: a captive portal, a login page or any web
+/// server that answers 200 to everything is not a working proxy. A custom
+/// address is taken on any 2xx.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Expect {
+    AnySuccess,
+    /// `/generate_204`: exactly 204.
+    NoContent,
+    /// A judge: its JSON answer.
+    Judge,
+    /// ip-api, httpbin and similar: a JSON object with one of these keys.
+    JsonWith(&'static [&'static str]),
+    /// api.ipify.org: the bare address.
+    Address,
+    /// example.com: its page.
+    ExamplePage,
+}
+
+impl Expect {
+    pub(crate) fn for_url(test_url: &str, judge: bool) -> Self {
+        let lower = test_url.to_ascii_lowercase();
+        let rest = lower.split_once("://").map_or(lower.as_str(), |(_, r)| r);
+        let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let host = host.rsplit('@').next().unwrap_or(host);
+        let host = host.split(':').next().unwrap_or(host);
+        let path = path
+            .split(['?', '#'])
+            .next()
+            .unwrap_or("")
+            .trim_end_matches('/');
+        if path.ends_with("generate_204") {
+            Self::NoContent
+        } else if judge {
+            Self::Judge
+        } else if host == "ip-api.com" || host == "pro.ip-api.com" {
+            Self::JsonWith(&["status", "query"])
+        } else if host == "httpbin.org" && path == "ip" {
+            Self::JsonWith(&["origin"])
+        } else if host == "api.ipify.org" && path.is_empty() {
+            Self::Address
+        } else if host == "example.com" || host == "www.example.com" {
+            Self::ExamplePage
+        } else {
+            Self::AnySuccess
+        }
+    }
+
+    pub(crate) fn status_ok(self, status: u16) -> bool {
+        match self {
+            Self::NoContent => status == 204,
+            _ => (200..300).contains(&status),
+        }
+    }
+
+    /// Whether the body must be read and checked: a read error then fails.
+    pub(crate) fn checks_body(self) -> bool {
+        !matches!(self, Self::AnySuccess | Self::NoContent)
+    }
+
+    pub(crate) fn body_ok(self, body: &str) -> bool {
+        let json = || serde_json::from_str::<serde_json::Value>(body).ok();
+        match self {
+            Self::AnySuccess | Self::NoContent => true,
+            Self::Judge => json().is_some_and(|v| {
+                ["anonymity", "content_sha256", "ip"]
+                    .iter()
+                    .any(|k| v.get(k).is_some())
+            }),
+            Self::JsonWith(keys) => json().is_some_and(|v| keys.iter().any(|k| v.get(k).is_some())),
+            Self::Address => looks_like_ip(body.trim()),
+            Self::ExamplePage => body.contains("Example Domain"),
+        }
+    }
+}
+
+/// A judge's own "busy" answer (429 rate limited, 503 busy, 504 timeout):
+/// the proxy delivered it, so the proxy works; only the verdict is missing.
+pub(crate) fn judge_busy(status: u16, body: &str) -> bool {
+    matches!(status, 429 | 503 | 504)
+        && serde_json::from_str::<serde_json::Value>(body)
+            .is_ok_and(|v| v.get("error").is_some_and(|e| e.is_string()))
+}
+
 pub(crate) fn answered_in_clear(requested: &str, final_url: &str) -> bool {
     !is_tls_target(requested) && !is_tls_target(final_url)
 }
@@ -378,6 +462,7 @@ async fn check_candidate_inner(
     let mut first_sig: Option<String> = None;
     let mut first_in_clear = false;
     let mut last_err: Option<String> = None;
+    let expect = Expect::for_url(&test_url, flags.judge);
 
     for _ in 0..repeats {
         if cancel.load(Ordering::Relaxed) {
@@ -387,19 +472,51 @@ async fn check_candidate_inner(
         let start = Instant::now();
         match client.get(&req_url).send().await {
             Ok(r) => {
-                let status = r.status();
+                let status = r.status().as_u16();
                 let ms = start.elapsed().as_millis() as u64;
-                if status.is_success() {
-                    latencies.push(ms);
-                    if first_body.is_none() {
-                        first_sig = signature_header(&r);
-                        first_in_clear = answered_in_clear(&req_url, r.url().as_str());
-                        first_body = read_body_capped(r, BODY_LIMIT_PAGE).await.ok();
+                if flags.judge && matches!(status, 429 | 503 | 504) {
+                    // The judge's own "busy" answer came through the proxy.
+                    let body = read_body_capped(r, BODY_LIMIT_SMALL)
+                        .await
+                        .unwrap_or_default();
+                    if judge_busy(status, &body) {
+                        latencies.push(ms);
+                        last_err = None;
+                    } else {
+                        last_err = Some(format!("http {status}"));
                     }
-                    last_err = None;
-                } else {
-                    last_err = Some(format!("http {}", status.as_u16()));
+                    continue;
                 }
+                if !(200..300).contains(&status) {
+                    last_err = Some(format!("http {status}"));
+                    continue;
+                }
+                if !expect.status_ok(status) {
+                    last_err = Some(format!("unexpected answer (http {status})"));
+                    continue;
+                }
+                if first_body.is_none() {
+                    let sig = signature_header(&r);
+                    let in_clear = answered_in_clear(&req_url, r.url().as_str());
+                    match read_body_capped(r, BODY_LIMIT_PAGE).await {
+                        Ok(b) if expect.body_ok(&b) => {
+                            first_sig = sig;
+                            first_in_clear = in_clear;
+                            first_body = Some(b);
+                        }
+                        Ok(_) => {
+                            last_err = Some("unexpected answer".to_string());
+                            continue;
+                        }
+                        Err(e) if expect.checks_body() => {
+                            last_err = Some(e);
+                            continue;
+                        }
+                        Err(_) => {}
+                    }
+                }
+                latencies.push(ms);
+                last_err = None;
             }
             Err(e) => {
                 last_err = Some(request_error(&e));
@@ -718,12 +835,21 @@ pub(crate) async fn probe_sites(client: &reqwest::Client, sites: &[String]) -> V
         set.spawn(async move {
             let start = Instant::now();
             let probe = match client.get(&site).send().await {
-                Ok(r) => SiteProbe {
+                // A 403 or 451 is the site, or the proxy, refusing: only a
+                // normal answer (2xx, or a redirect) means it opens.
+                Ok(r) if r.status().as_u16() < 400 => SiteProbe {
                     url: site,
                     ok: true,
                     ms: Some(start.elapsed().as_millis() as u64),
                     status: Some(r.status().as_u16()),
                     error: None,
+                },
+                Ok(r) => SiteProbe {
+                    url: site,
+                    ok: false,
+                    ms: Some(start.elapsed().as_millis() as u64),
+                    status: Some(r.status().as_u16()),
+                    error: Some(format!("http {}", r.status().as_u16())),
                 },
                 Err(e) => SiteProbe {
                     url: site,

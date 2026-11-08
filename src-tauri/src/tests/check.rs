@@ -162,6 +162,54 @@ async fn bytes_that_came_with_the_headers_do_not_inflate_the_speed() {
 }
 
 #[test]
+fn known_check_addresses_must_give_their_own_answer() {
+    use crate::commands::check::{judge_busy, Expect};
+    let e = Expect::for_url;
+    assert_eq!(
+        e("https://www.google.com/generate_204", false),
+        Expect::NoContent
+    );
+    assert_eq!(e("https://j.example/generate_204", true), Expect::NoContent);
+    assert_eq!(
+        e("http://proxycheck.lmtunnel.com/judge", true),
+        Expect::Judge
+    );
+    assert_eq!(e("https://my.site/page", false), Expect::AnySuccess);
+    // A portal answering 200 to everything is not a working proxy.
+    assert!(!Expect::NoContent.status_ok(200));
+    assert!(Expect::NoContent.status_ok(204));
+    let portal = "<html>Please log in to the Wi-Fi</html>";
+    for url in [
+        "http://ip-api.com/json",
+        "https://httpbin.org/ip",
+        "https://api.ipify.org",
+        "http://example.com",
+    ] {
+        assert!(!e(url, false).body_ok(portal), "{url}");
+    }
+    assert!(!Expect::Judge.body_ok(portal));
+    assert!(e("http://ip-api.com/json", false).body_ok(r#"{"status":"success","query":"1.2.3.4"}"#));
+    assert!(e("https://httpbin.org/ip", false).body_ok(r#"{"origin":"1.2.3.4"}"#));
+    assert!(e("https://api.ipify.org", false).body_ok("1.2.3.4\n"));
+    assert!(Expect::Judge.body_ok(r#"{"ip":"1.2.3.4","anonymity":"elite"}"#));
+    // The judge's own "busy" answers mean the proxy delivered them.
+    assert!(judge_busy(429, r#"{"error":"rate limited"}"#));
+    assert!(judge_busy(503, r#"{"error":"busy"}"#));
+    assert!(!judge_busy(503, "<html>Service Unavailable</html>"));
+    assert!(!judge_busy(502, r#"{"error":"bad gateway"}"#));
+}
+
+#[test]
+fn a_judge_answer_without_its_hash_is_modified() {
+    use crate::judge_sig::{judge_tamper, SignatureCheck};
+    assert_eq!(
+        judge_tamper(SignatureCheck::NotSigned, Some("abc"), None).as_deref(),
+        Some("modified")
+    );
+    assert_eq!(judge_tamper(SignatureCheck::NotSigned, None, None), None);
+}
+
+#[test]
 fn short_error_mapping() {
     // Texts of the causes reqwest and hyper-util report through source().
     assert_eq!(short_error("operation timed out"), "timeout");

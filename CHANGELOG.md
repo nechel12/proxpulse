@@ -122,6 +122,14 @@ All notable changes to ProxPulse. The format follows
 - SOCKS4 proxies work on machines whose resolver lists an IPv6 address first:
   the TLS check, the speed test and the dispatcher took the first address,
   which SOCKS4 cannot carry, and failed.
+- A proxy counts as alive only when a known check address gives its own
+  answer: `204` for `generate_204`, the JSON of ip-api, httpbin or the judge,
+  the address from ipify, the example.com page. A captive portal or a server
+  that answers 200 to everything was alive before, and so was an answer whose
+  body failed to arrive. A judge's own "busy" answer (429, 503, 504) no longer
+  counts against the proxy, which delivered it; a judge answer without the
+  content hash the direct one had is `?mod`; and a site answering 403 or 451
+  no longer counts as open.
 
 ## [0.6.1] — 2026-11-07
 
