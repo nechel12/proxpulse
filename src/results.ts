@@ -343,74 +343,92 @@ export class ResultsView {
     $("f-site")?.classList.toggle("hidden", opts.site.length === 0);
   }
 
-  private sitesCell(r: ProxyResult): string {
-    const sum = siteSummary(r);
-    if (!sum) {
-      const skipped = r.alive && (r.skipped ?? []).includes("sites");
-      return skipped
-        ? `<td><span class="dim" title="${escapeHtml(this.t("skipped_hint"))}">${escapeHtml(this.t("skipped_short"))}</span></td>`
-        : "<td>—</td>";
-    }
-    const title = (r.sites ?? [])
-      .map((s) => `${s.ok ? "✓" : "✗"} ${siteHost(s.url)} ${s.ok ? `${s.ms ?? "?"} ms${s.status ? ` (${s.status})` : ""}` : s.error ?? ""}`)
-      .join("\n");
-    const cls = sum.ok === sum.total ? "ping-fast" : sum.ok === 0 ? "ping-slow" : "ping-mid";
-    return `<td class="${cls}" title="${escapeHtml(title)}">${sum.ok}/${sum.total}</td>`;
-  }
-
-  private speedCell(r: ProxyResult): string {
-    const s = r.speed;
-    if (!s) return "<td>—</td>";
-    const ms = (v: number | null) => (v == null ? "?" : `${v}`);
-    const title = s.ok
-      ? this.t("speed_t", { c: ms(s.connectMs), tls: ms(s.tlsMs), fb: ms(s.ttfbMs), mb: (s.bytes / 1e6).toFixed(1) })
-      : s.error ?? "";
-    return `<td class="${s.ok ? "" : "ping-slow"}" title="${escapeHtml(title)}">${escapeHtml(speedLabel(s))}</td>`;
-  }
-
   private row(r: ProxyResult, i: number): HTMLTableRowElement {
-    const t = this.t;
     const tr = document.createElement("tr");
     tr.dataset.index = String(i);
     if (this.selected.has(r.proxy)) {
       tr.className = "selected";
       tr.setAttribute("aria-selected", "true");
     }
-    const pill = r.alive ? `<span class="pill alive">${t("pill_alive")}</span>` : `<span class="pill dead">${t("pill_dead")}</span>`;
-    const ping = r.latency_ms == null ? "-" : `${r.latency_ms} ms`;
-    const an = anonShort(r.anonymity);
-    const tls = tlsShort(r.tls);
-    const marks = [
-      r.tamper === "modified" ? `<span class="anon-trans" title="${escapeHtml(t("tamper_modified_t"))}">?mod</span>` : "",
-      r.tamper === "unverified" ? `<span class="anon-anon" title="${escapeHtml(t("tamper_unverified_t"))}">?unv</span>` : "",
-      r.tls === "modified" ? `<span class="anon-trans" title="${escapeHtml(t("tls_modified_t"))}">?tls</span>` : "",
-      r.dnsbl?.listed.length
-        ? `<span class="anon-trans" title="${escapeHtml(t("dnsbl_listed_t", { lists: r.dnsbl.listed.join(", ") }))}">bl ${r.dnsbl.listed.length}</span>`
-        : "",
-    ].join(" ");
-    // Several "different" proxies often leave through one exit IP.
-    const same = r.ip ? this.shared.get(r.ip) ?? 0 : 0;
-    const shared = same > 1 ? ` <span class="geo-tag" title="${escapeHtml(t("same_ip_t", { n: same }))}">×${same}</span>` : "";
-    const info = r.alive ? `${escapeHtml(r.ip ?? "ok")}${shared} ${marks}` : escapeHtml(errorText(r.error ?? "fail", t));
-    const infoTitle = escapeHtml(rowTitle(r));
-    // An empty cell for a stage skipped at its limit gets an explanation
-    // instead of looking like "no data".
-    const skipped = new Set(r.skipped ?? []);
-    const cell = (stage: string, txt: string) =>
-      r.alive && txt === "—" && skipped.has(stage)
-        ? `<span class="dim" title="${escapeHtml(t("skipped_hint"))}">${escapeHtml(t("skipped_short"))}</span>`
-        : escapeHtml(txt);
-    tr.innerHTML =
-      `<td>${i + 1}</td><td>${escapeHtml(this.hideCreds ? maskProxy(r.proxy, r.url) : r.proxy)}</td><td>${escapeHtml(r.proto)}</td>` +
-      `<td>${pill}</td><td class="cell-err" title="${infoTitle}">${info}</td>` +
-      `<td class="${pingClass(r.latency_ms)}">${ping}</td>` +
-      `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.cls}">${cell("anon", an.txt)}</td>` +
-      `<td class="cell-geo" title="${infoTitle}">${cell("geo", geoShort(r))}</td>` +
-      `<td>${escapeHtml(r.ip_type ?? "-")}</td>` +
-      `<td class="${tls.cls}" title="${infoTitle}">${cell("tls", tls.txt)}</td>` +
-      this.sitesCell(r) +
-      this.speedCell(r) +
-      `<td class="${uptimeClass(r.history)}" title="${escapeHtml(historyTitle(r.history, t, this.locale))}">${uptimeLabel(r.history)}</td>`;
+    tr.innerHTML = rowCells(r, i, { t: this.t, locale: this.locale, hideCreds: this.hideCreds, shared: this.shared });
     return tr;
   }
+}
+
+function sitesCell(r: ProxyResult, t: Translate): string {
+  const sum = siteSummary(r);
+  if (!sum) {
+    const skipped = r.alive && (r.skipped ?? []).includes("sites");
+    return skipped
+      ? `<td><span class="dim" title="${escapeHtml(t("skipped_hint"))}">${escapeHtml(t("skipped_short"))}</span></td>`
+      : "<td>—</td>";
+  }
+  const title = (r.sites ?? [])
+    .map((s) => `${s.ok ? "✓" : "✗"} ${siteHost(s.url)} ${s.ok ? `${s.ms ?? "?"} ms${s.status ? ` (${s.status})` : ""}` : s.error ?? ""}`)
+    .join("\n");
+  const cls = sum.ok === sum.total ? "ping-fast" : sum.ok === 0 ? "ping-slow" : "ping-mid";
+  return `<td class="${cls}" title="${escapeHtml(title)}">${sum.ok}/${sum.total}</td>`;
+}
+
+function speedCell(r: ProxyResult, t: Translate): string {
+  const s = r.speed;
+  if (!s) return "<td>—</td>";
+  const ms = (v: number | null) => (v == null ? "?" : `${v}`);
+  const title = s.ok
+    ? t("speed_t", { c: ms(s.connectMs), tls: ms(s.tlsMs), fb: ms(s.ttfbMs), mb: (s.bytes / 1e6).toFixed(1) })
+    : s.error ?? "";
+  return `<td class="${s.ok ? "" : "ping-slow"}" title="${escapeHtml(title)}">${escapeHtml(speedLabel(s))}</td>`;
+}
+
+/** What a row's cells depend on besides the result itself. */
+export type RowContext = {
+  t: Translate;
+  locale: string;
+  hideCreds: boolean;
+  /** How many results leave through each exit IP. */
+  shared: Map<string, number>;
+};
+
+/**
+ * The cells of one result row as HTML. Everything a proxy or the network
+ * could have put into the result is escaped.
+ */
+export function rowCells(r: ProxyResult, i: number, c: RowContext): string {
+  const t = c.t;
+  const pill = r.alive ? `<span class="pill alive">${t("pill_alive")}</span>` : `<span class="pill dead">${t("pill_dead")}</span>`;
+  const ping = r.latency_ms == null ? "-" : `${r.latency_ms} ms`;
+  const an = anonShort(r.anonymity);
+  const tls = tlsShort(r.tls);
+  const marks = [
+    r.tamper === "modified" ? `<span class="anon-trans" title="${escapeHtml(t("tamper_modified_t"))}">?mod</span>` : "",
+    r.tamper === "unverified" ? `<span class="anon-anon" title="${escapeHtml(t("tamper_unverified_t"))}">?unv</span>` : "",
+    r.tls === "modified" ? `<span class="anon-trans" title="${escapeHtml(t("tls_modified_t"))}">?tls</span>` : "",
+    r.dnsbl?.listed.length
+      ? `<span class="anon-trans" title="${escapeHtml(t("dnsbl_listed_t", { lists: r.dnsbl.listed.join(", ") }))}">bl ${r.dnsbl.listed.length}</span>`
+      : "",
+  ].join(" ");
+  // Several "different" proxies often leave through one exit IP.
+  const same = r.ip ? c.shared.get(r.ip) ?? 0 : 0;
+  const shared = same > 1 ? ` <span class="geo-tag" title="${escapeHtml(t("same_ip_t", { n: same }))}">×${same}</span>` : "";
+  const info = r.alive ? `${escapeHtml(r.ip ?? "ok")}${shared} ${marks}` : escapeHtml(errorText(r.error ?? "fail", t));
+  const infoTitle = escapeHtml(rowTitle(r));
+  // An empty cell for a stage skipped at its limit gets an explanation
+  // instead of looking like "no data".
+  const skipped = new Set(r.skipped ?? []);
+  const cell = (stage: string, txt: string) =>
+    r.alive && txt === "—" && skipped.has(stage)
+      ? `<span class="dim" title="${escapeHtml(t("skipped_hint"))}">${escapeHtml(t("skipped_short"))}</span>`
+      : escapeHtml(txt);
+  return (
+    `<td>${i + 1}</td><td>${escapeHtml(c.hideCreds ? maskProxy(r.proxy, r.url) : r.proxy)}</td><td>${escapeHtml(r.proto)}</td>` +
+    `<td>${pill}</td><td class="cell-err" title="${infoTitle}">${info}</td>` +
+    `<td class="${pingClass(r.latency_ms)}">${ping}</td>` +
+    `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.cls}">${cell("anon", an.txt)}</td>` +
+    `<td class="cell-geo" title="${infoTitle}">${cell("geo", geoShort(r))}</td>` +
+    `<td>${escapeHtml(r.ip_type ?? "-")}</td>` +
+    `<td class="${tls.cls}" title="${infoTitle}">${cell("tls", tls.txt)}</td>` +
+    sitesCell(r, t) +
+    speedCell(r, t) +
+    `<td class="${uptimeClass(r.history)}" title="${escapeHtml(historyTitle(r.history, t, c.locale))}">${uptimeLabel(r.history)}</td>`
+  );
 }

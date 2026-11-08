@@ -90,10 +90,20 @@ fn history_file_round_trip() {
         "proxpulse-test-{}-history.json",
         std::process::id()
     ));
+    // Written the way the app writes it: a temporary file renamed over the
+    // old one, which must also work when the file already exists.
+    let write = |map: &HashMap<String, HistEntry>| {
+        crate::commands::dispatch::write_private_file(&path, &serde_json::to_vec(map).unwrap())
+            .unwrap();
+    };
     let mut map = HashMap::new();
     record(&mut map, &[alive("http://a:80", 50)], 5);
-    std::fs::write(&path, serde_json::to_vec(&map).unwrap()).unwrap();
+    write(&map);
     assert_eq!(read_history_file(&path), map);
+    record(&mut map, &[alive("http://b:80", 70)], 6);
+    write(&map);
+    assert_eq!(read_history_file(&path), map);
+    assert!(!path.with_extension("json.tmp").exists());
     std::fs::write(&path, b"not json").unwrap();
     assert!(read_history_file(&path).is_empty());
     let _ = std::fs::remove_file(&path);

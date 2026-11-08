@@ -7,4 +7,5 @@ mod parser;
 mod pool_api;
 mod pools;
 mod prefs;
+mod stubs;
 mod transport;

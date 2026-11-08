@@ -211,21 +211,10 @@ fn a_judge_answer_without_its_hash_is_modified() {
 
 #[test]
 fn short_error_mapping() {
-    // Texts of the causes reqwest and hyper-util report through source().
-    assert_eq!(short_error("operation timed out"), "timeout");
-    assert_eq!(
-        short_error("SOCKS5 connection refused"),
-        "connection refused"
-    );
-    assert_eq!(
-        short_error("SOCKS error: io error during SOCKS handshake"),
-        "socks error"
-    );
-    assert_eq!(
-        short_error("tunnel error: proxy authorization required"),
-        "proxy auth required"
-    );
-    assert_eq!(short_error("tunnel error: unsuccessful"), "proxy error");
+    // reqwest's errors are checked against real failures in tests/stubs.rs.
+    // Plain texts still come here: tokio's timeout and failed tasks.
+    assert_eq!(short_error("deadline has elapsed"), "timeout");
+    assert_eq!(short_error("task 7 panicked"), "task 7 panicked");
     assert!(short_error(&"x".repeat(500)).len() <= 160);
 }
 
