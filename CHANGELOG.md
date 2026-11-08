@@ -218,6 +218,9 @@ All notable changes to ProxPulse. The format follows
   in the dispatcher's "fastest" order; sticky sessions find hosts written in
   capitals; export files are written whole and owner-only; and a portable
   copy run next to an installed one no longer offers the installer.
+- The built-in updater downloads updates from `github.com` instead of
+  `api.github.com`, which allows 60 requests an hour per IP without a token:
+  many users behind one address could not update.
 - Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
   and the odd releases 23 and 25 were accepted before.
 

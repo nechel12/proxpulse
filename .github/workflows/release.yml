@@ -48,7 +48,8 @@ jobs:
   verify:
     needs: tag
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    # 0.6.1 took 28 minutes of 30.
+    timeout-minutes: 45
     permissions:
       contents: read
       checks: write
@@ -70,6 +71,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
+          # Read main's cache; a tag's own (about 1 GB) would never be read.
+          save-if: false
       - run: npm ci
       - run: npm run build
       - run: npm test
@@ -77,8 +80,8 @@ jobs:
       - run: npm audit --omit=dev
       - run: npm run check:versions
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -270,7 +273,8 @@ jobs:
       - name: Upload the signatures and latest.json
         run: |
           set -euo pipefail
-          node scripts/updater-manifest.mjs "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/assets.json" updater > latest.json
+          node scripts/updater-manifest.mjs "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/assets.json" updater \
+            "https://github.com/$GH_REPO/releases/download/$GITHUB_REF_NAME" > latest.json
           gh release upload "$GITHUB_REF_NAME" updater/*.sig latest.json --clobber
 
   # Replaces the placeholder body with the changelog section and an exact

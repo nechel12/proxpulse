@@ -1,7 +1,7 @@
 // latest.json for the built-in updater, made by the release workflow's `sign`
 // job after it signs the updater artifacts (the platform jobs build without the
 // signing key, so tauri-action does not write it).
-// Usage: node scripts/updater-manifest.mjs <X.Y.Z> <assets.json> <sig dir>
+// Usage: node scripts/updater-manifest.mjs <X.Y.Z> <assets.json> <sig dir> <download base>
 //        node scripts/updater-manifest.mjs --artifacts <assets.json>
 // assets.json is the release's asset list from the GitHub API; --artifacts
 // prints the names of the files to sign, one per line.
@@ -27,16 +27,20 @@ export function updaterArtifacts(names) {
 }
 
 /**
- * The manifest. `assets` are `{name, url}` from the API: the API URL of an
- * asset stays the same when the draft is published, its download URL does not.
+ * The manifest. `base` is the release's download folder,
+ * `https://github.com/<repo>/releases/download/<tag>`: the address the files
+ * will have once the draft is published (a draft's own download URLs change
+ * then). The API's asset URLs would also work, but api.github.com allows 60
+ * requests an hour per IP without a token, which users behind one NAT share.
  * `signature(name)` returns the `.sig` file's content.
  */
-export function updaterManifest(version, assets, signature, pubDate = new Date().toISOString()) {
+export function updaterManifest(version, assets, signature, base, pubDate = new Date().toISOString()) {
   const platforms = {};
   for (const asset of assets) {
     const match = PLATFORMS.find(([end]) => asset.name.endsWith(end));
     if (!match) continue;
-    const entry = { signature: signature(asset.name).trim(), url: asset.url };
+    const url = `${base.replace(/\/+$/, "")}/${encodeURIComponent(asset.name)}`;
+    const entry = { signature: signature(asset.name).trim(), url };
     for (const platform of match[1]) platforms[platform] = entry;
   }
   return {
@@ -48,18 +52,18 @@ export function updaterManifest(version, assets, signature, pubDate = new Date()
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [version, assetsFile, sigDir] = process.argv.slice(2);
+  const [version, assetsFile, sigDir, base] = process.argv.slice(2);
   if (version === "--artifacts" && assetsFile) {
     const names = JSON.parse(readFileSync(assetsFile, "utf8")).map((a) => a.name);
     process.stdout.write(updaterArtifacts(names).map((n) => `${n}
 `).join(""));
     process.exit(0);
   }
-  if (!version || !assetsFile || !sigDir) {
-    console.error("usage: node scripts/updater-manifest.mjs <X.Y.Z> <assets.json> <sig dir>");
+  if (!version || !assetsFile || !sigDir || !base) {
+    console.error("usage: node scripts/updater-manifest.mjs <X.Y.Z> <assets.json> <sig dir> <download base>");
     process.exit(1);
   }
   const assets = JSON.parse(readFileSync(assetsFile, "utf8")).map((a) => ({ name: a.name, url: a.url }));
-  const manifest = updaterManifest(version, assets, (name) => readFileSync(join(sigDir, `${name}.sig`), "utf8"));
+  const manifest = updaterManifest(version, assets, (name) => readFileSync(join(sigDir, `${name}.sig`), "utf8"), base);
   process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
 }

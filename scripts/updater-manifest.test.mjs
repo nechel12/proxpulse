@@ -30,7 +30,8 @@ describe("updater manifest", () => {
 
   it("has every platform key the 0.6.1 manifest had", () => {
     const assets = names.map((name, i) => ({ name, url: `https://api.github.com/assets/${i}` }));
-    const m = updaterManifest("0.7.0", assets, (name) => `sig-of-${name}\n`, "2026-01-01T00:00:00.000Z");
+    const base = "https://github.com/nechel12/proxpulse/releases/download/v0.7.0";
+    const m = updaterManifest("0.7.0", assets, (name) => `sig-of-${name}\n`, base, "2026-01-01T00:00:00.000Z");
     expect(Object.keys(m.platforms).sort()).toEqual([
       "darwin-aarch64", "darwin-aarch64-app", "darwin-x86_64", "darwin-x86_64-app",
       "linux-x86_64", "linux-x86_64-appimage", "linux-x86_64-deb", "linux-x86_64-rpm",
@@ -39,9 +40,10 @@ describe("updater manifest", () => {
     // NSIS for the plain Windows key, as updaterJsonPreferNsis gave.
     expect(m.platforms["windows-x86_64"]).toEqual({
       signature: "sig-of-ProxPulse_0.7.0_x64-setup.exe",
-      url: "https://api.github.com/assets/0",
+      url: `${base}/ProxPulse_0.7.0_x64-setup.exe`,
     });
-    expect(m.platforms["darwin-x86_64"].url).toBe("https://api.github.com/assets/8");
+    // github.com, never the rate-limited api.github.com.
+    expect(m.platforms["darwin-x86_64"].url).toBe(`${base}/ProxPulse_0.7.0_x64.app.tar.gz`);
     expect(m.version).toBe("0.7.0");
   });
 });
