@@ -5,6 +5,10 @@ export class AlertLatch {
   private active = new Set<string>();
 
   /** True when the alert was not active yet and should be shown. */
+  has(key: string): boolean {
+    return this.active.has(key);
+  }
+
   raise(key: string): boolean {
     if (this.active.has(key)) return false;
     this.active.add(key);
@@ -37,6 +41,16 @@ export class Notifier {
   readonly latch = new AlertLatch();
 
   constructor(private deps: NotifierDeps) {}
+
+  /**
+   * One notification per problem: the latch is set only once one went out,
+   * so a problem first seen while the window was in front still notifies
+   * when it is not. `latch.clear(key)` ends the problem.
+   */
+  async alert(key: string, title: string, body: string): Promise<void> {
+    if (this.latch.has(key)) return;
+    if (await this.send(title, body)) this.latch.raise(key);
+  }
 
   async send(title: string, body: string): Promise<boolean> {
     if (!this.deps.enabled() || !this.deps.isTauriRuntime()) return false;

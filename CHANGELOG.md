@@ -185,6 +185,8 @@ All notable changes to ProxPulse. The format follows
   is unknown (geo skipped at a limit); Geo sorts by the code and city it
   shows and Uptime by the uptime it shows; and a Shift range starts from the
   proxy last clicked, not a row position that changed with a re-sort.
+- A problem notification (offline, pool unchanged, webhook failed) is no
+  longer lost when the problem first came up while the window was in front.
 
 ## [0.6.1] — 2026-11-07
 

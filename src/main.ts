@@ -1399,9 +1399,9 @@ window.addEventListener("DOMContentLoaded", () => {
     autoStatus.handle(e.payload, shownPool(id));
     // An offline cycle repeats every minute: report it once until a check succeeds.
     if (e.payload.state === "offline") {
-      if (notifier.latch.raise(`offline@${id}`)) void notifier.send(notifTitle("notif_offline_t", id), t("notif_offline_b"));
+      void notifier.alert(`offline@${id}`, notifTitle("notif_offline_t", id), t("notif_offline_b"));
     } else if (e.payload.state === "suspect") {
-      if (notifier.latch.raise(`suspect@${id}`)) void notifier.send(notifTitle("notif_suspect_t", id), t("notif_suspect_b"));
+      void notifier.alert(`suspect@${id}`, notifTitle("notif_suspect_t", id), t("notif_suspect_b"));
     } else if (e.payload.state === "done") {
       notifier.latch.clear(`offline@${id}`);
       notifier.latch.clear(`suspect@${id}`);
@@ -1429,7 +1429,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (shownPool(id)) showAutoWebhook(e.payload, t, setStatusText);
     const failed = e.payload.results.filter((r) => !r.ok);
     if (failed.length === 0) notifier.latch.clear(`webhook@${id}`);
-    else if (notifier.latch.raise(`webhook@${id}`)) void notifier.send(notifTitle("notif_webhook_t", id), formatWebhookResults(failed, t));
+    else void notifier.alert(`webhook@${id}`, notifTitle("notif_webhook_t", id), formatWebhookResults(failed, t));
   }).catch(() => {});
   void listen("app://hidden-to-tray", () => {
     if (readFlag("pp-tray-hint", false)) return;
