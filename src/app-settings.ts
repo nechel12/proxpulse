@@ -23,6 +23,8 @@ type Deps = {
   onHideCreds: () => void;
   /** The pool registry, for the per-pool settings. */
   pools: () => PoolMeta[];
+  /** A check runs: importing or resetting settings reloads the page. */
+  isBusy?: () => boolean;
 };
 
 /** Backend preferences (`prefs.rs`). */
@@ -250,8 +252,16 @@ export class AppSettings {
     }
   }
 
+  /** Both reload the page, which would lose track of a check in progress. */
+  private refuseWhileBusy(): boolean {
+    if (!this.deps.isBusy?.()) return false;
+    this.deps.setStatusText("data-status", () => this.deps.t("settings_busy"));
+    return true;
+  }
+
   private async importSettings(file: File): Promise<void> {
     const { t, setStatusText } = this.deps;
+    if (this.refuseWhileBusy()) return;
     const parsed = file.size > 16 * 1024 * 1024 ? null : parseSettingsFile(await file.text());
     if (!parsed) {
       setStatusText("data-status", () => t("settings_bad"));
@@ -283,6 +293,7 @@ export class AppSettings {
   }
 
   private async resetSettings(): Promise<void> {
+    if (this.refuseWhileBusy()) return;
     if (!(await askConfirm(this.deps.t("settings_reset_confirm")))) return;
     clearSettings(localStorage, this.deps.pools().map((p) => p.id));
     try {

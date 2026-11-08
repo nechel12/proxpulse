@@ -166,6 +166,10 @@ All notable changes to ProxPulse. The format follows
   another is picked before it ends, and the Check tab names that pool when
   there are several. A pool still loading after a switch is no longer synced
   as empty, which could wipe it.
+- Importing or resetting settings during a check is refused: both reload the
+  window, after which Start and Check now stayed locked until the app was
+  restarted. After any reload during a check, the buttons unlock once the
+  check ends.
 
 ## [0.6.1] — 2026-11-07
 

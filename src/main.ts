@@ -93,6 +93,7 @@ const appSettings = new AppSettings({
   logErr,
   isTauriRuntime,
   pools: () => pools,
+  isBusy: () => running || autoStatus.running,
   onHideCreds: () => {
     resultsView.hideCreds = appSettings.hideCreds;
     pool.hideCreds = appSettings.hideCreds;
@@ -1436,6 +1437,18 @@ window.addEventListener("DOMContentLoaded", () => {
       if (sent) writeFlag("pp-tray-hint", true);
     });
   }).catch(() => {});
+  // After a reload during a check the buttons stay locked, and a manual
+  // check sends this page no events: ask the backend until it is free.
+  const waitUntilFree = (): void => {
+    window.setTimeout(() => {
+      void invoke<boolean>("check_busy")
+        .then((busy) => {
+          if (busy) waitUntilFree();
+          else if (!running) autoStatus.release();
+        })
+        .catch(() => {});
+    }, 2000);
+  };
   void invoke<boolean>("check_busy")
     .then((busy) => {
       if (!busy) return;
@@ -1443,6 +1456,7 @@ window.addEventListener("DOMContentLoaded", () => {
       ($("btn-start") as HTMLButtonElement).disabled = true;
       ($("btn-stop") as HTMLButtonElement).disabled = false;
       ($("btn-auto-now") as HTMLButtonElement).disabled = true;
+      waitUntilFree();
     })
     .catch(() => {});
 

@@ -54,4 +54,15 @@ describe("AutoStatusController", () => {
     c.handle(ev("p1", "done"));
     expect(els["btn-start"].disabled).toBe(false);
   });
+
+  it("unlocks after a reload once the backend is free", () => {
+    const els = page();
+    const c = controller();
+    c.restore();
+    expect(els["btn-start"].disabled).toBe(true);
+    c.release();
+    expect(c.running).toBe(false);
+    expect(els["btn-start"].disabled).toBe(false);
+    expect(els["btn-stop"].disabled).toBe(true);
+  });
 });

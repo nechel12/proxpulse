@@ -99,6 +99,17 @@ export class AutoStatusController {
   }
 
   /**
+   * The checker is free again although no event said so (a check running
+   * before a page reload): unlock unless a scheduled check is known to run.
+   */
+  release(): void {
+    if (this.active.size > 0) return;
+    this.running = false;
+    this.buttons(false);
+    this.renderCheckNote(undefined);
+  }
+
+  /**
    * On the Check tab, why Start does not work: a scheduled check of `pool`
    * holds the checker, and Stop would cancel it. Hidden when none runs.
    */
