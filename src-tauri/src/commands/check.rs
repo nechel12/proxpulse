@@ -1049,10 +1049,20 @@ pub(crate) async fn run_checks(
     }
 
     let mut out = Vec::new();
+    // Stop must abort in-flight requests at once instead of waiting for them
+    // to time out. One wait for it serves the whole loop and is polled first:
+    // a fresh 50 ms timer per pass fired only when no task finished for 50 ms,
+    // so in a fast run of hundreds of threads Stop went unnoticed while queued
+    // tasks kept checking.
+    let stopped = wait_cancelled(&cancel);
+    tokio::pin!(stopped);
     loop {
-        // Stop must abort in-flight requests immediately instead of waiting
-        // for the first task to finish its own timeout.
         tokio::select! {
+            biased;
+            _ = &mut stopped => {
+                set.abort_all();
+                break;
+            }
             maybe = set.join_next_with_id() => {
                 let r = match maybe {
                     Some(Ok((id, v))) => {
@@ -1072,12 +1082,6 @@ pub(crate) async fn run_checks(
                     let _ = ch.send(CheckEvent::Result(Box::new(r.clone())));
                 }
                 out.push(r);
-            }
-            _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                if cancel.load(Ordering::Relaxed) {
-                    set.abort_all();
-                    break;
-                }
             }
         }
     }

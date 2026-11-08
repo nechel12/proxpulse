@@ -110,6 +110,9 @@ All notable changes to ProxPulse. The format follows
   login, and a JSON `"protocol": "https"` no longer opens TLS to a plain HTTP
   proxy. A bare IPv6 address with a port (`fe80::1:8080`) is refused instead
   of turning into a wrong URL.
+- Stop takes effect at once in large, fast runs. It was only noticed when no
+  proxy finished for 50 ms, so with hundreds of threads queued proxies kept
+  being checked and written to the history as dead.
 
 ## [0.6.1] — 2026-11-07
 
