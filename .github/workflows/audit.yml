@@ -1,0 +1,32 @@
+name: audit
+
+# New advisories appear between pushes, and CI runs only on them: check the
+# dependencies every week too. A failed run is the alert (GitHub mails the
+# owner); Dependabot alerts cover the same advisories on the repository page.
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays, 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      # All npm dependencies, the build tools too: CI checks only what ships.
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: RustSec audit
+        run: |
+          cargo install --locked cargo-audit --version 0.22.2
+          cargo audit --file src-tauri/Cargo.lock

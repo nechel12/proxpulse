@@ -158,9 +158,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: src-tauri
-          # zip 4.x advisories are unreachable: tauri-plugin-updater verifies
-          # the minisign signature before extracting any archive.
-          ignore: RUSTSEC-2026-0367,RUSTSEC-2026-0368,RUSTSEC-2026-0369
 
   versions:
     runs-on: ubuntu-latest
