@@ -1,7 +1,7 @@
 use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckConfig, CheckState};
 use crate::commands::dispatch::{
-    backup_pool, pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
-    MAIN_POOL,
+    backup_pool, pool_items, save_pool, store_pool, write_private_file, DispatchInner,
+    DispatchItem, DispatchPoolItem, DispatchState, MAIN_POOL,
 };
 use crate::commands::import::fetch_url_text;
 use crate::commands::webhook::{
@@ -71,6 +71,11 @@ pub(crate) struct AutoInner {
     pub(crate) sent: SentLists,
     /// Suspicious cycles in a row (see [`looks_like_local_trouble`]).
     suspicious: AtomicU32,
+    /// Unix time the last cycle ran, kept across restarts in the schedule
+    /// file; 0 when it never ran.
+    pub(crate) last_run: AtomicU64,
+    /// Offline cycles in a row: the retry waits longer after each.
+    offline: AtomicU32,
 }
 
 impl AutoInner {
@@ -81,6 +86,8 @@ impl AutoInner {
             running: Arc::new(AtomicBool::new(false)),
             sent: SentLists::default(),
             suspicious: AtomicU32::new(0),
+            last_run: AtomicU64::new(0),
+            offline: AtomicU32::new(0),
         }
     }
 }
@@ -501,6 +508,20 @@ async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
 
     let settings = auto.settings.lock().await.clone();
     let pool_now = pool_items(&disp).await;
+    // A manual check holds the checker: skip before fetching subscriptions.
+    if app.state::<CheckState>().busy.load(Ordering::SeqCst) {
+        emit_auto_status(app, pool, "skipped", 0, pool_now.len(), None, None);
+        return AutoOutcome::Busy;
+    }
+    // Still offline after an offline cycle: one direct request says so,
+    // without fetching subscriptions and checking the whole pool again.
+    if auto.offline.load(Ordering::SeqCst) > 0 {
+        let cfg = pool_check_config(&settings.check).sanitized();
+        if !direct_reachable(&cfg.test_url, cfg.timeout()).await {
+            emit_auto_status(app, pool, "offline", 0, pool_now.len(), None, None);
+            return AutoOutcome::Offline;
+        }
+    }
     let mut urls: Vec<String> = pool_now.iter().map(|p| p.url.clone()).collect();
     let mut fresh = HashSet::new();
     if !settings.subscriptions.is_empty() {
@@ -667,21 +688,154 @@ async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
                         results,
                     },
                 );
+                // The lists just delivered, for change-only delivery after a
+                // restart.
+                if settings.webhook_changes_only {
+                    save_schedule(app, pool, &auto, &disp).await;
+                }
             }
             AutoOutcome::Finished
         }
     }
 }
 
-/// Next run time after a cycle: an offline or crowded-out cycle is retried
-/// soon instead of waiting a whole interval with stale results.
-fn next_run(enabled: bool, interval_min: u64, outcome: AutoOutcome, now: u64) -> u64 {
+/// Next run time after a cycle. A crowded-out cycle is retried soon instead
+/// of waiting a whole interval with stale results; an offline one too, but
+/// each further offline cycle in a row waits twice as long, up to the
+/// interval, so a machine that stays offline is not checked every minute.
+fn next_run(enabled: bool, interval_min: u64, outcome: AutoOutcome, now: u64, offline: u32) -> u64 {
+    let interval = interval_min.clamp(1, 1440) * 60;
     if !enabled {
         0
-    } else if matches!(outcome, AutoOutcome::Offline | AutoOutcome::Busy) {
+    } else if outcome == AutoOutcome::Busy {
         now + RETRY_SOON_SECS
+    } else if outcome == AutoOutcome::Offline {
+        now + (RETRY_SOON_SECS << offline.saturating_sub(1).min(6)).min(interval)
     } else {
-        now + interval_min.clamp(1, 1440) * 60
+        now + interval
+    }
+}
+
+/// The first run after the schedule is set up: one interval after the last
+/// run, which survives restarts, but not sooner than a minute from now. A
+/// daily schedule on a machine restarted every day would otherwise never run.
+fn first_run(interval_min: u64, last_run: u64, now: u64) -> u64 {
+    let interval = interval_min.clamp(1, 1440) * 60;
+    if last_run == 0 {
+        now + interval
+    } else {
+        (last_run + interval).max(now + RETRY_SOON_SECS)
+    }
+}
+
+/// What a schedule keeps across restarts: when it last ran, the miss counts
+/// of its pool's entries, and the lists last delivered to each webhook (for
+/// change-only delivery; they may hold credentials, like the pool file).
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct ScheduleFile {
+    pub(crate) last_run: u64,
+    pub(crate) fails: HashMap<String, u32>,
+    pub(crate) sent: HashMap<String, Vec<String>>,
+}
+
+pub(crate) fn schedule_file_name(id: &str) -> String {
+    if id == MAIN_POOL {
+        "schedule.json".to_string()
+    } else {
+        format!("schedule-{id}.json")
+    }
+}
+
+fn schedule_path(app: &tauri::AppHandle, id: &str) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join(schedule_file_name(id)))
+}
+
+async fn save_schedule(app: &tauri::AppHandle, id: &str, auto: &AutoInner, disp: &DispatchInner) {
+    let Some(path) = schedule_path(app, id) else {
+        return;
+    };
+    let file = ScheduleFile {
+        last_run: auto.last_run.load(Ordering::SeqCst),
+        fails: disp.fails.lock().await.clone(),
+        sent: auto
+            .sent
+            .lock()
+            .await
+            .iter()
+            .map(|(url, list)| (url.clone(), list.iter().cloned().collect()))
+            .collect(),
+    };
+    let Ok(bytes) = serde_json::to_vec(&file) else {
+        return;
+    };
+    let _ = tauri::async_runtime::spawn_blocking(move || write_private_file(&path, &bytes)).await;
+}
+
+/// Restore a pool's schedule state at startup.
+pub(crate) async fn load_schedule(app: &tauri::AppHandle, id: &str) {
+    let (Ok(auto), Ok(disp)) = (
+        app.state::<AutoState>().pool(Some(id)),
+        app.state::<DispatchState>().pool(Some(id)),
+    ) else {
+        return;
+    };
+    let Some(path) = schedule_path(app, id) else {
+        return;
+    };
+    let Ok(Ok(bytes)) = tauri::async_runtime::spawn_blocking(move || std::fs::read(path)).await
+    else {
+        return;
+    };
+    let Ok(file) = serde_json::from_slice::<ScheduleFile>(&bytes) else {
+        return;
+    };
+    auto.last_run.store(file.last_run, Ordering::SeqCst);
+    *disp.fails.lock().await = file.fails;
+    *auto.sent.lock().await = file
+        .sent
+        .into_iter()
+        .map(|(url, list)| (url, list.into_iter().collect()))
+        .collect();
+}
+
+/// Remove a deleted pool's schedule file.
+pub(crate) fn delete_schedule(app: &tauri::AppHandle, id: &str) {
+    if let Some(path) = schedule_path(app, id) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Book-keeping after a cycle, scheduled or "Check now": the offline streak,
+/// the last run, the next run, and the schedule file.
+async fn finish_cycle(app: &tauri::AppHandle, id: &str, auto: &AutoInner, outcome: AutoOutcome) {
+    let offline = match outcome {
+        AutoOutcome::Offline => auto.offline.fetch_add(1, Ordering::SeqCst) + 1,
+        AutoOutcome::Finished => {
+            auto.offline.store(0, Ordering::SeqCst);
+            auto.last_run.store(epoch_secs(), Ordering::SeqCst);
+            0
+        }
+        AutoOutcome::Busy => auto.offline.load(Ordering::SeqCst),
+    };
+    let settings = auto.settings.lock().await.clone();
+    auto.next.store(
+        next_run(
+            settings.enabled,
+            settings.interval_min,
+            outcome,
+            epoch_secs(),
+            offline,
+        ),
+        Ordering::SeqCst,
+    );
+    if outcome == AutoOutcome::Finished {
+        if let Ok(disp) = app.state::<DispatchState>().pool(Some(id)) {
+            save_schedule(app, id, auto, &disp).await;
+        }
     }
 }
 
@@ -701,16 +855,7 @@ pub(crate) async fn auto_scheduler_loop(app: tauri::AppHandle) {
                 continue;
             }
             let outcome = run_auto_cycle(&app, &id).await;
-            let settings = auto.settings.lock().await.clone();
-            auto.next.store(
-                next_run(
-                    settings.enabled,
-                    settings.interval_min,
-                    outcome,
-                    epoch_secs(),
-                ),
-                Ordering::SeqCst,
-            );
+            finish_cycle(&app, &id, &auto, outcome).await;
         }
     }
 }
@@ -763,8 +908,11 @@ pub(crate) async fn set_auto_config(
         || old.interval_min != s.interval_min
         || auto.next.load(Ordering::SeqCst) == 0
     {
-        auto.next
-            .store(epoch_secs() + s.interval_min * 60, Ordering::SeqCst);
+        let last = auto.last_run.load(Ordering::SeqCst);
+        auto.next.store(
+            first_run(s.interval_min, last, epoch_secs()),
+            Ordering::SeqCst,
+        );
     }
     Ok(())
 }
@@ -775,9 +923,12 @@ pub(crate) async fn run_auto_now(
     pool: Option<String>,
 ) -> Result<(), String> {
     let pool = pool.unwrap_or_else(|| MAIN_POOL.to_string());
-    app.state::<AutoState>().pool(Some(&pool))?;
+    let auto = app.state::<AutoState>().pool(Some(&pool))?;
     tauri::async_runtime::spawn(async move {
-        let _ = run_auto_cycle(&app, &pool).await;
+        // Like a scheduled run, it moves the schedule on: a run due seconds
+        // later would otherwise check the pool and post the webhooks again.
+        let outcome = run_auto_cycle(&app, &pool).await;
+        finish_cycle(&app, &pool, &auto, outcome).await;
     });
     Ok(())
 }
@@ -936,16 +1087,41 @@ mod tests {
 
     #[test]
     fn offline_or_busy_cycle_is_retried_soon() {
-        assert_eq!(next_run(false, 30, AutoOutcome::Offline, 1000), 0);
+        assert_eq!(next_run(false, 30, AutoOutcome::Offline, 1000, 1), 0);
         assert_eq!(
-            next_run(true, 30, AutoOutcome::Offline, 1000),
+            next_run(true, 30, AutoOutcome::Busy, 1000, 0),
             1000 + RETRY_SOON_SECS
         );
         assert_eq!(
-            next_run(true, 30, AutoOutcome::Busy, 1000),
-            1000 + RETRY_SOON_SECS
+            next_run(true, 30, AutoOutcome::Finished, 1000, 0),
+            1000 + 1800
         );
-        assert_eq!(next_run(true, 30, AutoOutcome::Finished, 1000), 1000 + 1800);
+        // Offline: a minute, then twice as long each time, up to the interval.
+        let wait = |n| next_run(true, 30, AutoOutcome::Offline, 1000, n) - 1000;
+        assert_eq!((wait(1), wait(2), wait(3)), (60, 120, 240));
+        assert_eq!(wait(5), 960);
+        assert_eq!(wait(6), 1800);
+        assert_eq!(wait(40), 1800);
+    }
+
+    #[test]
+    fn the_schedule_resumes_from_the_last_run() {
+        // Never ran: one interval from now.
+        assert_eq!(first_run(30, 0, 10_000), 10_000 + 1800);
+        // Restarted ten minutes after a run: twenty more minutes.
+        assert_eq!(first_run(30, 10_000 - 600, 10_000), 10_000 + 1200);
+        // A daily schedule restarted a day later: soon, not a day later.
+        assert_eq!(
+            first_run(1440, 100_000 - 90_000, 100_000),
+            100_000 + RETRY_SOON_SECS
+        );
+        assert_eq!(schedule_file_name(MAIN_POOL), "schedule.json");
+        assert_eq!(schedule_file_name("p1"), "schedule-p1.json");
+        let file: ScheduleFile =
+            serde_json::from_str(r#"{"lastRun":5,"sent":{"https://h":["a","b"]}}"#).unwrap();
+        assert_eq!(file.last_run, 5);
+        assert!(file.fails.is_empty());
+        assert_eq!(file.sent["https://h"], vec!["a", "b"]);
     }
 
     #[test]

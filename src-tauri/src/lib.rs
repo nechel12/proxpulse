@@ -438,6 +438,10 @@ pub fn run() {
             {
                 let disp: State<DispatchState> = app.state();
                 tauri::async_runtime::block_on(load_pool(app.handle(), &disp.inner));
+                tauri::async_runtime::block_on(commands::auto::load_schedule(
+                    app.handle(),
+                    commands::dispatch::MAIN_POOL,
+                ));
             }
             tauri::async_runtime::block_on(load_pools(app.handle()));
             // The window is created hidden; an autostart launch may keep it so.

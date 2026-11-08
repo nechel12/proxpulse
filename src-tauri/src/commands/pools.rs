@@ -136,6 +136,7 @@ async fn add_runtime(app: &AppHandle, id: &str) {
     *inner.options.lock().await = pool_dispatcher(&app.state::<PrefsState>().get(), id).options;
     app.state::<AutoState>().add(id);
     load_pool(app, &inner).await;
+    crate::commands::auto::load_schedule(app, id).await;
 }
 
 fn new_id(taken: &[PoolMeta]) -> String {
@@ -202,6 +203,7 @@ pub(crate) async fn delete_pool(app: AppHandle, id: String) -> Result<(), String
         delete_pool_file(&app, &inner).await;
     }
     app.state::<AutoState>().remove(&id);
+    crate::commands::auto::delete_schedule(&app, &id);
     forget_pool(&app, &id).await;
     Ok(())
 }

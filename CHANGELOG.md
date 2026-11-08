@@ -138,6 +138,18 @@ All notable changes to ProxPulse. The format follows
   5 minutes is closed, so silent upstreams can no longer use up the 1024
   connection slots. The Pool API stops writing to a client that does not
   read after 10 seconds.
+- The schedule survives restarts. Its next run used to be "now + interval"
+  at every launch, so a daily check on a machine restarted daily never ran;
+  it is now one interval after the last run (at least a minute after launch).
+  Miss counts and the lists last sent to change-only webhooks are kept too,
+  in `schedule.json`: after a restart the whole pool was posted as added,
+  and proxies removed before it stayed with the receiver for good.
+- An offline machine is no longer re-checked every minute: retries wait 1, 2,
+  4… minutes up to the interval, each first asking the check server
+  directly instead of downloading subscriptions and checking the whole pool,
+  and a manual check in progress is noticed before subscriptions are fetched.
+  **Check now** moves the schedule on, so a scheduled run due seconds later no
+  longer checks the pool and posts the webhooks a second time.
 
 ## [0.6.1] — 2026-11-07
 

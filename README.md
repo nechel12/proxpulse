@@ -402,7 +402,13 @@ The **Auto** tab re-checks the pool every N minutes; each
   `pool.json.bak` (see [Privacy and local data](#privacy-and-local-data)).
 - When no proxy answers and the check server is unreachable directly (offline,
   waking from sleep), the pool is left unchanged and the check is retried in a
-  minute; a check crowded out by a manual one is retried the same way.
+  minute, then after 2, 4, 8… minutes up to the interval, each time first
+  asking the check server directly. A check crowded out by a manual one is
+  retried in a minute.
+- The schedule survives restarts: the next check comes one interval after the
+  last one (at least a minute after launch), with the same miss counts and,
+  for change-only webhooks, the same last-sent lists. **Check now** moves the
+  schedule on like a scheduled check.
 - Scheduled checks never stop the dispatcher.
 - **Subscriptions** — up to 10 proxy list URLs are downloaded before every
   scheduled check; proxies not in the pool yet are checked with it, and the
@@ -486,8 +492,11 @@ Stored locally:
   last scheduled check removed entries; to restore it, quit ProxPulse and
   rename it to `pool.json`.
   `prefs.json` next to it holds the startup options, the pool API port and
-  the dispatcher settings, including login passwords, and `history.json` the
-  per-proxy history (URLs without credentials).
+  the dispatcher settings, including login passwords, `history.json` the
+  per-proxy history (URLs without credentials), and `schedule.json`
+  (`schedule-<id>.json`) the scheduled check's state: when it last ran, the
+  miss counts, and the lists last sent to each webhook (with credentials when
+  **Send credentials** is on), owner-only like the pool.
 - Starting with the system adds a login item: the `Run` registry key on
   Windows, a LaunchAgent on macOS, a `.desktop` file in `~/.config/autostart`
   on Linux. Turning the option off removes it.
