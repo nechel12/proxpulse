@@ -133,6 +133,34 @@ fn a_valid_chain_is_not_tampering() {
     assert_eq!(verified_info("aa", "TLS 1.3 x".into(), None), "TLS 1.3 x");
 }
 
+#[tokio::test]
+async fn bytes_that_came_with_the_headers_do_not_inflate_the_speed() {
+    use crate::commands::speed::{download, SpeedResult};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (client, mut server) = tokio::io::duplex(1024 * 1024);
+    tokio::spawn(async move {
+        let mut req = [0u8; 512];
+        let _ = server.read(&mut req).await;
+        // 60 kB of the body in the same read as the headers, the other
+        // 40 kB 300 ms later.
+        let mut first = b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n".to_vec();
+        first.extend(std::iter::repeat_n(0u8, 60_000));
+        server.write_all(&first).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        server.write_all(&[0u8; 40_000]).await.unwrap();
+    });
+    let mut result = SpeedResult::failed("p", String::new());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    download(client, 100_000, &mut result, deadline)
+        .await
+        .unwrap();
+    assert_eq!(result.bytes, 100_000);
+    // 40 kB in at least 0.3 s is at most about 1.07 Mbit/s; counting the
+    // first 60 kB too would give about 2.7.
+    let mbps = result.mbps.unwrap();
+    assert!(mbps < 1.2, "{mbps}");
+}
+
 #[test]
 fn short_error_mapping() {
     // Texts of the causes reqwest and hyper-util report through source().

@@ -1,7 +1,7 @@
 //! Download speed through a proxy, with the time split into connecting to
 //! the proxy, the TLS handshake and the wait for the first byte.
 
-use crate::commands::check::{BusyGuard, CheckState};
+use crate::commands::check::{wait_cancelled, BusyGuard, CheckState};
 use crate::http::{io_error, short_error};
 use crate::tls::tls_client_config;
 use crate::transport::{connect_via, parse_upstream_url, Upstream};
@@ -20,6 +20,13 @@ const SPEED_MAX_PROXIES: usize = 200;
 const SPEED_TIMEOUT: Duration = Duration::from_secs(10);
 /// The download stops here even if not all bytes arrived.
 const DOWNLOAD_LIMIT: Duration = Duration::from_secs(30);
+/// One proxy's whole measurement; a slow one returns what it measured by then.
+const MEASURE_LIMIT: Duration = Duration::from_secs(60);
+
+/// A read timeout that never runs past the measurement's deadline.
+fn until(deadline: Instant) -> Duration {
+    SPEED_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()))
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -36,7 +43,7 @@ pub(crate) struct SpeedResult {
 }
 
 impl SpeedResult {
-    fn failed(proxy: &str, error: String) -> Self {
+    pub(crate) fn failed(proxy: &str, error: String) -> Self {
         Self {
             proxy: proxy.to_string(),
             ok: false,
@@ -72,10 +79,11 @@ pub(crate) fn parse_head(buf: &[u8]) -> Option<(usize, u16, Option<u64>)> {
     Some((end, status, length))
 }
 
-async fn download<S: AsyncRead + AsyncWrite + Unpin>(
+pub(crate) async fn download<S: AsyncRead + AsyncWrite + Unpin>(
     mut s: S,
     bytes: u64,
     result: &mut SpeedResult,
+    deadline: Instant,
 ) -> Result<(), String> {
     let req = format!(
         "GET /__down?bytes={bytes} HTTP/1.1\r\nHost: {SPEED_HOST}\r\nUser-Agent: ProxPulse\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
@@ -87,7 +95,7 @@ async fn download<S: AsyncRead + AsyncWrite + Unpin>(
     let mut buf = vec![0u8; 64 * 1024];
     let mut head = Vec::new();
     let (mut body, status, length) = loop {
-        let n = tokio::time::timeout(SPEED_TIMEOUT, s.read(&mut buf))
+        let n = tokio::time::timeout(until(deadline), s.read(&mut buf))
             .await
             .map_err(|_| "timeout".to_string())?
             .map_err(|e| io_error(&e))?;
@@ -109,9 +117,12 @@ async fn download<S: AsyncRead + AsyncWrite + Unpin>(
         return Err(format!("http {status}"));
     }
     let want = length.unwrap_or(bytes);
+    // Body bytes that came with the headers arrived before the timer starts:
+    // counting them would inflate the speed.
+    let before_timer = body;
     let started = Instant::now();
-    while body < want && started.elapsed() < DOWNLOAD_LIMIT {
-        match tokio::time::timeout(SPEED_TIMEOUT, s.read(&mut buf)).await {
+    while body < want && started.elapsed() < DOWNLOAD_LIMIT && Instant::now() < deadline {
+        match tokio::time::timeout(until(deadline), s.read(&mut buf)).await {
             Ok(Ok(0)) => break,
             Ok(Ok(n)) => body += n as u64,
             Ok(Err(e)) => return Err(io_error(&e)),
@@ -119,7 +130,7 @@ async fn download<S: AsyncRead + AsyncWrite + Unpin>(
         }
     }
     result.bytes = body;
-    result.mbps = mbps(body, started.elapsed());
+    result.mbps = mbps(body - before_timer, started.elapsed());
     result.ok = result.mbps.is_some();
     if !result.ok {
         result.error = Some("no data".to_string());
@@ -128,6 +139,7 @@ async fn download<S: AsyncRead + AsyncWrite + Unpin>(
 }
 
 async fn measure(proxy: String, url: String, bytes: u64) -> SpeedResult {
+    let deadline = Instant::now() + MEASURE_LIMIT;
     let Some((scheme, host, port, user, pass)) = parse_upstream_url(&url) else {
         return SpeedResult::failed(&proxy, "bad proxy url".to_string());
     };
@@ -156,13 +168,20 @@ async fn measure(proxy: String, url: String, bytes: u64) -> SpeedResult {
     };
     let tls_start = Instant::now();
     let connector = tokio_rustls::TlsConnector::from(tls_client_config());
-    let tls = match tokio::time::timeout(SPEED_TIMEOUT, connector.connect(name, stream)).await {
+    // A failed handshake keeps the connect time already measured.
+    let tls = match tokio::time::timeout(until(deadline), connector.connect(name, stream)).await {
         Ok(Ok(t)) => t,
-        Ok(Err(e)) => return SpeedResult::failed(&proxy, io_error(&e)),
-        Err(_) => return SpeedResult::failed(&proxy, "tls handshake timeout".to_string()),
+        Ok(Err(e)) => {
+            result.error = Some(io_error(&e));
+            return result;
+        }
+        Err(_) => {
+            result.error = Some("tls handshake timeout".to_string());
+            return result;
+        }
     };
     result.tls_ms = Some(tls_start.elapsed().as_millis() as u64);
-    if let Err(e) = download(tls, bytes, &mut result).await {
+    if let Err(e) = download(tls, bytes, &mut result, deadline).await {
         result.ok = false;
         result.error = Some(e);
     }
@@ -200,7 +219,9 @@ pub(crate) async fn speed_test(
             if cancel.load(Ordering::Relaxed) {
                 return None;
             }
-            let limit = SPEED_TIMEOUT * 3 + DOWNLOAD_LIMIT;
+            // measure() stops at MEASURE_LIMIT with what it has; this only
+            // catches a step that ignores its own timeout.
+            let limit = MEASURE_LIMIT + SPEED_TIMEOUT;
             let proxy = t.proxy.clone();
             Some(
                 tokio::time::timeout(limit, measure(t.proxy, t.url, bytes))
@@ -209,9 +230,24 @@ pub(crate) async fn speed_test(
             )
         });
     }
-    while let Some(r) = set.join_next().await {
-        if let Ok(Some(result)) = r {
-            let _ = on_result.send(result);
+    // Stop ends measurements in progress (up to a minute each) at once, so
+    // the busy flag is released and the next check can start.
+    let stopped = wait_cancelled(&cancel);
+    tokio::pin!(stopped);
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut stopped => {
+                set.abort_all();
+                break;
+            }
+            next = set.join_next() => match next {
+                Some(Ok(Some(result))) => {
+                    let _ = on_result.send(result);
+                }
+                Some(_) => {}
+                None => break,
+            },
         }
     }
     Ok(())

@@ -220,7 +220,7 @@ impl<T> Deep<T> {
 }
 
 /// Resolves once Stop is pressed, so a long phase can be abandoned at once.
-async fn wait_cancelled(flag: &AtomicBool) {
+pub(crate) async fn wait_cancelled(flag: &AtomicBool) {
     while !flag.load(Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

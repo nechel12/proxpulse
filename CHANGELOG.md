@@ -113,6 +113,12 @@ All notable changes to ProxPulse. The format follows
 - Stop takes effect at once in large, fast runs. It was only noticed when no
   proxy finished for 50 ms, so with hundreds of threads queued proxies kept
   being checked and written to the history as dead.
+- The speed test stops at once on Stop, instead of finishing measurements of
+  up to a minute and leaving "another check is running" for the next check.
+  Its speed no longer counts the bytes that arrived with the response
+  headers, which inflated it; a failed TLS handshake keeps the connect time;
+  and a slow proxy returns what it measured within a minute instead of a bare
+  "timeout".
 
 ## [0.6.1] — 2026-11-07
 
