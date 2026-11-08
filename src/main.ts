@@ -550,6 +550,7 @@ const autoStatus = new AutoStatusController({
   t,
   setStatusText,
   isManualRunning: () => running,
+  poolName: (id) => poolLabel(pools.find((p) => p.id === id) ?? { id, name: "" }, t),
   onDone: (avg, alive) => {
     pingHist = pushPingPointStats(pingHist, avg, alive);
     renderPingGraph(pingHist, lang);

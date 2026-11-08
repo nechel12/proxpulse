@@ -156,6 +156,10 @@ All notable changes to ProxPulse. The format follows
 - Esc closes an open menu first and does nothing while you type in a field;
   before, closing the export menu with Esc stopped the check, which cannot be
   resumed.
+- After a scheduled check with subscriptions was skipped because of a manual
+  check, Start stayed locked until the next cycle ended. While a scheduled
+  check runs, the Check tab now says which pool it checks and that Stop
+  cancels it.
 
 ## [0.6.1] — 2026-11-07
 

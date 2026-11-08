@@ -500,9 +500,10 @@ async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
     ) else {
         return AutoOutcome::Finished;
     };
+    // This pool's cycle is already running ("Check now" during it): the
+    // interface shows that one; a "skipped" here would end it there.
     if auto.running.swap(true, Ordering::SeqCst) {
-        emit_auto_status(app, pool, "skipped", 0, 0, None, None);
-        return AutoOutcome::Finished;
+        return AutoOutcome::Busy;
     }
     let _run_guard = BusyGuard(auto.running.clone());
 
