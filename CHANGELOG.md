@@ -36,6 +36,9 @@ All notable changes to ProxPulse. The format follows
   recognised on non-English Windows too.
 - One proxy answering 403 or 429 to the free ip-api lookup no longer pauses
   geo lookups for the whole run; only the shared Pro key does.
+- A manual check where no proxy answered and the check server does not answer
+  directly either says so, and is not written to the proxies' history, where
+  it marked every proxy down.
 
 ## [0.6.1] — 2026-11-07
 

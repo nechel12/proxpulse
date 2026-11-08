@@ -657,6 +657,7 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
   const t0 = performance.now();
 
   let busy = false;
+  let unreachable = false;
   try {
     const fresh = await runCheckList(list, readCheckSettings(), geoCache.fresh(), (done, total) => {
       lastStatus = { key: "st_checking", params: { done, total } };
@@ -671,8 +672,13 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
     }, () => {
       keyOverHttp = true;
       renderKeyNote();
+    }, () => {
+      unreachable = true;
     });
     results = base ? defaultOrder(mergeResults(base, fresh)) : fresh;
+    // A re-check that reached nobody says nothing about the proxies: rows
+    // that were alive stay as they were.
+    if (unreachable && base) results = base;
   } catch (e) {
     if (String(e).includes("another check is running")) busy = true;
     /* otherwise keep partial results delivered through the channel */
@@ -698,6 +704,7 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   const alive = checked.filter((r) => r.alive).length;
   if (stopFlag) setStatusT("st_stopped", { alive, total: checked.length });
+  else if (unreachable) setStatusT("st_unreachable", { total: checked.length });
   else if (base) setStatusT("st_rechecked", { secs, alive, total: checked.length });
   else if (opts.truncated) setStatusT("st_done_trunc", { secs, alive, total: checked.length, n: MAX_PROXIES });
   else setStatusT("st_done", { secs, alive, total: checked.length });

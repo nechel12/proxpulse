@@ -67,6 +67,8 @@ export async function runCheckList(
   onProgress?: (done: number, total: number) => void,
   onLive?: (live: ProxyResult[]) => void,
   onKeyOverHttp?: () => void,
+  /** No proxy was alive and the check server did not answer directly. */
+  onUnreachable?: () => void,
 ): Promise<ProxyResult[]> {
   if (!/^https?:\/\//i.test(settings.testUrl)) throw new Error("badurl");
   const out: ProxyResult[] = [];
@@ -101,6 +103,10 @@ export async function runCheckList(
     }
     if (ev.kind === "keyOverHttp") {
       onKeyOverHttp?.();
+      return;
+    }
+    if (ev.kind === "unreachable") {
+      onUnreachable?.();
       return;
     }
     const { kind: _kind, ...r } = ev;

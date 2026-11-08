@@ -32,4 +32,16 @@ describe("check client", () => {
     expect(onKeyOverHttp).toHaveBeenCalledOnce();
     expect(out.map((r) => r.proxy)).toEqual(["1.2.3.4:80"]);
   });
+
+  it("reports an unreachable check server without taking it for a result", async () => {
+    const result: CheckEvent = { ...deadStub("1.2.3.4:80", "timeout"), kind: "result" };
+    backend.events = [result, { kind: "unreachable" }, { kind: "done" }];
+    const onUnreachable = vi.fn();
+    const settings = { testUrl: "https://example.com/" } as CheckSettings;
+
+    const out = await runCheckList(["1.2.3.4:80"], settings, [], undefined, undefined, undefined, onUnreachable);
+
+    expect(onUnreachable).toHaveBeenCalledOnce();
+    expect(out.map((r) => r.proxy)).toEqual(["1.2.3.4:80"]);
+  });
 });

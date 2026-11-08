@@ -194,6 +194,9 @@ pub(crate) enum CheckEvent {
     Result(Box<ProxyResult>),
     /// The judge's key came over plain HTTP, sent at most once per run.
     KeyOverHttp,
+    /// No proxy was alive and the check server did not answer directly
+    /// either: the run says nothing about the proxies. Sent before `Done`.
+    Unreachable,
     Done,
 }
 
@@ -1044,6 +1047,7 @@ pub(crate) async fn check_proxies(
     }
     let _guard = BusyGuard(busy);
     state.cancel.store(false, Ordering::SeqCst);
+    let probe = config.clone().sanitized();
 
     let results = run_checks(
         proxies,
@@ -1053,8 +1057,20 @@ pub(crate) async fn check_proxies(
         Some(&on_result),
     )
     .await?;
-    // Recorded before `Done`, so the UI reads the updated history.
-    crate::commands::history::record_results(&app, &results).await;
+    // Every proxy dead is more often this machine being offline, or the check
+    // server being down, than the whole list dying. Then the results are not
+    // history: they would mark every proxy down in Uptime.
+    let stopped = state.cancel.load(Ordering::SeqCst);
+    if !stopped
+        && !results.is_empty()
+        && !results.iter().any(|r| r.alive)
+        && !direct_reachable(&probe.test_url, probe.timeout()).await
+    {
+        let _ = on_result.send(CheckEvent::Unreachable);
+    } else {
+        // Recorded before `Done`, so the UI reads the updated history.
+        crate::commands::history::record_results(&app, &results).await;
+    }
     // The channel carries the authoritative result list; `Done` tells the UI
     // that it is drained. Returning the Vec as well duplicated the whole
     // payload over IPC.
