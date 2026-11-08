@@ -57,7 +57,7 @@ Builds for every platform are attached to each
 | | `…_x64_en-US.msi` — MSI installer | manual |
 | | `…-portable.exe` — no installer (data still goes to `%APPDATA%\com.nechel12.proxpulse`) | replace the file |
 | Linux x64 | `…_amd64.AppImage` | built-in |
-| | `…_amd64.deb`, `…x86_64.rpm` | package manager |
+| | `…_amd64.deb`, `…x86_64.rpm` | install the new package by hand (no repository) |
 | macOS | `…_aarch64.dmg` (Apple Silicon), `…_x64.dmg` (Intel) | built-in |
 
 `SHA256SUMS.txt` lists the checksum of every file; `latest.json` and `.sig`
@@ -365,7 +365,7 @@ subscriptions and webhooks.
 
 | Request | Answer |
 |---|---|
-| `GET /random` | a random proxy |
+| `GET /random` | a random proxy (with `format=json`, one object, not an array) |
 | `GET /fastest` | the proxy with the lowest ping |
 | `GET /list` | every matching proxy, one per line |
 | `GET /pools` | the pools: id, name and size, tab-separated |
@@ -375,7 +375,7 @@ subscriptions and webhooks.
 |---|---|
 | `pool` | pool id or name (any case); the main pool by default |
 | `country` | codes or names as shown in the pool, comma-separated |
-| `proto` | `http`, `https`, `socks4`, `socks5` or `socks` (both SOCKS) |
+| `proto` | `http`, `https`, `socks4`, `socks5` or `socks` (both SOCKS), comma-separated |
 | `limit` | 1–20000 proxies from `/list` (all by default); `/random` and `/fastest` ignore it |
 | `format` | `txt` (default) or `json`: objects with `url`, `scheme`, `host`, `port`, `country`, `latency` |
 
@@ -393,7 +393,8 @@ curl -u user:pass "http://127.0.0.1:1090/list?pool=work&format=json&limit=20"
 - Errors: `400` for a bad parameter, `404` for no match or an unknown pool or
   path, `405` for a method other than `GET`.
 - Requests whose `Host` is not `127.0.0.1` or `localhost` are refused, so a
-  web page cannot read the pool through DNS rebinding.
+  web page cannot read the pool through DNS rebinding. A request without
+  `Host` (HTTP/1.0 scripts; browsers always send one) is answered.
 
 ## Scheduled checks and webhooks
 

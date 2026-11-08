@@ -76,10 +76,13 @@ directly, never through a checked proxy, over HTTPS when the judge serves it
 and otherwise over plain HTTP; an answer through a proxy that fails the
 signature is treated as modified. The key protects against the checked
 proxies, not against someone on your own network path to an HTTP-only
-judge. User-supplied URLs may reach only
-public hosts, with DNS pinned per request: webhooks do not follow redirects,
-and every redirect of a URL import is checked like the original URL, so
-neither can be pointed at local services. Proxy credentials are sent to
+judge. Webhooks, URL imports and subscriptions may reach only public hosts,
+with DNS pinned per request: webhooks do not follow redirects, and every
+redirect of a URL import is checked like the original URL, so neither can be
+pointed at local services; subscription entries on this machine or its local
+network are skipped. The check target and your own judge are requested as
+entered, local addresses included, since a judge on your own network is a
+valid setup. Proxy credentials are sent to
 webhooks only when explicitly enabled and only over HTTPS. The dispatchers
 and the pool API listen on loopback only, and the API refuses requests for
 other host names. Updates are verified with the minisign public key

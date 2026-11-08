@@ -36,13 +36,13 @@ function downloads(version) {
 
 **Linux (x64)**
 - \`ProxPulse_${version}_amd64.AppImage\` — portable (auto-updates)
-- \`ProxPulse_${version}_amd64.deb\` — Debian/Ubuntu package (update via apt/dpkg)
-- \`ProxPulse-${version}-1.x86_64.rpm\` — Fedora/openSUSE package (update via rpm/dnf)
+- \`ProxPulse_${version}_amd64.deb\` — Debian/Ubuntu package (update: install the new one, there is no repository)
+- \`ProxPulse-${version}-1.x86_64.rpm\` — Fedora/openSUSE package (update: install the new one, there is no repository)
 
-**macOS (Apple Silicon)** — unsigned, see README for Gatekeeper steps
+**macOS (Apple Silicon)** — signed ad hoc, compile-checked only; see README for opening it
 - \`ProxPulse_${version}_aarch64.dmg\`
 
-**macOS (Intel)** — unsigned and untested
+**macOS (Intel)** — signed ad hoc, compile-checked only
 - \`ProxPulse_${version}_x64.dmg\`
 
 Linux auto-update is AppImage-only. \`latest.json\` and \`.sig\` files
