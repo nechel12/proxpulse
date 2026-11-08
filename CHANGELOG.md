@@ -27,6 +27,12 @@ All notable changes to ProxPulse. The format follows
   carries the anonymity verdict, is checked against the judge's key even when
   the main address ends in `/generate_204`. Before, no key was fetched and any
   proxy could rewrite the verdict.
+- The updater signing key no longer reaches the platform builds, which run
+  npm's and every crate's build scripts: a malicious dependency could have
+  read it and signed updates for every install. The builds now run unsigned,
+  and a separate job that runs only the pinned Tauri CLI signs the updater
+  files and writes `latest.json`. A build can still put wrong code into the
+  release it builds, but no longer takes the key with it.
 - The judge's key is no longer fetched through redirects, which could hand the
   lookup to another host and make its key look delivered over HTTPS. A "this
   judge does not sign" answer that came over plain HTTP now shows the same

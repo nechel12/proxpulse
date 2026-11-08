@@ -577,8 +577,10 @@ npm run build:unsigned   # local release build without the updater key
 ```
 
 `npm run tauri build` signs updater artifacts and needs
-`TAURI_SIGNING_PRIVATE_KEY`, which only the release workflow has; builds from
-`build:unsigned` are for local use and are never published as updates.
+`TAURI_SIGNING_PRIVATE_KEY`, which only the release workflow's signing job
+has; builds from `build:unsigned` are for local use and are never published
+as updates. The release builds every platform unsigned the same way and signs
+the updater files in a separate job that runs no dependency code.
 
 Checks (the same ones CI runs, plus an MSRV build, a Windows bundle smoke
 test and `cargo audit`):

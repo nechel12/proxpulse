@@ -38,8 +38,14 @@ publishes the GitHub release with `latest.json` for the built-in updater.
        `check:versions` rejects a tag that does not match the project
        version;
      - `release` builds Windows (NSIS, MSI, portable), Linux (AppImage, deb,
-       rpm) and macOS (Apple Silicon, Intel) with `tauri-action`, signing the
-       updater artifacts with the `TAURI_SIGNING_PRIVATE_KEY` secret;
+       rpm) and macOS (Apple Silicon, Intel) with `tauri-action`, without the
+       updater signing key: these jobs run npm's and every crate's build
+       scripts, which must never see it;
+     - `sign` signs the updater artifacts with the
+       `TAURI_SIGNING_PRIVATE_KEY` secret (and
+       `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, when the key has a password) and
+       writes `latest.json`; it runs only the Tauri CLI pinned by
+       `package-lock.json`, installed without install scripts;
      - `notes` writes the changelog section and the file-to-platform map into
        the release description, uploads `SHA256SUMS.txt`, and only then
        publishes the release.
@@ -78,4 +84,11 @@ publishes the GitHub release with `latest.json` for the built-in updater.
 The updater signing key is a minisign key; its public half is embedded in
 `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`). Losing the private key
 means existing installs cannot verify further updates, so it must be backed up
-outside the repository.
+outside the repository. It should have a password, kept in the
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret: then a leaked secret value alone
+cannot sign an update. A new key would lock out existing installs, so the
+password is set on the same key (re-encrypting it keeps the public key).
+
+The first release built this way is the first whose updater files are signed
+outside `tauri build`: before publishing it, check that an install of the
+previous version finds and installs it (the check above).

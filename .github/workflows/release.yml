@@ -5,6 +5,8 @@ on:
     tags:
       - "v*"
 
+# The updater signing key reaches only the `sign` job, which runs no
+# dependency code; the platform jobs build without it.
 # Write access is granted per job: `verify` installs and runs third-party npm
 # and cargo code, so it only gets a read-only token.
 permissions:
@@ -139,8 +141,12 @@ jobs:
           # and untested (no Mac, see README).
           - platform: macos-latest
             args: '--target aarch64-apple-darwin'
+            target: aarch64-apple-darwin
+            arch: aarch64
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'
+            target: x86_64-apple-darwin
+            arch: x64
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 90
     permissions:
@@ -173,17 +179,32 @@ jobs:
 
       # Before tagging: bump version in package.json,
       # src-tauri/tauri.conf.json and src-tauri/Cargo.toml to match.
-      # Signing key lives in repo secrets as TAURI_SIGNING_PRIVATE_KEY
-      # (one minisign key signs every platform).
+      # Built WITHOUT the updater signing key: this job runs npm's and every
+      # crate's build scripts, and code from a dependency must never see the
+      # key. The `sign` job signs the updater artifacts and writes latest.json.
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           releaseId: ${{ needs.draft.outputs.id }}
-          args: ${{ matrix.args }}
-          # README recommends the NSIS installer; keep latest.json in sync.
-          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }} --config src-tauri/tauri.unsigned.conf.json
+          includeUpdaterJson: false
+
+      # The macOS updater takes the app as a .tar.gz, which the bundler makes
+      # only when it signs. COPYFILE_DISABLE keeps macOS metadata files out.
+      - name: Pack the macOS app for the updater
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+          COPYFILE_DISABLE: "1"
+        run: |
+          set -euo pipefail
+          name="ProxPulse_${GITHUB_REF_NAME#v}_${ARCH}.app.tar.gz"
+          tar -czf "$name" -C "src-tauri/target/$TARGET/release/bundle/macos" ProxPulse.app
+          gh release upload "$GITHUB_REF_NAME" "$name" --clobber
 
       # Portable exe is not a Tauri bundle target — upload the raw binary.
       # Windows-only (Linux already ships portable AppImage,
@@ -199,11 +220,64 @@ jobs:
           cp src-tauri/target/release/proxpulse.exe "$NAME"
           gh release upload "$GITHUB_REF_NAME" "$NAME" --clobber
 
+  # Signs the updater artifacts and writes latest.json. The signing key is
+  # only in the "Sign" step, which runs nothing but the Tauri CLI pinned by
+  # package-lock.json, installed without install scripts: no dependency's code
+  # runs while the key is in the environment.
+  sign:
+    needs: [draft, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install the Tauri CLI (no install scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Download the updater artifacts
+        env:
+          RELEASE_ID: ${{ needs.draft.outputs.id }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GH_REPO/releases/$RELEASE_ID/assets" > "$RUNNER_TEMP/assets.json"
+          mkdir updater
+          node scripts/updater-manifest.mjs --artifacts "$RUNNER_TEMP/assets.json" > "$RUNNER_TEMP/artifacts.txt"
+          while IFS= read -r name; do
+            gh release download "$GITHUB_REF_NAME" --dir updater --pattern "$name"
+          done < "$RUNNER_TEMP/artifacts.txt"
+
+      - name: Sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for f in updater/*; do
+            # The version goes into the signed comment, as `tauri build` does.
+            ./node_modules/.bin/tauri signer sign --app-version "${GITHUB_REF_NAME#v}" "$f"
+          done
+
+      - name: Upload the signatures and latest.json
+        run: |
+          set -euo pipefail
+          node scripts/updater-manifest.mjs "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/assets.json" updater > latest.json
+          gh release upload "$GITHUB_REF_NAME" updater/*.sig latest.json --clobber
+
   # Replaces the placeholder body with the changelog section and an exact
   # file → platform map (filenames contain the version, so it is generated).
   # Runs after every platform job (tauri-action must not overwrite after).
   notes:
-    needs: release
+    needs: sign
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
