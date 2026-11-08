@@ -160,6 +160,9 @@ export function buildTemplate(list: ProxyResult[], template: string): string {
         port: p ? String(p.port) : "",
         user: p?.user ?? "",
         pass: p?.pass ?? "",
+        // "user:pass@", "user@" or nothing, so a proxy without a login
+        // does not become scheme://:@host:port.
+        auth: p?.user ? `${p.user}${p.pass ? `:${p.pass}` : ""}@` : "",
         country: r.country_code ?? r.country ?? "",
         ping: r.latency_ms == null ? "" : String(r.latency_ms),
         ip: r.ip ?? "",

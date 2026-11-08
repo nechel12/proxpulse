@@ -817,7 +817,8 @@ async function rowAction(action: RowAction, rows: ProxyResult[]): Promise<void> 
   if (action === "copy") {
     try {
       // Copies keep credentials, like exports.
-      await navigator.clipboard.writeText(rows.map((r) => r.proxy).join("\n"));
+      // The normalized URL, as Export → Copy gives it.
+      await navigator.clipboard.writeText(rows.map((r) => r.url || r.proxy).join("\n"));
       setStatusT("st_copied", { n: rows.length });
     } catch { /* clipboard unavailable */ }
   } else if (action === "recheck") {
@@ -826,11 +827,14 @@ async function rowAction(action: RowAction, rows: ProxyResult[]): Promise<void> 
     await speedTest(rows.filter((r) => r.alive));
   } else if (action === "pool") {
     const alive = rows.filter((r) => r.alive);
+    const before = pool.count;
     mergePool(alive.map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
     renderPool();
     updateCounts();
     const n = await syncPool(false);
-    setStatusT(n < 0 ? "pool_sync_err" : "pool_added", { n: alive.length });
+    // What entered the pool: Max ping keeps slow ones out, known ones are
+    // only updated.
+    setStatusT(n < 0 ? "pool_sync_err" : "pool_added", { n: Math.max(0, pool.count - before) });
   } else if (action === "remove") {
     if (running) return;
     results = results.filter((r) => !keys.has(r.proxy));
@@ -860,7 +864,7 @@ async function doExport(kind: ExportKind): Promise<void> {
 
 /** The line template for "Export by template", remembered between uses. */
 async function askTemplate(): Promise<string | null> {
-  let saved = "{scheme}://{user}:{pass}@{host}:{port}";
+  let saved = "{scheme}://{auth}{host}:{port}";
   try {
     saved = localStorage.getItem("pp-export-template") ?? saved;
   } catch { /* ignore */ }

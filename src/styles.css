@@ -391,7 +391,8 @@ tr.empty td { text-align: center; color: var(--mut); padding: 30px; font-family:
   border: 1px solid var(--red); border-radius: 12px; padding: 16px;
   box-shadow: 0 18px 60px var(--shadow), 0 0 22px rgba(255,30,45,.25);
 }
-.modal-title { font-family: var(--mono); font-size: 12px; letter-spacing: 1px; color: var(--red2); margin-bottom: 10px; text-transform: uppercase; }
+/* No uppercase: a title may quote case-sensitive text ({url} in the template prompt). */
+.modal-title { font-family: var(--mono); font-size: 12px; letter-spacing: 1px; color: var(--red2); margin-bottom: 10px; }
 .modal-box input {
   width: 100%; background: var(--field); border: 1px solid var(--line); color: var(--txt);
   border-radius: 8px; padding: 9px 10px; outline: none; font-size: 13px;

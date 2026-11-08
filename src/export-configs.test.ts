@@ -62,4 +62,10 @@ describe("config exports", () => {
   it("fills line templates and keeps unknown placeholders", () => {
     expect(buildTemplate([list[0]], "{host}:{port}:{user}:{pass} {country} {ping}ms {nope}")).toBe("1.2.3.4:1080:u@x:p:ss DE 200ms {nope}");
   });
+
+  it("leaves {auth} empty for a proxy without a login", () => {
+    const open = { ...list[0], proxy: "socks5://1.2.3.4:1080", url: "socks5://1.2.3.4:1080" };
+    expect(buildTemplate([open], "{scheme}://{auth}{host}:{port}")).toBe("socks5://1.2.3.4:1080");
+    expect(buildTemplate([list[0]], "{auth}")).toMatch(/@$/);
+  });
 });

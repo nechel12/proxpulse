@@ -201,6 +201,12 @@ All notable changes to ProxPulse. The format follows
   list; the speed test reports its own errors and a stop as a speed test;
   Clear and Remove are refused during a check, whose next result brought the
   rows back.
+- "Added to the pool: N" counts what entered the pool, not every alive proxy
+  (Max ping keeps slow ones out); the button that adds the check's alive
+  proxies to the shown pool says so instead of "Sync"; the export template's
+  default no longer gives `http://:@host:port` for proxies without a login
+  (new `{auth}` placeholder), and its prompt no longer shows placeholders in
+  capitals; Copy in the row menu gives the normalized URL, like Export → Copy.
 - Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
   and the odd releases 23 and 25 were accepted before.
 
