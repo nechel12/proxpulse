@@ -41,7 +41,14 @@ publishes the GitHub release with `latest.json` for the built-in updater.
        rpm) and macOS (Apple Silicon, Intel) with `tauri-action`, signing the
        updater artifacts with the `TAURI_SIGNING_PRIVATE_KEY` secret;
      - `notes` writes the changelog section and the file-to-platform map into
-       the release description and uploads `SHA256SUMS.txt`.
+       the release description, uploads `SHA256SUMS.txt`, and only then
+       publishes the release.
+
+   The release stays a draft until every platform is uploaded: the updater
+   reads `releases/latest`, which skips drafts, so no user sees a partial
+   `latest.json`. If a platform fails, the draft stays unpublished: fix the
+   cause and use **Re-run failed jobs**; the draft is reused. If the fix needs
+   a code change, delete the draft and release a new patch version.
 
    `v*` tags are protected by a repository ruleset: they cannot be moved or
    deleted. A broken release is fixed with a new patch version, not by

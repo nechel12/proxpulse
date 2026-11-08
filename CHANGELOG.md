@@ -21,6 +21,8 @@ All notable changes to ProxPulse. The format follows
 - Error texts no longer contain the requested URL, which could hold the ip-api
   Pro key, a Telegram bot token, a subscription URL or your own IP, in the
   table, CSV exports, the status line and notifications.
+- Releases are published only after every platform is built: until then the
+  release is a draft, so the updater never sees a partial `latest.json`.
 
 ### Added
 

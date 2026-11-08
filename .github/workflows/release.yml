@@ -85,8 +85,50 @@ jobs:
           # the minisign signature before extracting any archive.
           ignore: RUSTSEC-2026-0367,RUSTSEC-2026-0368,RUSTSEC-2026-0369
 
-  release:
+  # The release is created as a draft and published only by `notes`, after
+  # every platform is uploaded. A draft is invisible to the updater
+  # (releases/latest skips drafts), so users never get a partial latest.json,
+  # and a failed platform leaves an unpublished draft instead of a release
+  # that misses it.
+  draft:
     needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      id: ${{ steps.create.outputs.id }}
+    steps:
+      - name: Create the draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          found="$(gh api "repos/$GH_REPO/releases?per_page=100" \
+            --jq "[.[] | select(.tag_name == \"$GITHUB_REF_NAME\")][0] // empty | \"\(.id) \(.draft)\"")"
+          if [ -z "$found" ]; then
+            # The id comes from the create call itself: the release list may
+            # not show a new draft yet.
+            id="$(gh api -X POST "repos/$GH_REPO/releases" \
+              -f tag_name="$GITHUB_REF_NAME" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="ProxPulse $GITHUB_REF_NAME" \
+              -f body="See the assets below to download and install this version." \
+              -F draft=true --jq .id)"
+          else
+            read -r id draft <<< "$found"
+            # A re-run reuses its own draft but never touches a published release.
+            if [ "$draft" != true ]; then
+              echo "::error::$GITHUB_REF_NAME is already published"
+              exit 1
+            fi
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: draft
     strategy:
       fail-fast: false
       matrix:
@@ -141,18 +183,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "ProxPulse ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install this version."
-          releaseDraft: false
-          prerelease: false
+          releaseId: ${{ needs.draft.outputs.id }}
           args: ${{ matrix.args }}
           # README recommends the NSIS installer; keep latest.json in sync.
           updaterJsonPreferNsis: true
 
       # Portable exe is not a Tauri bundle target — upload the raw binary.
       # Windows-only (Linux already ships portable AppImage,
-      # macOS ships .app.tar.gz). Runs after tauri-action created the release.
+      # macOS ships .app.tar.gz). gh finds the draft by its tag.
       - name: Upload portable exe
         if: matrix.platform == 'windows-latest'
         shell: bash
@@ -201,3 +239,16 @@ jobs:
           set -euo pipefail
           node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/notes.md"
           gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+
+      # Parallel platform jobs rewrite latest.json in turn and can drop one
+      # another's entry: publish only a manifest that has every platform.
+      - name: Check the updater manifest
+        run: |
+          jq -e '.platforms | has("windows-x86_64") and has("linux-x86_64")
+            and has("darwin-aarch64") and has("darwin-x86_64")' assets/latest.json
+
+      # Last step: only now does the release, and its latest.json, reach users.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
