@@ -271,3 +271,45 @@ fn stops_at_the_limit() {
     );
     assert!(extract_proxies(text, 0, "http").is_empty());
 }
+
+#[test]
+fn real_list_fixtures_are_extracted() {
+    let urls = |text: &str| -> Vec<String> {
+        extract(text)
+            .iter()
+            .filter_map(|p| crate::proxy::normalize_proxy(p, "http").map(|(u, _)| u))
+            .collect()
+    };
+    // A free-proxy site table copied with tabs: more than five columns.
+    assert_eq!(
+        urls("1.2.3.4\t8080\tUS\tUnited States\telite proxy\tno\tyes\t1 min ago\n5.6.7.8\t3128\tDE\tGermany\tanonymous\tno\tno\t2 mins ago"),
+        vec!["http://1.2.3.4:8080", "http://5.6.7.8:3128"]
+    );
+    // Separators inside a password do not split the line.
+    assert_eq!(
+        urls("1.2.3.4:8080:user:pa;ss"),
+        vec!["http://user:pa;ss@1.2.3.4:8080"]
+    );
+    assert_eq!(
+        urls("1.2.3.4:8080:user:pass!"),
+        vec!["http://user:pass!@1.2.3.4:8080"]
+    );
+    assert_eq!(
+        urls("1.2.3.4,8080,user,p/ss"),
+        vec!["http://user:p%2Fss@1.2.3.4:8080"]
+    );
+    assert_eq!(
+        urls("1.2.3.4:8080 user pass"),
+        vec!["http://user:pass@1.2.3.4:8080"]
+    );
+    // Commented lines stay out, even in a short list.
+    assert_eq!(
+        urls("# 9.9.9.9:3128 (dead)\n1.2.3.4:8080"),
+        vec!["http://1.2.3.4:8080"]
+    );
+    // JSON: a `name` is not a login, and "https" means CONNECT support.
+    assert_eq!(
+        urls(r#"[{"ip":"1.2.3.4","port":8080,"name":"Germany #1","protocol":"https"}]"#),
+        vec!["http://1.2.3.4:8080"]
+    );
+}

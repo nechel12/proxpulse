@@ -170,10 +170,23 @@ pub(crate) fn from_columns(parts: &[String], default_proto: &str) -> Option<(Str
             if is_proto_name(a) && valid_port(c) {
                 return build_url(&canonical_scheme(a), None, b, c);
             }
+            // `host:port user pass`.
+            if let Some((host, port)) = a
+                .rsplit_once(':')
+                .filter(|(h, p)| !h.is_empty() && valid_port(p))
+            {
+                if !b.is_empty() && !c.is_empty() {
+                    return build_url(def, Some(&format!("{b}:{c}")), host, port);
+                }
+            }
             None
         }
         4 => {
             let p: Vec<&str> = parts.iter().map(|x| x.trim()).collect();
+            // A table row (`1.2.3.4 8080 US elite`): no login in it.
+            if valid_port(p[1]) && looks_like_host(p[0]) && is_table_cell(p[2]) {
+                return build_url(def, None, p[0], p[1]);
+            }
             if let Some(host_first) = four_columns_host_first(&p) {
                 return if host_first {
                     build_url(def, Some(&format!("{}:{}", p[2], p[3])), p[0], p[1])
@@ -199,6 +212,74 @@ pub(crate) fn from_columns(parts: &[String], default_proto: &str) -> Option<(Str
     }
 }
 
+/// `user:pass` as a URL may carry it. Passwords from column formats hold
+/// `/`, `?`, `#` or `@`, which would end or split the URL, so every character
+/// a URL's userinfo may not hold is percent-encoded; an existing `%XX` is kept,
+/// so a URL that was already encoded stays as it is. The dispatcher and
+/// reqwest decode it again.
+pub(crate) fn encode_userinfo(userinfo: &str) -> String {
+    let b = userinfo.as_bytes();
+    let hex = |c: u8| c.is_ascii_hexdigit();
+    let mut out = String::with_capacity(b.len());
+    for (i, &c) in b.iter().enumerate() {
+        // Userinfo may hold `:`: the first one separates user and password,
+        // later ones belong to the password.
+        let keep = c.is_ascii_alphanumeric()
+            || b"-._~!$&'()*+,;=:".contains(&c)
+            || (c == b'%'
+                && b.get(i + 1).is_some_and(|&x| hex(x))
+                && b.get(i + 2).is_some_and(|&x| hex(x)));
+        if keep {
+            out.push(c as char);
+        } else {
+            out.push_str(&format!("%{c:02X}"));
+        }
+    }
+    out
+}
+
+/// Whether a delimiter-free reading of the whole token is a proxy:
+/// `host:port:user:pass` (or `user:pass:host:port`), or `user:pass@host:port`.
+/// Such a token is not split at `,;|` and tabs, which a password may hold.
+fn whole_token_is_proxy(s: &str) -> bool {
+    if s.chars().any(char::is_whitespace) {
+        return false;
+    }
+    if let Some((_, host)) = s.rsplit_once('@') {
+        return host
+            .rsplit_once(':')
+            .is_some_and(|(h, p)| !h.is_empty() && valid_port(p));
+    }
+    let p: Vec<&str> = s.split(':').collect();
+    p.len() == 4
+        && ((valid_port(p[1]) && !p[0].is_empty()) || (valid_port(p[3]) && !p[2].is_empty()))
+}
+
+/// A column of a proxy table that is not a login: a country code or name
+/// column's code, an anonymity or protocol word, a yes/no flag.
+pub(crate) fn is_table_cell(s: &str) -> bool {
+    let t = s.trim();
+    let country_code = t.len() == 2 && t.chars().all(|c| c.is_ascii_uppercase());
+    country_code
+        || [
+            "elite",
+            "anonymous",
+            "anon",
+            "transparent",
+            "high",
+            "high-anonymous",
+            "yes",
+            "no",
+            "-",
+            "http",
+            "https",
+            "socks4",
+            "socks5",
+        ]
+        .iter()
+        .any(|w| t.eq_ignore_ascii_case(w))
+}
+
 pub(crate) fn build_url(
     scheme: &str,
     userinfo: Option<&str>,
@@ -218,7 +299,7 @@ pub(crate) fn build_url(
     };
     let scheme = canonical_scheme(scheme);
     let url = match userinfo {
-        Some(u) if !u.is_empty() => format!("{scheme}://{u}@{host}:{port}"),
+        Some(u) if !u.is_empty() => format!("{scheme}://{}@{host}:{port}", encode_userinfo(u)),
         _ => format!("{scheme}://{host}:{port}"),
     };
     let label = proto_label(&scheme);
@@ -241,7 +322,9 @@ pub(crate) fn normalize_proxy(raw: &str, default_proto: &str) -> Option<(String,
         _ => "http",
     };
 
-    if s.contains(',') || s.contains(';') || s.contains('|') || s.contains('\t') {
+    if (s.contains(',') || s.contains(';') || s.contains('|') || s.contains('\t'))
+        && !whole_token_is_proxy(&s)
+    {
         let parts: Vec<String> = s
             .split([',', ';', '|', '\t'])
             .map(clean_token)
@@ -293,9 +376,13 @@ pub(crate) fn normalize_proxy(raw: &str, default_proto: &str) -> Option<(String,
         Some(_) => return None,
         None => (None, s.clone()),
     };
-    for sep in ['/', '?', '#'] {
-        if let Some(pos) = authority.find(sep) {
-            authority.truncate(pos);
+    // A path, query or fragment ends the address, but only after the host: a
+    // password may hold `/`, `?` or `#`, and column formats carry it last.
+    let host_from = authority.rfind('@').map_or(0, |at| at + 1);
+    let columns = host_from == 0 && !authority.contains('[') && authority.matches(':').count() >= 3;
+    if !columns {
+        if let Some(pos) = authority[host_from..].find(['/', '?', '#']) {
+            authority.truncate(host_from + pos);
         }
     }
     authority = authority.trim_matches('/').to_string();
@@ -307,7 +394,21 @@ pub(crate) fn normalize_proxy(raw: &str, default_proto: &str) -> Option<(String,
         Some((u, h)) => (Some(u.to_string()), h.to_string()),
         None => (None, authority.clone()),
     };
+    // `host:port@user:pass`: the address first, the login after the @.
+    let port_of = |s: &str| {
+        s.rsplit_once(':')
+            .is_some_and(|(h, p)| !h.is_empty() && valid_port(p))
+    };
+    let (userinfo, hostport) = match userinfo {
+        Some(u) if !port_of(&hostport) && port_of(&u) && !u.contains('[') => (Some(hostport), u),
+        other => (other, hostport),
+    };
     if hostport.is_empty() {
+        return None;
+    }
+    // Bare IPv6 with a port (`fe80::1:8080`) cannot be told from an address:
+    // brackets are required.
+    if !hostport.starts_with('[') && hostport.contains("::") {
         return None;
     }
 

@@ -98,18 +98,25 @@ The format is detected per line; scheme case does not matter:
 - `user:pass@127.0.0.1:8080`
 - `http://…`, `https://…` (TLS to the proxy), `socks5://…`, `socks5h://…`,
   `socks://…`, `socks4://…`, `socks4a://…`
-- `127.0.0.1:8080:user:pass` and `user:pass:127.0.0.1:8080`
+- `127.0.0.1:8080:user:pass`, `user:pass:127.0.0.1:8080`,
+  `127.0.0.1:8080@user:pass` and `127.0.0.1:8080 user pass`; a password keeps
+  any characters, `/`, `#`, `;` or `!` included
 - `127.0.0.1:8080:socks5` (protocol as a suffix)
 - CSV, tabs or spaces: `127.0.0.1,8080,user,pass`, `socks5,127.0.0.1,8080`
+- Tables copied from free-proxy sites: the IP and port columns are taken, the
+  country, anonymity and other columns are ignored
 - JSON: an object, an array or a log with `host`/`ip`, `port`, `username`,
-  `password`, `type` fields
+  `password`, `type` fields (`"https"` there means an HTTP proxy that supports
+  HTTPS sites)
 - Numbered or bulleted lists (`1) …`, `- …`, `[x] …`), `# …` and `// …`
   comments, `ip:port` inside prose
 
 Text files of any kind (TXT, CSV, JSON, LOG) and URLs (up to 2 MB, public
 hosts only) are imported with the same parser. Every entry must normalize to a
 proxy the checker can use, and one proxy written two ways counts once, so the
-counter equals the number of proxies a check tests.
+counter equals the number of proxies a check tests. A check and a pool take up
+to 20,000 proxies, and the source field up to 10 MB of text; a longer list is
+checked up to that number, and the status line says so.
 
 > [!NOTE]
 > IPv6 addresses need square brackets (`[2001:db8::1]:8080`); the bare form is

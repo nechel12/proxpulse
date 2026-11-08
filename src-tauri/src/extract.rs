@@ -4,14 +4,15 @@
 // returns and the checker receives exactly that list. Every candidate must
 // also pass `normalize_proxy`, so the count matches what a check will test.
 
-use crate::proxy::{is_proto_name, looks_like_host, normalize_proxy, valid_port};
+use crate::proxy::{is_proto_name, is_table_cell, looks_like_host, normalize_proxy, valid_port};
 use serde_json::Value;
 use std::collections::HashSet;
 
 const PROTO_KEYS: [&str; 4] = ["protocol", "proto", "type", "scheme"];
 const HOST_KEYS: [&str; 6] = ["host", "hostname", "ip", "server", "address", "addr"];
 const PORT_KEYS: [&str; 3] = ["port", "port_number", "portnumber"];
-const USER_KEYS: [&str; 5] = ["user", "username", "login", "usr", "name"];
+// Not "name": feeds use it for a label ("Germany #1"), not a login.
+const USER_KEYS: [&str; 4] = ["user", "username", "login", "usr"];
 const PASS_KEYS: [&str; 6] = ["pass", "password", "pwd", "passw", "passwd", "secret"];
 const LIST_KEYS: [&str; 7] = [
     "proxies", "proxy", "data", "list", "items", "results", "rows",
@@ -156,7 +157,15 @@ pub(crate) fn proxies_from_json(v: &Value, out: &mut Vec<String>, limit: usize) 
             if let (Some(h), Some(p)) = (&host, &port) {
                 let user = get_key(o, &USER_KEYS);
                 let pass = get_key(o, &PASS_KEYS);
-                let proto = get_key(o, &PROTO_KEYS);
+                // In proxy feeds "https" means the proxy supports CONNECT,
+                // not TLS to the proxy, which would fail against it.
+                let proto = get_key(o, &PROTO_KEYS).map(|p| {
+                    if p.eq_ignore_ascii_case("https") {
+                        "http".to_string()
+                    } else {
+                        p
+                    }
+                });
                 if let Some(built) =
                     build_from_parts(h, p, user.as_deref(), pass.as_deref(), proto.as_deref())
                 {
@@ -202,8 +211,25 @@ pub(crate) fn try_csv_line(line: &str) -> Option<String> {
     } else {
         return None;
     };
+    // A table copied from a free-proxy site: host, port, then country,
+    // anonymity and other columns, none of them a login.
+    if parts.len() >= 4
+        && valid_port(parts[1])
+        && looks_like_host(parts[0])
+        && (parts.len() > 5 || is_table_cell(parts[2]))
+    {
+        return Some(format!("{}:{}", host_for_url(parts[0]), parts[1]));
+    }
     match parts.len() {
         2 if valid_port(parts[1]) => Some(format!("{}:{}", host_for_url(parts[0]), parts[1])),
+        // `host:port user pass`.
+        3 if parts[0]
+            .rsplit_once(':')
+            .is_some_and(|(h, p)| !h.is_empty() && valid_port(p))
+            && !is_proto_name(parts[1]) =>
+        {
+            Some(format!("{}:{}@{}", parts[1], parts[2], parts[0]))
+        }
         3 if valid_port(parts[1]) && is_proto_name(parts[2]) => Some(format!(
             "{}://{}:{}",
             parts[2],
@@ -364,7 +390,14 @@ impl Collector<'_> {
         if self.full() {
             return;
         }
-        let s = clean_tail(trim_quotes(s.trim()));
+        let s = trim_quotes(s.trim());
+        // `host:port:user:pass` ends in the password: `!` or `.` there is
+        // part of it, not punctuation.
+        let password_last = {
+            let p: Vec<&str> = s.split(':').collect();
+            p.len() == 4 && valid_port(p[1]) && !s.contains('@')
+        };
+        let s = if password_last { s } else { clean_tail(s) };
         let n = s.chars().count();
         if !(3..=512).contains(&n) || s.starts_with('#') || s.starts_with("//") {
             return;
@@ -417,6 +450,11 @@ pub(crate) fn extract_proxies(text: &str, limit: usize, default_proto: &str) -> 
         if line.is_empty() {
             continue;
         }
+        // A whole proxy token is not split at `,;|`, which a password may hold.
+        if looks_like_proxy_value(line) {
+            c.push(line);
+            continue;
+        }
         if let Some(csv) = try_csv_line(line) {
             c.push(&csv);
             continue;
@@ -451,7 +489,16 @@ pub(crate) fn extract_proxies(text: &str, limit: usize, default_proto: &str) -> 
     }
 
     if c.out.len() < 5 && !c.full() {
-        for f in ipv4_ports(text) {
+        // Commented-out lines stay out here too.
+        let uncommented: String = text
+            .lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                !t.starts_with('#') && !t.starts_with("//")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for f in ipv4_ports(&uncommented) {
             if c.out.iter().any(|s| s.contains(f)) {
                 continue;
             }

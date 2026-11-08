@@ -156,3 +156,73 @@ fn credentials_stripping() {
     assert_eq!(strip_credentials("u:p@ss@host:80"), "host:80");
     assert_eq!(strip_credentials("1.2.3.4:8080"), "1.2.3.4:8080");
 }
+
+/// Lines as they come from real lists (sellers, free-proxy sites, configs),
+/// and the URL each must become; `None` where a line is ambiguous.
+#[test]
+fn real_list_fixtures() {
+    let url = |raw: &str| norm(raw, "http").map(|(u, _)| u);
+    for (raw, want) in [
+        // Passwords keep their special characters, encoded for the URL.
+        (
+            "1.2.3.4:8080:user:pa/ss",
+            Some("http://user:pa%2Fss@1.2.3.4:8080"),
+        ),
+        (
+            "1.2.3.4:8080:user:pa?s#s",
+            Some("http://user:pa%3Fs%23s@1.2.3.4:8080"),
+        ),
+        (
+            "1.2.3.4:8080:user:pass!",
+            Some("http://user:pass!@1.2.3.4:8080"),
+        ),
+        (
+            "1.2.3.4:8080:user:pa;ss",
+            Some("http://user:pa;ss@1.2.3.4:8080"),
+        ),
+        (
+            "user:p/ss@1.2.3.4:8080",
+            Some("http://user:p%2Fss@1.2.3.4:8080"),
+        ),
+        (
+            "user:p@ss@1.2.3.4:8080",
+            Some("http://user:p%40ss@1.2.3.4:8080"),
+        ),
+        (
+            "http://user:p%40ss@1.2.3.4:8080/",
+            Some("http://user:p%40ss@1.2.3.4:8080"),
+        ),
+        (
+            "user:pässword@1.2.3.4:8080",
+            Some("http://user:p%C3%A4ssword@1.2.3.4:8080"),
+        ),
+        // The address first, the login after the @.
+        (
+            "1.2.3.4:8080@user:pass",
+            Some("http://user:pass@1.2.3.4:8080"),
+        ),
+        // A login after a host:port.
+        (
+            "1.2.3.4:8080 user pass",
+            Some("http://user:pass@1.2.3.4:8080"),
+        ),
+        // Table rows: country and anonymity columns are not a login.
+        ("1.2.3.4 8080 US elite", Some("http://1.2.3.4:8080")),
+        (
+            "1.2.3.4 8080 user pass",
+            Some("http://user:pass@1.2.3.4:8080"),
+        ),
+        // Bare IPv6 with a port is ambiguous: brackets are required.
+        ("fe80::1:8080", None),
+        ("[fe80::1]:8080", Some("http://[fe80::1]:8080")),
+    ] {
+        assert_eq!(url(raw).as_deref(), want, "{raw}");
+    }
+    // The dispatcher reads the encoded password back as it was.
+    let (_, host, port, user, pass) =
+        parse_upstream_url("http://user:pa%2Fss@1.2.3.4:8080").unwrap();
+    assert_eq!(
+        (host.as_str(), port, user.as_deref(), pass.as_deref()),
+        ("1.2.3.4", 8080, Some("user"), Some("pa/ss"))
+    );
+}

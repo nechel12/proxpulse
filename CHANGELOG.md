@@ -99,6 +99,17 @@ All notable changes to ProxPulse. The format follows
   valid but differs from the direct one, as a CDN's regional certificate does.
   A proxy that intercepts TLS cannot present a valid chain, so only a rejected
   certificate counts; a different valid one is noted in the tooltip.
+- Passwords with `/`, `?`, `#`, `@`, `;` or `!` are no longer cut short or
+  dropped (`1.2.3.4:8080:user:pa/ss` became `user:pa`, and the proxy answered
+  407); they are percent-encoded in the proxy URL.
+- Common list formats are read as meant: `1.2.3.4 8080 US elite` is no longer
+  a login `US` with the password `elite`, `1.2.3.4:8080 user pass` and
+  `1.2.3.4:8080@user:pass` keep their login, tables copied from free-proxy
+  sites (more than five columns) are read instead of giving 0 proxies,
+  commented-out lines stay out of short lists, a JSON `name` is no longer a
+  login, and a JSON `"protocol": "https"` no longer opens TLS to a plain HTTP
+  proxy. A bare IPv6 address with a port (`fe80::1:8080`) is refused instead
+  of turning into a wrong URL.
 
 ## [0.6.1] — 2026-11-07
 
