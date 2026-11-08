@@ -95,6 +95,10 @@ All notable changes to ProxPulse. The format follows
   anonymity verdict: without it the judge cannot see a leak, so a transparent
   proxy showed as `anon` or even `elite`. The judge's own `/ip` over HTTPS is
   now asked when `api.ipify.org` does not answer.
+- The TLS check no longer marks a proxy `?tls` when the certificate it got is
+  valid but differs from the direct one, as a CDN's regional certificate does.
+  A proxy that intercepts TLS cannot present a valid chain, so only a rejected
+  certificate counts; a different valid one is noted in the tooltip.
 
 ## [0.6.1] — 2026-11-07
 

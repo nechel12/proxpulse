@@ -229,8 +229,8 @@ avoids repeated lookups for unchanged exit IPs.
 | Anon | `elite` | No proxy headers and no trace of your direct IP. |
 | | `anon` | The proxy reveals itself (`Via`, its own `X-Forwarded-For` entries, `Forwarded`, `X-Real-IP`, `Proxy-*`) but not your IP. |
 | | `transp` | Your direct IP appears in a forwarded header: the proxy leaks it. |
-| TLS | `ok` / `mod` / `n/v` | The certificate matches / differs or is rejected / the handshake failed for another reason. |
-| Info | `?mod`, `?tls` | The page through the proxy differs from the direct one or fails the judge's signature / the TLS certificate differs. The row tooltip lists every result. |
+| TLS | `ok` / `mod` / `n/v` | The certificate chain verifies against the public roots (another valid certificate than the direct one, such as a different CDN edge, is only noted in the tooltip) / it is rejected, so the proxy swaps it / the handshake failed for another reason. |
+| Info | `?mod`, `?tls` | The page through the proxy differs from the direct one or fails the judge's signature / the TLS certificate is rejected. The row tooltip lists every result. |
 | Info | `?unv` | The judge's key could not be fetched, so the answer's signature was not checked. |
 | Info | `bl N` | The exit IP is on N blocklists; the tooltip names them. |
 | Anon, Geo, TLS | `—` | Not checked: off, unsupported by the proxy, or an HTTPS judge. Anon is also `—` when your own IP could not be learned (neither `api.ipify.org` nor the judge's `/ip` answered): without it a leak cannot be seen. |

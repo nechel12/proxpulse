@@ -96,6 +96,18 @@ pub(crate) async fn tls_direct_fp() -> Option<String> {
         .map(|(fp, _)| fp)
 }
 
+/// The tooltip for a handshake whose chain verified. The handshake checks
+/// the chain against the bundled public roots, so a proxy that intercepts
+/// TLS with its own CA has already failed it; a different but valid
+/// certificate is another edge certificate of a CDN, not tampering, and is
+/// only noted.
+pub(crate) fn verified_info(fp: &str, info: String, base_fp: Option<&str>) -> String {
+    match base_fp {
+        Some(b) if b != fp => format!("{info} (another valid certificate than direct)"),
+        _ => info,
+    }
+}
+
 pub(crate) async fn tls_via_proxy(
     proxy_url: &str,
     timeout: Duration,
@@ -121,11 +133,10 @@ pub(crate) async fn tls_via_proxy(
         Err(_) => return (None, None),
     };
     match tls_handshake_fp(stream, timeout).await {
-        Ok((fp, info)) => match base_fp {
-            Some(b) if fp == b => (Some("ok".to_string()), Some(info)),
-            Some(_) => (Some("modified".to_string()), Some(info)),
-            None => (None, Some(info)),
-        },
+        Ok((fp, info)) => (
+            Some("ok".to_string()),
+            Some(verified_info(&fp, info, base_fp)),
+        ),
         Err(e) if is_cert_error(&e) => (
             Some("modified".to_string()),
             Some(format!(

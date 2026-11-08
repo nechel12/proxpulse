@@ -118,6 +118,22 @@ fn tls_config_builds() {
 }
 
 #[test]
+fn a_valid_chain_is_not_tampering() {
+    use crate::tls::verified_info;
+    // The chain verified against the public roots: another certificate than
+    // the direct one is a CDN edge, only noted in the tooltip.
+    assert_eq!(
+        verified_info("aa", "TLS 1.3 x".into(), Some("bb")),
+        "TLS 1.3 x (another valid certificate than direct)"
+    );
+    assert_eq!(
+        verified_info("aa", "TLS 1.3 x".into(), Some("aa")),
+        "TLS 1.3 x"
+    );
+    assert_eq!(verified_info("aa", "TLS 1.3 x".into(), None), "TLS 1.3 x");
+}
+
+#[test]
 fn short_error_mapping() {
     // Texts of the causes reqwest and hyper-util report through source().
     assert_eq!(short_error("operation timed out"), "timeout");
