@@ -1,6 +1,7 @@
 use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckConfig, CheckState};
 use crate::commands::dispatch::{
-    pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState, MAIN_POOL,
+    backup_pool, pool_items, save_pool, store_pool, DispatchItem, DispatchPoolItem, DispatchState,
+    MAIN_POOL,
 };
 use crate::commands::import::fetch_url_text;
 use crate::commands::webhook::{
@@ -13,7 +14,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager, State};
@@ -70,6 +71,8 @@ pub(crate) struct AutoInner {
     pub(crate) running: Arc<AtomicBool>,
     /// Lists last delivered to each webhook, for change-only delivery.
     pub(crate) sent: SentLists,
+    /// Suspicious cycles in a row (see [`looks_like_local_trouble`]).
+    suspicious: AtomicU32,
 }
 
 impl AutoInner {
@@ -79,6 +82,7 @@ impl AutoInner {
             next: AtomicU64::new(0),
             running: Arc::new(AtomicBool::new(false)),
             sent: SentLists::default(),
+            suspicious: AtomicU32::new(0),
         }
     }
 }
@@ -275,7 +279,27 @@ fn emit_auto_status(
 }
 
 /// A proxy that fails this many scheduled checks in a row leaves the pool.
+/// Slower than the pool's max ping counts as a failure too.
 pub(crate) const AUTO_DROP_AFTER: u32 = 2;
+/// A cycle in which this many pool entries or more, and more than half of
+/// the pool, missed (dead or over the max ping) is suspicious.
+const LOCAL_TROUBLE_MIN: usize = 3;
+
+/// Whether a cycle in which `missed` of `total` pool entries failed more
+/// likely says something about this machine (a congested uplink, a VPN or
+/// firewall blocking proxy ports) than about the proxies.
+pub(crate) fn looks_like_local_trouble(total: usize, missed: usize) -> bool {
+    missed >= LOCAL_TROUBLE_MIN && missed * 2 > total
+}
+
+/// Whether to apply a cycle, given whether it is suspicious and how many
+/// suspicious cycles came right before it. The first suspicious cycle in a
+/// row changes neither the pool nor the history; a second one in a row is
+/// trusted, so a pool that really died is still pruned (two misses later,
+/// with a backup), just one cycle later.
+pub(crate) fn apply_cycle(suspicious: bool, streak_before: u32) -> bool {
+    !suspicious || streak_before >= 1
+}
 /// Retry delay after a cycle that could not run usefully: the check server
 /// was unreachable directly, or a manual check was in progress.
 const RETRY_SOON_SECS: u64 = 60;
@@ -367,6 +391,11 @@ pub(crate) fn add_new_items(
     merged.avg = sum.checked_div(n);
 }
 
+/// Alive, but slower than the pool's max ping (`0` means no limit).
+fn is_slow(r: &ProxyResult, max_ping_ms: u64) -> bool {
+    r.alive && max_ping_ms > 0 && r.latency_ms.is_some_and(|ms| ms > max_ping_ms)
+}
+
 /// Merge check results into the pool as it is *now*: entries deleted while
 /// the check ran are not resurrected, and entries without a result (added
 /// during the run) are kept unchanged.
@@ -387,22 +416,21 @@ pub(crate) fn merge_auto_items(
             continue;
         };
         seen.insert(r.url.as_str());
-        if !r.alive {
-            // One miss may be a hiccup on our side; drop only after several
-            // consecutive failures.
+        let slow = is_slow(r, max_ping_ms);
+        if !r.alive || slow {
+            // One miss may be a hiccup on our side (a congested uplink makes
+            // every proxy slow); drop only after several consecutive misses.
             let n = prev_fails.get(&r.url).copied().unwrap_or(0) + 1;
             if n < AUTO_DROP_AFTER {
                 fails.insert(r.url.clone(), n);
                 items.push(DispatchItem {
                     raw: raw.clone(),
                     url: Some(r.url.clone()),
-                    latency: *latency,
+                    // A slow proxy keeps its new latency, so it sorts down.
+                    latency: if slow { r.latency_ms } else { *latency },
                     country: old_country.clone(),
                 });
             }
-            continue;
-        }
-        if max_ping_ms > 0 && r.latency_ms.is_some_and(|ms| ms > max_ping_ms) {
             continue;
         }
         alive += 1;
@@ -530,18 +558,53 @@ async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
                 emit_auto_status(app, pool, "offline", 0, total, None, None);
                 return AutoOutcome::Offline;
             }
-            crate::commands::history::record_results(app, &results).await;
             let current: HashMap<String, PoolEntry> = {
                 let pool = disp.pool.lock().await;
                 pool.iter()
                     .map(|u| (u.url.clone(), (u.raw.clone(), u.latency, u.country.clone())))
                     .collect()
             };
+            // Entries of the pool that answered (fast or slow) and that missed.
+            let in_pool = |r: &&ProxyResult| current.contains_key(&r.url);
+            let answered = results.iter().filter(in_pool).filter(|r| r.alive).count();
+            let missed = results
+                .iter()
+                .filter(in_pool)
+                .filter(|r| !r.alive || is_slow(r, settings.max_ping_ms))
+                .count();
+            let suspicious = looks_like_local_trouble(current.len(), missed);
+            let streak_before = if suspicious {
+                auto.suspicious.fetch_add(1, Ordering::SeqCst)
+            } else {
+                auto.suspicious.store(0, Ordering::SeqCst);
+                0
+            };
+            if !apply_cycle(suspicious, streak_before) {
+                // Neither the pool, its miss counts nor the history changes:
+                // what the cycle saw was more likely a problem on this machine.
+                emit_auto_status(app, pool, "suspect", answered, current.len(), None, None);
+                return AutoOutcome::Finished;
+            }
             let prev_fails = disp.fails.lock().await.clone();
             let mut merged =
                 merge_auto_items(&results, &current, settings.max_ping_ms, &prev_fails);
+            let removed = {
+                let kept: HashSet<&str> = merged
+                    .items
+                    .iter()
+                    .filter_map(|i| i.url.as_deref())
+                    .collect();
+                current
+                    .keys()
+                    .filter(|u| !kept.contains(u.as_str()))
+                    .count()
+            };
+            crate::commands::history::record_results(app, &results).await;
             add_new_items(&mut merged, &results, &fresh, settings.max_ping_ms);
             *disp.fails.lock().await = merged.fails;
+            if removed > 0 {
+                backup_pool(app, &disp).await;
+            }
             store_pool(&disp, merged.items, false).await;
             save_pool(app, &disp).await;
             let pool_id = pool.to_string();
@@ -752,13 +815,19 @@ mod tests {
             alive_result("http://b:80", 999, "FR"),
         ];
         let m = merge_auto_items(&results, &current, 100, &HashMap::new());
-        assert_eq!(urls(&m), vec!["http://a:80", "http://c:80"]);
+        // b is over the max ping: a first miss, kept with its new latency.
+        assert_eq!(urls(&m), vec!["http://a:80", "http://b:80", "http://c:80"]);
         assert_eq!(m.items[0].raw, "raw-a");
         assert_eq!(m.items[0].latency, Some(10));
         assert_eq!(m.items[0].country.as_deref(), Some("FR"));
-        assert_eq!(m.items[1].raw, "raw-c");
+        assert_eq!(m.items[1].latency, Some(999));
+        assert_eq!(m.fails.get("http://b:80"), Some(&1));
+        assert_eq!(m.items[2].raw, "raw-c");
         assert_eq!(m.avg, Some(10));
         assert_eq!(m.alive, 1);
+        // The second slow cycle in a row drops it.
+        let m = merge_auto_items(&results, &current, 100, &m.fails);
+        assert_eq!(urls(&m), vec!["http://a:80", "http://c:80"]);
 
         // A proxy deleted while the check was running is not resurrected,
         // and an entry without a result is kept as is.
@@ -770,6 +839,30 @@ mod tests {
         let m = merge_auto_items(&results, &current, 0, &HashMap::new());
         assert_eq!(urls(&m), vec!["http://b:80"]);
         assert_eq!(m.alive, 0);
+    }
+
+    #[test]
+    fn a_cycle_where_most_of_the_pool_fails_is_suspicious() {
+        // Most of the pool at once, at least three entries.
+        assert!(looks_like_local_trouble(10, 6));
+        assert!(looks_like_local_trouble(4, 3));
+        assert!(looks_like_local_trouble(3, 3));
+        // Half or less, or a small pool losing one or two.
+        assert!(!looks_like_local_trouble(10, 5));
+        assert!(!looks_like_local_trouble(2, 2));
+        assert!(!looks_like_local_trouble(3, 2));
+        assert!(!looks_like_local_trouble(0, 0));
+    }
+
+    #[test]
+    fn only_the_first_suspicious_cycle_in_a_row_is_held_back() {
+        assert!(apply_cycle(false, 0));
+        // A one-off: the pool and the history stay as they were.
+        assert!(!apply_cycle(true, 0));
+        // It repeats: the proxies really are failing, so it applies, and
+        // removal still needs the usual two misses in a row.
+        assert!(apply_cycle(true, 1));
+        assert!(apply_cycle(true, 5));
     }
 
     #[test]

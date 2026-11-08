@@ -1348,8 +1348,11 @@ window.addEventListener("DOMContentLoaded", () => {
     // An offline cycle repeats every minute: report it once until a check succeeds.
     if (e.payload.state === "offline") {
       if (notifier.latch.raise(`offline@${id}`)) void notifier.send(notifTitle("notif_offline_t", id), t("notif_offline_b"));
+    } else if (e.payload.state === "suspect") {
+      if (notifier.latch.raise(`suspect@${id}`)) void notifier.send(notifTitle("notif_suspect_t", id), t("notif_suspect_b"));
     } else if (e.payload.state === "done") {
       notifier.latch.clear(`offline@${id}`);
+      notifier.latch.clear(`suspect@${id}`);
     }
   }).catch(() => {});
   void listen<AutoPoolEvent>("auto://pool", (e) => {

@@ -373,8 +373,14 @@ The **Auto** tab re-checks the pool every N minutes; each
 
 - Scheduled checks are light: liveness, ping and country; geo is requested
   only for entries without a country.
-- A proxy leaves the pool after two failed checks in a row; **Max ping**
-  removes slower ones (`0` — no limit).
+- A proxy leaves the pool after two failed checks in a row; with **Max ping**
+  set (`0` — no limit), two checks in a row slower than it count the same.
+- A check in which more than half of the pool (at least three proxies) fails
+  changes neither the pool nor the history and says so: that is more often a
+  problem on this machine (a congested uplink, a VPN or firewall blocking
+  proxy ports) than the proxies dying. Only when the next check shows the same
+  is it applied. Before a check removes entries, the pool is copied to
+  `pool.json.bak` (see [Privacy and local data](#privacy-and-local-data)).
 - When no proxy answers and the check server is unreachable directly (offline,
   waking from sleep), the pool is left unchanged and the check is retried in a
   minute; a check crowded out by a manual one is retried the same way.
@@ -455,6 +461,9 @@ Stored locally:
   `~/Library/Application Support/com.nechel12.proxpulse`): the pool **with
   usernames and passwords**, owner-only on Linux and macOS (named pools:
   `pool-<id>.json`, their names in `pools.json`). **Clear pool** clears it.
+  `pool.json.bak` (`pool-<id>.json.bak`) holds the pool as it was before the
+  last scheduled check removed entries; to restore it, quit ProxPulse and
+  rename it to `pool.json`.
   `prefs.json` next to it holds the startup options, the pool API port and
   the dispatcher settings, including login passwords, and `history.json` the
   per-proxy history (URLs without credentials).

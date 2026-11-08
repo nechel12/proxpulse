@@ -27,6 +27,8 @@ All notable changes to ProxPulse. The format follows
 - Answers whose signature could not be checked, because the judge's key could
   not be fetched, are marked `?unv`, with `unverified` in exports.
 - A note under the status line when the judge's key came over plain HTTP.
+- A pool backup, `pool.json.bak` (or `pool-<id>.json.bak`) in the app data
+  folder, written before a scheduled check removes entries.
 
 ### Fixed
 
@@ -36,6 +38,13 @@ All notable changes to ProxPulse. The format follows
   recognised on non-English Windows too.
 - One proxy answering 403 or 429 to the free ip-api lookup no longer pauses
   geo lookups for the whole run; only the shared Pro key does.
+- A scheduled check can no longer empty the pool in one or two cycles. A proxy
+  over the max ping is removed only after two slow checks in a row, like a dead
+  one. A cycle in which more than half of the pool (at least three proxies)
+  fails changes neither the pool nor the history and says so; only when the
+  next cycle shows the same is it applied, so a congested uplink or a VPN that
+  blocks proxy ports for one cycle costs nothing, and a pool that really died
+  is still pruned.
 - A manual check where no proxy answered and the check server does not answer
   directly either says so, and is not written to the proxies' history, where
   it marked every proxy down.

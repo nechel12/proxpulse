@@ -1,7 +1,7 @@
 export type AutoStatusEvent = {
   /** The pool whose schedule ran. */
   pool?: string;
-  state: "fetching" | "running" | "done" | "stopped" | "skipped" | "empty" | "error" | "offline";
+  state: "fetching" | "running" | "done" | "stopped" | "skipped" | "empty" | "error" | "offline" | "suspect";
   alive: number;
   total: number;
   avgMs: number | null;
@@ -68,6 +68,9 @@ export class AutoStatusController {
         break;
       case "offline":
         show(() => `${this.deps.t("auto_offline")} ${time()}`);
+        break;
+      case "suspect":
+        show(() => `${this.deps.t("auto_suspect", { alive: ev.alive, total: ev.total })} ${time()}`);
         break;
     }
     if (ev.state === "done" && shown) this.deps.onDone(ev.avgMs, ev.alive);

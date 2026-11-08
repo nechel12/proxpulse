@@ -1055,8 +1055,31 @@ fn pool_path(app: &tauri::AppHandle, id: &str) -> Option<PathBuf> {
 pub(crate) async fn delete_pool_file(app: &tauri::AppHandle, inner: &DispatchInner) {
     let _guard = inner.save_lock.lock().await;
     if let Some(path) = pool_path(app, &inner.id) {
+        let _ = std::fs::remove_file(pool_backup_path(&path));
         let _ = std::fs::remove_file(path);
     }
+}
+
+/// `pool.json.bak` next to `pool.json`: the pool as it was before the last
+/// scheduled check removed entries from it.
+pub(crate) fn pool_backup_path(pool_file: &Path) -> PathBuf {
+    pool_file.with_extension("json.bak")
+}
+
+/// Keep one copy of the pool before a scheduled check removes entries, so a
+/// wrongly emptied pool, credentials included, can be put back by hand.
+pub(crate) async fn backup_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>) {
+    let Some(path) = pool_path(app, &inner.id) else {
+        return;
+    };
+    let _guard = inner.save_lock.lock().await;
+    // As in `save_pool`: a pool deleted meanwhile must not get a file back.
+    if app.state::<DispatchState>().pool(Some(&inner.id)).is_err() {
+        return;
+    }
+    let items = pool_items(inner).await;
+    let backup = pool_backup_path(&path);
+    let _ = tauri::async_runtime::spawn_blocking(move || write_pool_file(&backup, &items)).await;
 }
 
 /// Write the pool atomically. The file holds proxy credentials.
@@ -1139,6 +1162,13 @@ pub(crate) async fn set_dispatch_pool(
     let inner = state.pool(pool.as_deref())?;
     let n = store_pool(&inner, items, true).await;
     save_pool(&app, &inner).await;
+    if n == 0 {
+        // Clear pool: its backup holds the same logins and passwords.
+        if let Some(path) = pool_path(&app, &inner.id) {
+            let _guard = inner.save_lock.lock().await;
+            let _ = std::fs::remove_file(pool_backup_path(&path));
+        }
+    }
     Ok(n)
 }
 
