@@ -160,14 +160,14 @@
             <summary data-i18n="adv_title">Параметры: таймаут, потоки, повторы</summary>
             <div class="adv-body">
               <div class="grid2">
-                <label class="fld"><span data-i18n="f_timeout">Таймаут, мс</span><input id="timeout" type="number" value="5000" min="1000" max="30000" step="500" /></label>
-                <label class="fld"><span data-i18n="f_threads">Потоки</span><input id="concurrency" type="number" value="50" min="1" max="500" /></label>
+                <label class="fld" data-i18n-title="f_timeout_t"><span data-i18n="f_timeout">Таймаут, мс</span><input id="timeout" type="number" value="5000" min="1000" max="30000" step="500" /></label>
+                <label class="fld" data-i18n-title="f_threads_t"><span data-i18n="f_threads">Потоки</span><input id="concurrency" type="number" value="50" min="1" max="500" /></label>
               </div>
               <div class="grid2">
-                <label class="fld"><span data-i18n="f_repeats">Замеры</span><input id="repeats" type="number" value="1" min="1" max="5" step="1" /></label>
-                <label class="fld"><span data-i18n="f_speed_mb">Тест скорости, МБ</span><select id="speed-mb"><option value="1">1</option><option value="5">5</option><option value="10">10</option><option value="25">25</option></select></label>
-                <label class="fld">
-                  <span data-i18n="f_protonoscheme">Тип без схемы</span>
+                <label class="fld" data-i18n-title="f_repeats_t"><span data-i18n="f_repeats">Замеров на прокси</span><input id="repeats" type="number" value="1" min="1" max="5" step="1" /></label>
+                <label class="fld" data-i18n-title="f_speed_mb_t"><span data-i18n="f_speed_mb">Объём теста скорости, МБ</span><select id="speed-mb"><option value="1">1</option><option value="5">5</option><option value="10">10</option><option value="25">25</option></select></label>
+                <label class="fld" data-i18n-title="f_protonoscheme_t">
+                  <span data-i18n="f_protonoscheme">Протокол строк без схемы</span>
                   <select id="default-proto">
                     <option value="http" data-i18n="opt_http" selected>HTTP</option>
                     <option value="socks5">SOCKS5</option>
@@ -177,8 +177,8 @@
                 </label>
               </div>
               <div class="checks end">
-                <label class="chk"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Пречек порта</span></label>
-                <label class="fld" style="flex:1"><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" data-i18n-title="precheck_timeout" data-i18n-aria="precheck_timeout" /></label>
+                <label class="chk" data-i18n-title="precheck_label_t"><input id="chk-precheck" type="checkbox" checked /><span data-i18n="precheck_label">Сначала проверять порт</span></label>
+                <label class="fld" style="flex:1"><span data-i18n="precheck_timeout">Таймаут пречека, мс</span><input id="precheck-timeout" type="number" value="1500" min="300" max="10000" step="100" data-i18n-title="precheck_timeout" data-i18n-aria="precheck_timeout" /></label>
               </div>
             </div>
           </details>
@@ -388,7 +388,7 @@
             <button id="auto-on" class="sqchk" aria-pressed="false"><span class="sq"></span><span data-i18n="auto_on">Вкл</span></button>
             <label class="fld" style="flex:1"><span data-i18n="auto_every">Каждые, мин</span><input id="auto-min" type="number" value="30" min="1" max="1440" /></label>
           </div>
-          <label class="fld" style="margin-top:8px"><span data-i18n="max_ping">Макс. пинг, мс</span><input id="auto-max-ping" type="number" value="0" min="0" data-i18n-ph="max_ping_ph" placeholder="0 — без лимита" /></label>
+          <label class="fld" style="margin-top:8px"><span data-i18n="max_ping">Макс. пинг, мс (0 — без лимита)</span><input id="auto-max-ping" type="number" value="0" min="0" data-i18n-ph="max_ping_ph" placeholder="0 — без лимита" /></label>
           <button id="btn-auto-now" class="btn ghost" data-i18n="auto_now">Проверить сейчас</button>
           <div id="auto-status" class="status-line">—</div>
           <div class="panel-head" style="margin-top:14px">

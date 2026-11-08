@@ -227,6 +227,9 @@ All notable changes to ProxPulse. The format follows
   address gets its own message instead of the one about `http(s)://`; and the
   backend's error words (`timeout`, `connection refused`, `http 502`) appear
   in the interface's language.
+- Check settings say what they do: "Requests per proxy", "Protocol for lines
+  without a scheme", "Check the port first" with a visible timeout and unit,
+  "Speed test size", "Max ping, ms (0 — no limit)", each with a tooltip.
 - Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
   and the odd releases 23 and 25 were accepted before.
 

@@ -198,12 +198,12 @@ plain HTTP. See the
 |---|---|---|
 | Timeout | 5000 ms | limit for one request through the proxy (1000–30000) |
 | Threads | 50 | proxies checked in parallel (1–500) |
-| Samples | 1 | requests per proxy for ping, jitter and success rate (1–5); each opens a new connection, so ping includes connecting to the proxy |
-| No-scheme type | HTTP | protocol for entries without a scheme; **HTTP + SOCKS5** tries both |
-| Port precheck | on, 1500 ms | fast TCP connect that drops dead hosts before the full check |
+| Requests per proxy | 1 | requests per proxy for ping, jitter and success rate (1–5); each opens a new connection, so ping includes connecting to the proxy |
+| Protocol for lines without a scheme | HTTP | protocol for entries without a scheme; **HTTP + SOCKS5** tries both |
+| Check the port first | on, 1500 ms | fast TCP connect that drops dead hosts before the full check |
 
 Presets: **Fast** (liveness only), **Standard** (all deep checks),
-**Deep** (ip-api, 3 samples), **Judge** (built-in judge, full mode). Editing
+**Deep** (ip-api, 3 requests per proxy), **Judge** (built-in judge, full mode). Editing
 any setting turns the selection into a custom configuration; **+ Save**
 stores it as a named preset.
 
