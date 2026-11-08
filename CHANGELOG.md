@@ -10,6 +10,14 @@ All notable changes to ProxPulse. The format follows
 
 - A judge's key that came over HTTPS is only replaced over HTTPS during a run,
   so nobody on the direct path can force plain HTTP on the second key request.
+- A line with a scheme ProxPulse cannot speak (`vless://`, `trojan://`, `ss://`,
+  or JSON whose `type` is `elite`) is no longer taken for a proxy. Such a line
+  was "checked" with no proxy at all, straight from your own connection, and
+  showed up alive and `elite` with your IP and country.
+- SOCKS5 proxies resolve host names through the proxy, as the dispatcher does,
+  instead of on your machine, which leaked every checked host name to your DNS
+  resolver. A SOCKS5 server that refuses host names now shows as dead, as it
+  would fail in the dispatcher, and the ping includes the proxy's own lookup.
 
 ### Added
 

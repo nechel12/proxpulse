@@ -91,8 +91,12 @@ pub(crate) fn build_from_parts(
     if host.is_empty() || !valid_port(port) {
         return None;
     }
-    let prefix = match proto.map(str::trim).filter(|p| !p.is_empty()) {
-        Some(p) if p.contains("://") => p.to_lowercase(),
+    // A protocol field that names no proxy protocol (`"type": "elite"` in
+    // many public feeds means anonymity) is ignored: the default applies.
+    let prefix = match proto
+        .map(|p| p.trim().trim_end_matches("://"))
+        .filter(|p| is_proto_name(p))
+    {
         Some(p) => format!("{}://", p.to_lowercase()),
         None => String::new(),
     };

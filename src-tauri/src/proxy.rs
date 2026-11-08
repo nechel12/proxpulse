@@ -261,7 +261,10 @@ pub(crate) fn normalize_proxy(raw: &str, default_proto: &str) -> Option<(String,
     }
 
     let (explicit_scheme, mut authority) = match s.split_once("://") {
-        Some((sch, rest)) if !sch.trim().is_empty() => {
+        // Only schemes the checker can speak: a `vless://`, `trojan://` or
+        // `ss://` link is not a proxy it can check, and passing it on would
+        // make the check go out directly (see `http::reqwest_proxy_url`).
+        Some((sch, rest)) if is_proto_name(sch.trim()) => {
             (Some(sch.trim().to_lowercase()), rest.to_string())
         }
         Some(_) => return None,

@@ -117,6 +117,70 @@ fn json_inputs() {
         vec!["1.2.3.4:8080"]
     );
     assert!(extract(r#"{"version":"1.0.0"}"#).is_empty());
+    // "type" often means anonymity, not protocol: the default protocol applies
+    // instead of an `elite://` URL that would be checked without a proxy.
+    assert_eq!(
+        parse(r#"[{"ip":"1.2.3.4","port":8080,"type":"elite"}]"#),
+        vec!["1.2.3.4:8080"]
+    );
+    assert_eq!(
+        extract(r#"[{"ip":"1.2.3.4","port":8080,"type":"elite"}]"#),
+        vec!["1.2.3.4:8080"]
+    );
+}
+
+#[test]
+fn unsupported_schemes_are_not_proxies() {
+    // Links of other protocols would be "checked" with no proxy at all. At
+    // most the address:port fallback picks the host up as a plain proxy.
+    for line in [
+        "vless://uuid@1.2.3.4:443?security=tls#x",
+        "trojan://pass@1.2.3.4:443",
+        "ss://YWVzLTI1Ni1nY206cGFzcw@1.2.3.4:8388",
+        "elite://1.2.3.4:8080",
+    ] {
+        assert_eq!(crate::proxy::normalize_proxy(line, "http"), None, "{line}");
+        for found in extract(line) {
+            let (url, _) = crate::proxy::normalize_proxy(&found, "http").unwrap();
+            assert!(
+                crate::http::reqwest_proxy_url(&url).is_ok(),
+                "{line} -> {url}"
+            );
+        }
+    }
+    // The address:port fallback does pick the host up, so the loop above ran.
+    assert_eq!(extract("elite://1.2.3.4:8080"), vec!["1.2.3.4:8080"]);
+    assert_eq!(
+        crate::proxy::normalize_proxy("socks://1.2.3.4:1080", "http").map(|(u, _)| u),
+        Some("socks5://1.2.3.4:1080".to_string())
+    );
+}
+
+#[test]
+fn checks_never_go_out_without_the_proxy() {
+    use crate::http::reqwest_proxy_url;
+    assert_eq!(
+        reqwest_proxy_url("socks5://u:p@1.2.3.4:1080").as_deref(),
+        Ok("socks5h://u:p@1.2.3.4:1080")
+    );
+    assert_eq!(
+        reqwest_proxy_url("http://1.2.3.4:8080").as_deref(),
+        Ok("http://1.2.3.4:8080")
+    );
+    assert_eq!(
+        reqwest_proxy_url("socks4://1.2.3.4:1080").as_deref(),
+        Ok("socks4://1.2.3.4:1080")
+    );
+    for bad in [
+        "vless://1.2.3.4:443",
+        "elite://1.2.3.4:8080",
+        "1.2.3.4:8080",
+    ] {
+        assert!(reqwest_proxy_url(bad).is_err(), "{bad}");
+        assert!(
+            crate::http::build_client(Some(bad), std::time::Duration::from_secs(1), false).is_err()
+        );
+    }
 }
 
 #[test]

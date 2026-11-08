@@ -107,6 +107,26 @@ fn client_cache() -> &'static StdMutex<ClientCache> {
     })
 }
 
+/// The proxy URL as reqwest should get it, or an error for a scheme it cannot
+/// use. reqwest accepts any URL as a proxy, but hyper-util silently skips a
+/// scheme it does not know and the request then goes out directly, from the
+/// user's own address: a `vless://` line would be "checked" without a proxy.
+/// SOCKS5 becomes `socks5h`, so names are resolved by the proxy, as the
+/// dispatcher does, instead of leaking to the local resolver.
+pub(crate) fn reqwest_proxy_url(url: &str) -> Result<String, String> {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return Err("invalid proxy URL".to_string());
+    };
+    let scheme = match scheme.to_ascii_lowercase().as_str() {
+        "socks5" | "socks" | "socks5h" => "socks5h",
+        s @ ("http" | "https" | "socks4" | "socks4a") => {
+            return Ok(format!("{s}://{rest}"));
+        }
+        _ => return Err("unsupported proxy protocol".to_string()),
+    };
+    Ok(format!("{scheme}://{rest}"))
+}
+
 pub(crate) fn build_client(
     proxy_url: Option<&str>,
     timeout: Duration,
@@ -136,7 +156,9 @@ pub(crate) fn build_client(
         b = b.no_proxy();
     }
     if let Some(u) = proxy_url {
-        let p = reqwest::Proxy::all(u).map_err(|e| short_error(&e.to_string()))?;
+        // reqwest's own message would repeat the URL, password included.
+        let p = reqwest::Proxy::all(reqwest_proxy_url(u)?)
+            .map_err(|_| "invalid proxy URL".to_string())?;
         // No idle connections through a checked proxy: every sample (and
         // every later run) then measures the full path, TCP + proxy
         // handshake + request. A reused tunnel would make later samples look
