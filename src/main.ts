@@ -25,6 +25,7 @@ import { PoolApiPanel } from "./pool-api.ts";
 import { AutoSettingsStore, storedAutoConfig } from "./auto-settings.ts";
 import { MAIN_POOL, MAX_POOLS, forgetPoolSettings, poolLabel, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
+import { runButtons } from "./run-buttons.ts";
 import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
 import { AppSettings, readFlag, writeFlag } from "./app-settings.ts";
@@ -241,7 +242,11 @@ function renderPool() {
   }, screenVisible);
 }
 
-function mergePool(items: { raw: string; url?: string | null; latency: number | null; country?: string | null }[]) {
+/** A check's alive rows into the shown pool. */
+function mergeAlive(rows: ProxyResult[]): void {
+  const items = rows
+    .filter((r) => r.alive)
+    .map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) }));
   pool.merge(items, maxPingMs, MAX_PROXIES);
 }
 
@@ -565,7 +570,7 @@ dispatchMonitor.pool = currentPool;
 const autoStatus = new AutoStatusController({
   t,
   setStatusText,
-  isManualRunning: () => running,
+  onChange: () => syncRunButtons(),
   poolName: (id) => poolLabel(pools.find((p) => p.id === id) ?? { id, name: "" }, t),
   onDone: (avg, alive) => {
     pingHist = pushPingPointStats(pingHist, avg, alive);
@@ -587,13 +592,26 @@ async function sendWebhook(manual: boolean): Promise<void> {
 async function withStart(body: () => Promise<void>): Promise<void> {
   if (running || starting) return;
   starting = true;
-  ($("btn-start") as HTMLButtonElement).disabled = true;
+  syncRunButtons();
   try {
     await body();
   } finally {
     starting = false;
-    if (!running) ($("btn-start") as HTMLButtonElement).disabled = false;
+    syncRunButtons();
   }
+}
+
+/** Start, Stop and "Check now" follow the run state; nothing else sets them. */
+function syncRunButtons(): void {
+  const on = runButtons({
+    manual: running,
+    starting,
+    autoChecking: autoStatus.checking,
+    autoRunning: autoStatus.running,
+  });
+  ($("btn-start") as HTMLButtonElement).disabled = !on.start;
+  ($("btn-stop") as HTMLButtonElement).disabled = !on.stop;
+  ($("btn-auto-now") as HTMLButtonElement).disabled = !on.autoNow;
 }
 
 async function start() {
@@ -693,8 +711,7 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
   }
   render();
   updateCounts();
-  ($("btn-start") as HTMLButtonElement).disabled = true;
-  ($("btn-stop") as HTMLButtonElement).disabled = false;
+  syncRunButtons();
   setNet("work", "net_work", { s: 0 });
   setProgress(0, list.length);
   // Not "parsing" until the first result: the list is parsed already.
@@ -737,8 +754,7 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
     /* otherwise keep partial results delivered through the channel */
   } finally {
     running = false;
-    ($("btn-start") as HTMLButtonElement).disabled = false;
-    ($("btn-stop") as HTMLButtonElement).disabled = !autoStatus.running;
+    syncRunButtons();
     window.clearInterval(ticker);
   }
 
@@ -767,7 +783,7 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
 
   // merge alive into dispatcher pool (existing entries kept)
   if (currentPool === targetPool) {
-    mergePool(checked.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
+    mergeAlive(checked);
     renderPool();
     updateCounts();
     await syncPool(false);
@@ -786,7 +802,7 @@ async function speedTest(rows: ProxyResult[]): Promise<void> {
     if (!(await checkerFree())) return;
     running = true;
     stopFlag = false;
-    ($("btn-stop") as HTMLButtonElement).disabled = false;
+    syncRunButtons();
     setNet("work", "net_work", { s: 0 });
     const total = rows.length;
     let done = 0;
@@ -812,7 +828,7 @@ async function speedTest(rows: ProxyResult[]): Promise<void> {
       logErr("speed: " + failed.slice(0, 200));
     } finally {
       running = false;
-      ($("btn-stop") as HTMLButtonElement).disabled = !autoStatus.running;
+      syncRunButtons();
     }
     if (failed?.includes("another check is running")) setStatusT("auto_skip");
     else if (failed) setStatusT("speed_err", { e: failed.slice(0, 120) });
@@ -841,7 +857,7 @@ async function rowAction(action: RowAction, rows: ProxyResult[]): Promise<void> 
   } else if (action === "pool") {
     const alive = rows.filter((r) => r.alive);
     const before = pool.count;
-    mergePool(alive.map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
+    mergeAlive(alive);
     renderPool();
     updateCounts();
     const n = await syncPool(false);
@@ -1036,7 +1052,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   async function doPoolSync(statusElId: string): Promise<void> {
-    mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
+    mergeAlive(results);
     renderPool();
     updateCounts();
     const n = await syncPool(false);
@@ -1252,7 +1268,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setStatusText("srv-status", () => "...");
     try {
       if (pool.count === 0) {
-        mergePool(results.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
+        mergeAlive(results);
         renderPool();
         updateCounts();
       }
@@ -1485,9 +1501,6 @@ window.addEventListener("DOMContentLoaded", () => {
     .then((busy) => {
       if (!busy) return;
       autoStatus.restore();
-      ($("btn-start") as HTMLButtonElement).disabled = true;
-      ($("btn-stop") as HTMLButtonElement).disabled = false;
-      ($("btn-auto-now") as HTMLButtonElement).disabled = true;
       waitUntilFree();
     })
     .catch(() => {});

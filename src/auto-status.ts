@@ -14,7 +14,8 @@ export type AutoStatusEvent = {
 type Deps = {
   t: Translate;
   setStatusText: StatusSetter;
-  isManualRunning: () => boolean;
+  /** `running` or `checking` changed: the run buttons follow them. */
+  onChange: () => void;
   onDone: (avgMs: number | null, alive: number) => void;
   locale: () => string;
   /** The pool's name as the tabs show it. */
@@ -22,9 +23,14 @@ type Deps = {
 };
 
 export class AutoStatusController {
+  /** A schedule is fetching subscriptions or checking. */
   running = false;
-  /** Pools whose scheduled check is in progress. */
+  /** A scheduled check holds the checker (after a reload: one may). */
+  checking = false;
+  /** Pools whose scheduled cycle is in progress. */
   private active = new Set<string>();
+  /** Of those, the ones checking rather than fetching. */
+  private inCheck = new Set<string>();
 
   constructor(private deps: Deps) {}
 
@@ -46,15 +52,16 @@ export class AutoStatusController {
         ev.state === "fetching" ? this.deps.t("auto_fetching") : this.deps.t("auto_running", { n: ev.total }),
       );
       this.active.add(pool);
-      this.running = true;
-      if (ev.state === "running") this.buttons(true);
+      if (ev.state === "running") this.inCheck.add(pool);
+      this.update();
       this.renderCheckNote(pool);
       return;
     }
     // Every other state ends that pool's cycle, "skipped" too: a cycle that
     // fetched subscriptions and then met a manual check is over.
     this.active.delete(pool);
-    this.running = this.active.size > 0;
+    this.inCheck.delete(pool);
+    this.update();
     this.renderCheckNote([...this.active][0]);
     switch (ev.state) {
       case "skipped":
@@ -80,20 +87,13 @@ export class AutoStatusController {
         break;
     }
     if (ev.state === "done" && shown) this.deps.onDone(ev.avgMs, ev.alive);
-    if (this.running) return;
-    if (!this.deps.isManualRunning()) {
-      const start = document.getElementById("btn-start") as HTMLButtonElement | null;
-      if (start) start.disabled = false;
-      const stop = document.getElementById("btn-stop") as HTMLButtonElement | null;
-      if (stop) stop.disabled = true;
-    }
-    const now = document.getElementById("btn-auto-now") as HTMLButtonElement | null;
-    if (now) now.disabled = false;
   }
 
+  /** After a reload the backend says a check runs: assume a scheduled one. */
   restore(): void {
     this.running = true;
-    this.buttons(true);
+    this.checking = true;
+    this.deps.onChange();
     this.renderCheckNote("");
   }
 
@@ -103,9 +103,14 @@ export class AutoStatusController {
    */
   release(): void {
     if (this.active.size > 0) return;
-    this.running = false;
-    this.buttons(false);
+    this.update();
     this.renderCheckNote(undefined);
+  }
+
+  private update(): void {
+    this.running = this.active.size > 0;
+    this.checking = this.inCheck.size > 0;
+    this.deps.onChange();
   }
 
   /**
@@ -125,12 +130,4 @@ export class AutoStatusController {
     note.hidden = false;
   }
 
-  private buttons(active: boolean): void {
-    const start = document.getElementById("btn-start") as HTMLButtonElement | null;
-    if (start) start.disabled = active;
-    const stop = document.getElementById("btn-stop") as HTMLButtonElement | null;
-    if (stop) stop.disabled = !active;
-    const now = document.getElementById("btn-auto-now") as HTMLButtonElement | null;
-    if (now) now.disabled = active;
-  }
 }
