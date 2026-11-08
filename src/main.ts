@@ -325,7 +325,12 @@ function pushPingPoint(list: ProxyResult[] = results): void {
   renderPingGraph(pingHist, lang);
 }
 
+/** False while a switched-to pool is loading: its list is empty until then. */
+let poolLoaded = true;
+
 async function syncPool(notify: boolean): Promise<number> {
+  // Syncing the empty list of a pool still loading would wipe it.
+  if (!poolLoaded) return -1;
   try {
     const n = await invoke<number>("set_dispatch_pool", {
       pool: currentPool,
@@ -393,6 +398,7 @@ async function loadPoolItems(): Promise<void> {
       latency: p.latency,
       country: p.country ?? null,
     })));
+    poolLoaded = true;
     poolCounts.set(id, pool.count);
     renderPool();
     updateCounts();
@@ -411,6 +417,11 @@ function renderPoolSwitchers(): void {
   document.querySelectorAll<HTMLElement>(".pool-tag").forEach((el) => {
     el.textContent = pools.length > 1 ? ` · ${label}` : "";
   });
+  const into = document.getElementById("check-pool-note");
+  if (into) {
+    into.hidden = pools.length < 2;
+    into.textContent = pools.length > 1 ? t("check_into_pool", { pool: label }) : "";
+  }
 }
 
 function showWebhookOptions(): void {
@@ -451,6 +462,7 @@ async function switchPool(id: string): Promise<void> {
   showDispatchOptions();
   renderPoolSwitchers();
   poolApi.render();
+  poolLoaded = false;
   pool.set([]);
   renderPool();
   updateCounts();
@@ -642,8 +654,30 @@ async function startInner() {
   await runList(list, { recheck: false, truncated });
 }
 
+/**
+ * Merge alive proxies into a pool that is not shown any more: the run
+ * started for it, and the pool picked meanwhile must not get its results.
+ */
+async function mergeIntoPool(id: string, alive: ProxyResult[]): Promise<void> {
+  try {
+    const items = await invoke<PoolItem[]>("get_dispatch_pool", { pool: id });
+    const target = new PoolView();
+    target.set(items.map((p) => ({ raw: p.raw, url: p.url, latency: p.latency, country: p.country ?? null })));
+    let maxPing = 0;
+    try {
+      maxPing = Math.max(0, Math.floor(Number(localStorage.getItem(scopedKey("pp-maxping", id))) || 0));
+    } catch { /* ignore */ }
+    target.merge(alive.map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })), maxPing, MAX_PROXIES);
+    const n = await invoke<number>("set_dispatch_pool", { pool: id, items: target.items });
+    poolCounts.set(id, n);
+  } catch { /* the pool was deleted meanwhile */ }
+}
+
 async function runList(list: string[], opts: { recheck: boolean; truncated: boolean }) {
   running = true;
+  // The pool shown when the run starts takes its alive proxies, even if
+  // another one is picked before it ends.
+  const targetPool = currentPool;
   stopFlag = false;
   keyOverHttp = false;
   renderKeyNote();
@@ -716,10 +750,14 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
   setNet("done", stopFlag ? "net_stopped" : "net_done");
 
   // merge alive into dispatcher pool (existing entries kept)
-  mergePool(checked.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
-  renderPool();
-  updateCounts();
-  await syncPool(false);
+  if (currentPool === targetPool) {
+    mergePool(checked.filter((r) => r.alive).map((r) => ({ raw: r.proxy, url: r.url, latency: r.latency_ms, country: poolCountry(r) })));
+    renderPool();
+    updateCounts();
+    await syncPool(false);
+  } else {
+    await mergeIntoPool(targetPool, checked.filter((r) => r.alive));
+  }
   // A re-check of a few entries would distort the per-run ping history.
   if (!base) pushPingPoint(results);
   void attachHistory();

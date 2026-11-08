@@ -162,6 +162,10 @@ All notable changes to ProxPulse. The format follows
   cancels it.
 - A click on a built-in preset no longer wipes your own judge address and
   custom check URL; it sets how to check, and keeps where.
+- Alive proxies of a check go to the pool shown when it started, even if
+  another is picked before it ends, and the Check tab names that pool when
+  there are several. A pool still loading after a switch is no longer synced
+  as empty, which could wipe it.
 
 ## [0.6.1] — 2026-11-07
 
