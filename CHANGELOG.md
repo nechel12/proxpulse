@@ -91,6 +91,10 @@ All notable changes to ProxPulse. The format follows
   cache tells them apart by a hash of the username, never the password.
 - Scheduled checks use the pool's known countries instead of looking geo up
   again through every live proxy each cycle, which used up the ip-api limit.
+- When your own IP could not be learned, a judge's answer no longer gives an
+  anonymity verdict: without it the judge cannot see a leak, so a transparent
+  proxy showed as `anon` or even `elite`. The judge's own `/ip` over HTTPS is
+  now asked when `api.ipify.org` does not answer.
 
 ## [0.6.1] — 2026-11-07
 

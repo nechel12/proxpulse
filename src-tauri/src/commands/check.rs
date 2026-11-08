@@ -637,7 +637,10 @@ pub(crate) fn apply_judge_integrity(
     proxy_sha: Option<&str>,
 ) {
     res.tamper = judge_sig::judge_tamper(check, baseline.judge_content_sha.as_deref(), proxy_sha);
-    if check == judge_sig::SignatureCheck::Invalid {
+    // Without our direct IP the judge cannot see a leak: its "elite" or
+    // "anonymous" may hide "transparent", so there is no verdict, as without
+    // a judge.
+    if check == judge_sig::SignatureCheck::Invalid || baseline.direct_ip.is_none() {
         res.anonymity = None;
     }
 }
@@ -751,7 +754,36 @@ pub(crate) fn wants_direct_ip(flags: &CheckFlags, test_url: &str) -> bool {
     }
 }
 
-async fn fetch_baseline(flags: CheckFlags, want_ip: bool) -> Baseline {
+/// `https://host/ip` next to a judge address: the judge tells a direct client
+/// its address too. HTTPS only, since a wrong address would hide leaks.
+pub(crate) fn judge_ip_url(judge_url: &str) -> Option<String> {
+    let key = judge_sig::key_url(judge_url)?;
+    let base = key.strip_suffix("/key")?;
+    let rest = base
+        .strip_prefix("https://")
+        .or_else(|| base.strip_prefix("http://"))?;
+    Some(format!("https://{rest}/ip"))
+}
+
+/// Our address as one of these services sees it: api.ipify.org answers with
+/// the bare address, a judge's `/ip` with `{"ip": ...}`.
+async fn lookup_direct_ip(client: &reqwest::Client, url: &str) -> Option<String> {
+    let r = client.get(url).send().await.ok()?;
+    if !r.status().is_success() {
+        return None;
+    }
+    let body = read_body_capped(r, BODY_LIMIT_SMALL).await.ok()?;
+    let body = body.trim();
+    let ip = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("ip")?.as_str().map(str::to_string))
+        .unwrap_or_else(|| body.to_string());
+    looks_like_ip(&ip).then_some(ip)
+}
+
+/// `judge_ip`: the judge's own `/ip` over HTTPS, asked when api.ipify.org
+/// does not answer.
+async fn fetch_baseline(flags: CheckFlags, want_ip: bool, judge_ip: Option<String>) -> Baseline {
     let timeout = Duration::from_millis(9000);
     let direct_ip = async {
         if !want_ip {
@@ -766,18 +798,15 @@ async fn fetch_baseline(flags: CheckFlags, want_ip: bool) -> Baseline {
             }
         }
         let c = build_client(None, timeout, true).ok()?;
-        let r = c.get("https://api.ipify.org").send().await.ok()?;
-        if !r.status().is_success() {
-            return None;
+        let mut found = lookup_direct_ip(&c, "https://api.ipify.org").await;
+        if found.is_none() {
+            if let Some(url) = &judge_ip {
+                found = lookup_direct_ip(&c, url).await;
+            }
         }
-        let t = read_body_capped(r, BODY_LIMIT_SMALL).await.ok()?;
-        let t = t.trim().to_string();
-        if looks_like_ip(&t) {
-            baseline_cache().lock().await.direct_ip = Some((t.clone(), Instant::now()));
-            Some(t)
-        } else {
-            None
-        }
+        let t = found?;
+        baseline_cache().lock().await.direct_ip = Some((t.clone(), Instant::now()));
+        Some(t)
     };
     let example = async {
         if !flags.tamper {
@@ -887,7 +916,11 @@ pub(crate) async fn run_checks(
         tokio::join!(
             tokio::time::timeout(
                 Duration::from_secs(20),
-                fetch_baseline(flags.clone(), wants_direct_ip(&flags, &test_url))
+                fetch_baseline(
+                    flags.clone(),
+                    wants_direct_ip(&flags, &test_url),
+                    judge_url.as_deref().and_then(judge_ip_url),
+                )
             ),
             async {
                 match &judge_url {

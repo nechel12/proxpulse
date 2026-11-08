@@ -229,6 +229,19 @@ fn the_http_judge_always_gets_its_key() {
 }
 
 #[test]
+fn the_judge_tells_us_our_address_over_https_only() {
+    use crate::commands::check::judge_ip_url;
+    assert_eq!(
+        judge_ip_url("http://j.example/judge").as_deref(),
+        Some("https://j.example/ip")
+    );
+    assert_eq!(
+        judge_ip_url("https://j.example:8443/svc/judge?x=1").as_deref(),
+        Some("https://j.example:8443/svc/ip")
+    );
+}
+
+#[test]
 fn a_forged_judge_answer_leaves_no_exit_ip_or_geo() {
     use crate::commands::check::forget_judge_answer;
     let mut res =

@@ -233,7 +233,7 @@ avoids repeated lookups for unchanged exit IPs.
 | Info | `?mod`, `?tls` | The page through the proxy differs from the direct one or fails the judge's signature / the TLS certificate differs. The row tooltip lists every result. |
 | Info | `?unv` | The judge's key could not be fetched, so the answer's signature was not checked. |
 | Info | `bl N` | The exit IP is on N blocklists; the tooltip names them. |
-| Anon, Geo, TLS | `—` | Not checked: off, unsupported by the proxy, or an HTTPS judge. |
+| Anon, Geo, TLS | `—` | Not checked: off, unsupported by the proxy, or an HTTPS judge. Anon is also `—` when your own IP could not be learned (neither `api.ipify.org` nor the judge's `/ip` answered): without it a leak cannot be seen. |
 | Anon, Geo, TLS | `limit` | Skipped at a concurrency limit; running the check again fills it. |
 
 ```mermaid
@@ -447,8 +447,10 @@ release page instead.
 
 Network requests leave the machine for: the selected check target; ip-api,
 httpbin.org and example.com when deep checks are on; direct (no proxy)
-baselines — your IP and the example.com reference — and a connectivity check
-when a scheduled check finds no alive proxy; the selected judge; GitHub
+baselines — your IP from `api.ipify.org` (or, when it does not answer, from
+the judge's own `/ip` over HTTPS) and the example.com reference — and a
+connectivity check when a scheduled check finds no alive proxy; the selected
+judge; GitHub
 Releases (update check, also at launch unless turned off); configured
 webhooks; URL imports and subscriptions; the chosen sites through each alive
 proxy; `speed.cloudflare.com` through the proxies of a speed test; your DNS
