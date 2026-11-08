@@ -589,7 +589,7 @@ verified against the signing key embedded in the app.
 
 ## Build from source
 
-Requirements: [Node.js](https://nodejs.org/) 22.12+, [Rust](https://rustup.rs/)
+Requirements: [Node.js](https://nodejs.org/) 22.13+ (or 24+), [Rust](https://rustup.rs/)
 1.90+, WebView2 on Windows (preinstalled on Windows 10/11), WebKitGTK and the
 packages below on Linux.
 

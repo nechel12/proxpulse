@@ -5,7 +5,7 @@ explain the behavior and tradeoffs in the PR description.
 
 ## Development
 
-- [Node.js](https://nodejs.org/) 22.12+ and [Rust](https://rustup.rs/) 1.90+.
+- [Node.js](https://nodejs.org/) 22.13+ (or 24+) and [Rust](https://rustup.rs/) 1.90+.
 - WebView2 on Windows (preinstalled on Windows 10/11); WebKitGTK and the other
   system packages listed in the README on Linux.
 

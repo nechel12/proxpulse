@@ -196,6 +196,8 @@ All notable changes to ProxPulse. The format follows
   open any URL, reveal folders and show file dialogs, which it never uses.
 - The prompts for importing or resetting settings say that the check results
   and the pasted list are lost when the window reloads.
+- Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
+  and the odd releases 23 and 25 were accepted before.
 
 ## [0.6.1] — 2026-11-07
 

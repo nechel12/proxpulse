@@ -604,7 +604,7 @@ URL (вебхуки, импорт по URL) допускаются только 
 
 ## Сборка из исходников
 
-Нужны [Node.js](https://nodejs.org/) 22.12+, [Rust](https://rustup.rs/)
+Нужны [Node.js](https://nodejs.org/) 22.13+ (или 24+), [Rust](https://rustup.rs/)
 1.90+, WebView2 в Windows (предустановлен в Windows 10/11), WebKitGTK и
 пакеты ниже в Linux.
 
