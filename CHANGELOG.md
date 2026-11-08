@@ -38,6 +38,9 @@ All notable changes to ProxPulse. The format follows
 - Subscriptions can no longer add addresses on this machine or its local
   network (`127.0.0.1`, `192.168.x.x`, `localhost`, …) to a pool; such lines
   are skipped. Your own lists are not limited.
+- The Pool API gives out proxy usernames and passwords only for a pool with a
+  dispatcher login. Without one, any user of the computer could read them,
+  since loopback is shared.
 
 ### Added
 

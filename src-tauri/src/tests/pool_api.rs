@@ -132,6 +132,47 @@ async fn get(port: u16, request: &str) -> (String, String) {
 }
 
 #[tokio::test]
+async fn passwords_need_a_login() {
+    let with_password = |host: &str| Upstream {
+        url: format!("http://u:p%40ss@{host}:1080"),
+        user: Some("u".into()),
+        pass: Some("p@ss".into()),
+        ..up("http", host, "DE", 10)
+    };
+    let open = Arc::new(DispatchInner::new(MAIN_POOL));
+    *open.pool.lock().await = vec![with_password("10.0.0.1")];
+    let locked = Arc::new(DispatchInner::new("p1"));
+    *locked.pool.lock().await = vec![with_password("10.0.0.2")];
+    *locked.options.lock().await = DispatchOptions {
+        auth_user: "me".into(),
+        auth_pass: "secret".into(),
+        ..DispatchOptions::default()
+    };
+    let pools = vec![(meta(MAIN_POOL, ""), open), (meta("p1", "Work"), locked)];
+    let source: PoolSource = Arc::new(move || pools.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(serve(listener, source));
+    let req = |path: &str, auth: &str| {
+        format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}\r\n")
+    };
+
+    // No login on the pool: any process here could ask, so no passwords.
+    let (_, body) = get(port, &req("/list", "")).await;
+    assert_eq!(body, "http://10.0.0.1:1080\n");
+    let (_, body) = get(port, &req("/random?format=json", "")).await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["url"], "http://10.0.0.1:1080");
+
+    // With the pool's login, the full URL.
+    let token = base64::engine::general_purpose::STANDARD.encode("me:secret");
+    let auth = format!("Authorization: Basic {token}\r\n");
+    let (_, body) = get(port, &req("/list?pool=work", &auth)).await;
+    assert_eq!(body, "http://u:p%40ss@10.0.0.2:1080\n");
+    server.abort();
+}
+
+#[tokio::test]
 async fn the_api_serves_the_pools() {
     let main = Arc::new(DispatchInner::new(MAIN_POOL));
     *main.pool.lock().await = vec![

@@ -361,10 +361,11 @@ curl "http://127.0.0.1:1090/random?country=DE&proto=socks5"
 curl -u user:pass "http://127.0.0.1:1090/list?pool=work&format=json&limit=20"
 ```
 
-- Proxies come as URLs **with their usernames and passwords**.
 - A pool with a dispatcher login answers only with the same login (HTTP
-  Basic, `curl -u`), and `/pools` lists it only then. Without one, any local
-  process can read it.
+  Basic, `curl -u`), and `/pools` lists it only then. Its proxies come as URLs
+  **with their usernames and passwords**.
+- A pool without a login can be read by any local process, so its proxies come
+  without usernames and passwords. Set a dispatcher login to get them.
 - Upstreams paused after a failure are left out unless nothing else matches.
 - Errors: `400` for a bad parameter, `404` for no match or an unknown pool or
   path, `405` for a method other than `GET`.

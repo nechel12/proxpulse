@@ -26,7 +26,8 @@ GET /random    one live proxy\n\
 GET /fastest   the proxy with the lowest ping\n\
 GET /list      every matching proxy\n\
 GET /pools     the pools and their sizes\n\
-Parameters: pool=<id or name> country=DE,NL proto=http,socks5 limit=N format=txt|json\n";
+Parameters: pool=<id or name> country=DE,NL proto=http,socks5 limit=N format=txt|json\n\
+Proxy passwords are included only for a pool with a dispatcher login.\n";
 
 /// The API's state in the preferences.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -217,9 +218,20 @@ struct ProxyOut<'a> {
     latency: Option<u64>,
 }
 
-fn proxy_json(up: &Upstream) -> serde_json::Value {
+/// The proxy URL as the API hands it out: with its username and password
+/// only for a pool with a dispatcher login. Without one, anyone on this
+/// computer could read them, since loopback is shared by all its users.
+fn shown_url(up: &Upstream, credentials: bool) -> String {
+    if credentials {
+        up.url.clone()
+    } else {
+        crate::proxy::strip_credentials(&up.url)
+    }
+}
+
+fn proxy_json(up: &Upstream, credentials: bool) -> serde_json::Value {
     serde_json::to_value(ProxyOut {
-        url: &up.url,
+        url: &shown_url(up, credentials),
         scheme: &up.scheme,
         host: &up.host,
         port: up.port,
@@ -345,6 +357,8 @@ pub(crate) async fn answer(head: &str, source: &PoolSource) -> Vec<u8> {
         r.extra = "WWW-Authenticate: Basic realm=\"ProxPulse\"\r\n";
         return r.bytes();
     }
+    // may_read checked the login, when the pool has one.
+    let credentials = !inner.options.lock().await.auth_user.is_empty();
     let cooling = cooling(inner).await;
     let mut list = select(&inner.pool.lock().await, &q, &cooling);
     if list.is_empty() {
@@ -368,16 +382,16 @@ pub(crate) async fn answer(head: &str, source: &PoolSource) -> Vec<u8> {
     if q.json {
         if path == "/list" {
             Reply::json(serde_json::Value::Array(
-                list.iter().map(proxy_json).collect(),
+                list.iter().map(|u| proxy_json(u, credentials)).collect(),
             ))
         } else {
-            Reply::json(proxy_json(&list[0]))
+            Reply::json(proxy_json(&list[0], credentials))
         }
     } else {
         Reply::text(
             "200 OK",
             list.iter()
-                .map(|u| format!("{}\n", u.url))
+                .map(|u| format!("{}\n", shown_url(u, credentials)))
                 .collect::<String>(),
         )
     }
