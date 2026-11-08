@@ -232,8 +232,9 @@ pub(crate) fn build_body(
                 .replace("{proxies}", &proxies.join("\n"))
                 .replace("{added}", &added.join("\n"))
                 .replace("{removed}", &removed.join("\n"));
-            let trimmed = opts.template.trim_start();
-            let ctype = if trimmed.starts_with('{') || trimmed.starts_with('[') {
+            // JSON only when the filled-in body is JSON: "{count} proxies
+            // online" starts with a brace too, and was refused as bad JSON.
+            let ctype = if serde_json::from_str::<serde_json::Value>(&body).is_ok() {
                 "application/json"
             } else {
                 "text/plain"

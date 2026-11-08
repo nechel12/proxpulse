@@ -427,7 +427,8 @@ async fn take_upstreams(st: &Arc<DispatchInner>, host: &str) -> Vec<Upstream> {
     let sticky = {
         let mut s = st.sticky.lock().await;
         s.retain(|_, (_, until)| *until > now);
-        s.get(host).map(|(url, _)| url.clone())
+        s.get(&host.to_ascii_lowercase())
+            .map(|(url, _)| url.clone())
     };
     let candidates: Vec<Upstream> = {
         let pool = st.pool.lock().await;

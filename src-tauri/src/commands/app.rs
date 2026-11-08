@@ -33,11 +33,10 @@ fn detect_install_kind() -> String {
     }
 
     let path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
-    if let Some(kind) = uninstall_kind(RegKey::predef(HKEY_LOCAL_MACHINE), path)
-        .or_else(|| uninstall_kind(RegKey::predef(HKEY_CURRENT_USER), path))
-    {
-        return kind.to_string();
-    }
+    let registered = || {
+        uninstall_kind(RegKey::predef(HKEY_LOCAL_MACHINE), path)
+            .or_else(|| uninstall_kind(RegKey::predef(HKEY_CURRENT_USER), path))
+    };
     if let Ok(exe) = std::env::current_exe() {
         let exe = exe.to_string_lossy().to_ascii_lowercase();
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
@@ -49,12 +48,16 @@ fn detect_install_kind() -> String {
         for var in ["ProgramFiles", "ProgramFiles(x86)"] {
             if let Ok(base) = std::env::var(var) {
                 if exe.starts_with(&base.to_ascii_lowercase()) {
-                    return "msi".to_string();
+                    // NSIS can install per machine too: the registry says which.
+                    return registered().unwrap_or("msi").to_string();
                 }
             }
         }
+        // Outside the install folders it is a portable copy, even when an
+        // installed one is registered: offering it the installer was wrong.
+        return "portable".to_string();
     }
-    "portable".to_string()
+    registered().unwrap_or("portable").to_string()
 }
 
 #[cfg(target_os = "linux")]

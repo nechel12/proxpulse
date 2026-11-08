@@ -71,10 +71,14 @@ pub(crate) async fn export_text_file(
     let path = with_export_extension(path, &ext);
     validate_export_path(&path.to_string_lossy())?;
     let write_path = path.clone();
-    tauri::async_runtime::spawn_blocking(move || std::fs::write(&write_path, contents))
-        .await
-        .map_err(|e| crate::http::short_error(&e.to_string()))?
-        .map_err(|e| e.to_string())?;
+    // Whole or not at all, and owner-only on Linux and macOS: an export may
+    // hold proxy passwords.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::commands::dispatch::write_private_file(&write_path, contents.as_bytes())
+    })
+    .await
+    .map_err(|e| crate::http::short_error(&e.to_string()))?
+    .map_err(|e| e.to_string())?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 

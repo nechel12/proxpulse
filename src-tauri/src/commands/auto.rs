@@ -431,7 +431,7 @@ pub(crate) fn merge_auto_items(
     let mut avg_sum = 0u64;
     let mut avg_n = 0u64;
     for r in results {
-        let Some((raw, latency, old_country)) = current.get(&r.url) else {
+        let Some((raw, _, old_country)) = current.get(&r.url) else {
             continue;
         };
         seen.insert(r.url.as_str());
@@ -445,8 +445,10 @@ pub(crate) fn merge_auto_items(
                 items.push(DispatchItem {
                     raw: raw.clone(),
                     url: Some(r.url.clone()),
-                    // A slow proxy keeps its new latency, so it sorts down.
-                    latency: if slow { r.latency_ms } else { *latency },
+                    // A slow proxy keeps its new latency and a dead one has
+                    // none, so both sort down: its old latency kept a dead
+                    // proxy first in the dispatcher's "fastest" order.
+                    latency: if slow { r.latency_ms } else { None },
                     country: old_country.clone(),
                 });
             }
@@ -1066,10 +1068,10 @@ mod tests {
         ]);
         let results = vec![dead("http://a:80"), alive_result("http://b:80", 50, "NL")];
 
-        // First miss: kept with its previous latency and country.
+        // First miss: kept with its country, without a latency, so it sorts last.
         let first = merge_auto_items(&results, &current, 0, &HashMap::new());
         assert_eq!(urls(&first), vec!["http://a:80", "http://b:80"]);
-        assert_eq!(first.items[0].latency, Some(100));
+        assert_eq!(first.items[0].latency, None);
         assert_eq!(first.items[0].country.as_deref(), Some("DE"));
         assert_eq!(first.alive, 1);
         assert_eq!(first.fails.get("http://a:80"), Some(&1));

@@ -212,6 +212,12 @@ All notable changes to ProxPulse. The format follows
   as `limit`) and the result stays. A connection through a proxy for the TLS
   check, the speed test and the dispatcher takes at most twice the timeout as
   a whole, not one timeout per step.
+- Automation details: a webhook template like `{count} proxies online` is no
+  longer sent as JSON (and refused) because it starts with a brace; a pool
+  proxy that missed a scheduled check loses its old ping, which kept it first
+  in the dispatcher's "fastest" order; sticky sessions find hosts written in
+  capitals; export files are written whole and owner-only; and a portable
+  copy run next to an installed one no longer offers the installer.
 - Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
   and the odd releases 23 and 25 were accepted before.
 
