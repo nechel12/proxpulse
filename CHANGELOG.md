@@ -194,6 +194,8 @@ All notable changes to ProxPulse. The format follows
 - The window may open only the app's own GitHub pages and the ip-api
   members page, and show message dialogs: the default permissions also let it
   open any URL, reveal folders and show file dialogs, which it never uses.
+- The prompts for importing or resetting settings say that the check results
+  and the pasted list are lost when the window reloads.
 
 ## [0.6.1] — 2026-11-07
 
