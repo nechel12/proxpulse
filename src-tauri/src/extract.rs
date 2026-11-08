@@ -26,12 +26,7 @@ fn is_word(b: u8) -> bool {
 }
 
 fn host_for_url(host: &str) -> String {
-    let h = host.trim();
-    if h.contains(':') && !h.starts_with('[') {
-        format!("[{h}]")
-    } else {
-        h.to_string()
-    }
+    crate::proxy::bracket_v6(host)
 }
 
 fn trim_quotes(s: &str) -> &str {

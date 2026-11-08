@@ -292,11 +292,7 @@ pub(crate) fn build_url(
     }
     // Column/CSV input often contains bare IPv6 addresses. Bracket them so
     // the resulting URL is actually parseable.
-    let host = if host.contains(':') && !host.starts_with('[') {
-        format!("[{host}]")
-    } else {
-        host.to_string()
-    };
+    let host = bracket_v6(host);
     let scheme = canonical_scheme(scheme);
     let url = match userinfo {
         Some(u) if !u.is_empty() => format!("{scheme}://{}@{host}:{port}", encode_userinfo(u)),
@@ -519,15 +515,16 @@ pub(crate) fn normalize_candidates(raw: &str, default_proto: &str) -> Vec<(Strin
 
 /// host:port of an already normalized proxy url
 pub(crate) fn host_port_of_url(url: &str) -> Option<(String, u16)> {
-    let rest = url.split_once("://")?.1;
-    let after = rest.rsplit('@').next()?;
-    let hp = after.split('/').next()?;
-    if let Some(stripped) = hp.strip_prefix('[') {
-        let end = stripped.find(']')?;
-        let host = &stripped[..end];
-        let port: u16 = stripped[end + 1..].strip_prefix(':')?.parse().ok()?;
-        return Some((host.to_string(), port));
+    crate::transport::parse_upstream_url(url).map(|(_, host, port, _, _)| (host, port))
+}
+
+/// A host as a URL or `CONNECT` line writes it: a bare IPv6 address in
+/// brackets.
+pub(crate) fn bracket_v6(host: &str) -> String {
+    let host = host.trim();
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
     }
-    let (h, p) = hp.rsplit_once(':')?;
-    Some((h.to_string(), p.parse().ok()?))
 }

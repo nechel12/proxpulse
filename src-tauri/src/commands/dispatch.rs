@@ -1,6 +1,6 @@
 use crate::commands::prefs::{remember_dispatch_options, remember_dispatcher, DispatcherPrefs};
 use crate::transport::{
-    close_after_response, connect_to_http_proxy, connect_via, find_header_end, parse_upstream_url,
+    close_after_response, connect_to_http_proxy, connect_via, find_header_end,
     prepare_forward_request, read_exact_t, strip_header, write_all_t, Upstream,
 };
 use crate::{normalize_proxy, strip_credentials};
@@ -1036,21 +1036,12 @@ pub(crate) fn upstream_from_item(
     }
     let source = url.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(raw);
     let (normalized, _) = normalize_proxy(source, "http")?;
-    let (scheme, host, port, user, pass) = parse_upstream_url(&normalized)?;
-    Some((
-        normalized.clone(),
-        Upstream {
-            raw: raw.to_string(),
-            url: normalized,
-            scheme,
-            host,
-            port,
-            user,
-            pass,
-            latency,
-            country,
-        },
-    ))
+    let up = Upstream {
+        latency,
+        country,
+        ..Upstream::from_url(raw, &normalized)?
+    };
+    Some((normalized, up))
 }
 
 /// Replace the pool. `stop_when_empty` is for explicit user actions: clearing

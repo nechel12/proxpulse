@@ -4,7 +4,7 @@
 use crate::commands::check::{wait_cancelled, BusyGuard, CheckState};
 use crate::http::{io_error, short_error};
 use crate::tls::tls_client_config;
-use crate::transport::{connect_via, parse_upstream_url, Upstream};
+use crate::transport::{connect_via, Upstream};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -140,19 +140,8 @@ pub(crate) async fn download<S: AsyncRead + AsyncWrite + Unpin>(
 
 async fn measure(proxy: String, url: String, bytes: u64) -> SpeedResult {
     let deadline = Instant::now() + MEASURE_LIMIT;
-    let Some((scheme, host, port, user, pass)) = parse_upstream_url(&url) else {
+    let Some(up) = Upstream::from_url(&url, &url) else {
         return SpeedResult::failed(&proxy, "bad proxy url".to_string());
-    };
-    let up = Upstream {
-        raw: url.clone(),
-        url,
-        scheme,
-        host,
-        port,
-        user,
-        pass,
-        latency: None,
-        country: None,
     };
     let mut result = SpeedResult::failed(&proxy, String::new());
     result.error = None;

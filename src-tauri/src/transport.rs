@@ -27,6 +27,25 @@ pub(crate) struct Upstream {
 
 pub(crate) type UpstreamParts = (String, String, u16, Option<String>, Option<String>);
 
+impl Upstream {
+    /// The upstream a normalized proxy URL names, before anything is known
+    /// about it.
+    pub(crate) fn from_url(raw: &str, url: &str) -> Option<Self> {
+        let (scheme, host, port, user, pass) = parse_upstream_url(url)?;
+        Some(Self {
+            raw: raw.to_string(),
+            url: url.to_string(),
+            scheme,
+            host,
+            port,
+            user,
+            pass,
+            latency: None,
+            country: None,
+        })
+    }
+}
+
 /// Decode `%XX` escapes in URL credentials the way reqwest does for the
 /// checks, so the dispatcher sends the same login. Other `%` stay as they are.
 pub(crate) fn percent_decode(s: &str) -> String {
@@ -48,6 +67,8 @@ pub(crate) fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Scheme, host, port and the decoded login of a normalized proxy URL: the
+/// one parser for URLs that `normalize_proxy` produced.
 pub(crate) fn parse_upstream_url(url: &str) -> Option<UpstreamParts> {
     let (scheme, rest) = url.split_once("://")?;
     let after = rest.rsplit('@').next()?;
@@ -73,11 +94,7 @@ pub(crate) fn parse_upstream_url(url: &str) -> Option<UpstreamParts> {
 }
 
 pub(crate) fn host_for_connect(host: &str) -> String {
-    if host.contains(':') && !host.starts_with('[') {
-        format!("[{host}]")
-    } else {
-        host.to_string()
-    }
+    crate::proxy::bracket_v6(host)
 }
 
 pub(crate) enum ProxyStream {

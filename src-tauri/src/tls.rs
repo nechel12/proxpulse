@@ -1,5 +1,5 @@
 use crate::http::short_error;
-use crate::transport::{connect_via, parse_upstream_url, Upstream};
+use crate::transport::{connect_via, Upstream};
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 use std::time::Duration;
@@ -112,20 +112,8 @@ pub(crate) async fn tls_via_proxy(
     timeout: Duration,
     base_fp: Option<&str>,
 ) -> (Option<String>, Option<String>) {
-    let (scheme, host, port, user, pass) = match parse_upstream_url(proxy_url) {
-        Some(v) => v,
-        None => return (None, None),
-    };
-    let up = Upstream {
-        raw: proxy_url.to_string(),
-        url: proxy_url.to_string(),
-        scheme,
-        host,
-        port,
-        user,
-        pass,
-        latency: None,
-        country: None,
+    let Some(up) = Upstream::from_url(proxy_url, proxy_url) else {
+        return (None, None);
     };
     let stream = match connect_via(&up, "example.com", 443, timeout).await {
         Ok(s) => s,
