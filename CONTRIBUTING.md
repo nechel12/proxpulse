@@ -30,6 +30,15 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 `@tauri-apps/*` npm packages and the `tauri*` crates must share a major.minor
 version; Tauri refuses to build otherwise. Update them together.
 
+### Repository notes
+
+- `.githooks/commit-msg` removes AI attribution lines from commit messages;
+  enable it with `git config core.hooksPath .githooks`.
+- `package.json` overrides `minimatch` to 11.x: eslint and typescript-eslint
+  pin 10.x, which an audit advisory covers, and npm's own fix is a downgrade
+  to eslint 9. Remove the override once both depend on 11.x or later
+  (`npm ls minimatch` shows no 10.x left).
+
 ## Pull requests
 
 - Add or update tests for behavior changes: Rust tests live in

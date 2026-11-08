@@ -32,10 +32,9 @@ pub(crate) fn tls_client_config() -> Arc<rustls::ClientConfig> {
 }
 
 pub(crate) fn cert_fp_hex(der: &[u8]) -> String {
-    use sha2::Digest;
     use std::fmt::Write;
-    // NOTE: digest 0.11 outputs no longer implement LowerHex.
-    sha2::Sha256::digest(der)
+    ring::digest::digest(&ring::digest::SHA256, der)
+        .as_ref()
         .iter()
         .fold(String::with_capacity(64), |mut s, b| {
             let _ = write!(s, "{b:02x}");

@@ -15,4 +15,9 @@ export default defineConfig(
       "@typescript-eslint/no-explicit-any": "error",
     },
   },
+  {
+    // Release and version scripts run on Node.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: { globals: { process: "readonly", console: "readonly" } },
+  },
 );
