@@ -34,6 +34,8 @@ All notable changes to ProxPulse. The format follows
   `proxy auth required`): with reqwest 0.13 the cause was lost, so with the
   default judge every failure read "proxy error". A refused connection is
   recognised on non-English Windows too.
+- One proxy answering 403 or 429 to the free ip-api lookup no longer pauses
+  geo lookups for the whole run; only the shared Pro key does.
 
 ## [0.6.1] — 2026-11-07
 

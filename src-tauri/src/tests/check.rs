@@ -176,6 +176,15 @@ async fn request_errors_name_the_cause_not_the_url() {
 }
 
 #[test]
+fn one_proxy_does_not_pause_geo_for_the_run() {
+    // Free tier: per exit IP, and the 403 may come from the proxy itself.
+    assert!(!geo_refusal_is_shared(None));
+    assert!(!geo_refusal_is_shared(Some("  ")));
+    // The Pro key is shared by every proxy, and its answer comes over HTTPS.
+    assert!(geo_refusal_is_shared(Some("abc")));
+}
+
+#[test]
 fn socket_errors_map_by_kind_not_by_text() {
     // Windows words a refused connection differently, and localizes it.
     let refused = Error::new(ErrorKind::ConnectionRefused, "Подключение не установлено");

@@ -381,12 +381,21 @@ pub(crate) fn geo_url(ipapi_key: Option<&str>) -> String {
     }
 }
 
-/// After a 429/403 from ip-api, geo lookups pause for `GEO_COOLDOWN`.
+/// After ip-api refuses the Pro key (429/403), geo lookups pause for
+/// `GEO_COOLDOWN`.
 pub(crate) async fn geo_cooling_down() -> bool {
     GEO_COOLDOWN_UNTIL
         .lock()
         .await
         .is_some_and(|t| Instant::now() < t)
+}
+
+/// Whether a 429/403 to this lookup speaks for every proxy in the run. Only
+/// the Pro key is shared, and it goes over HTTPS, so the answer is ip-api's.
+/// The free tier is limited per exit IP, and over plain HTTP a 403 may be the
+/// proxy's own page: one proxy must not switch geo off for the whole run.
+pub(crate) fn geo_refusal_is_shared(ipapi_key: Option<&str>) -> bool {
+    ipapi_key.is_some_and(|k| !k.trim().is_empty())
 }
 
 pub(crate) async fn fetch_geo(client: &reqwest::Client, ipapi_key: Option<&str>) -> Option<IpApi> {
@@ -397,7 +406,9 @@ pub(crate) async fn fetch_geo(client: &reqwest::Client, ipapi_key: Option<&str>)
     let r = client.get(url).send().await.ok()?;
     let status = r.status();
     if status.as_u16() == 429 || status.as_u16() == 403 {
-        *GEO_COOLDOWN_UNTIL.lock().await = Some(Instant::now() + GEO_COOLDOWN);
+        if geo_refusal_is_shared(ipapi_key) {
+            *GEO_COOLDOWN_UNTIL.lock().await = Some(Instant::now() + GEO_COOLDOWN);
+        }
         return None;
     }
     if !status.is_success() {
