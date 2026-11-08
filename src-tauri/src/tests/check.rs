@@ -197,6 +197,59 @@ fn socket_errors_map_by_kind_not_by_text() {
 }
 
 #[test]
+fn the_http_judge_always_gets_its_key() {
+    use crate::commands::check::judge_baseline_url;
+    let http = Some("http://j.example/judge");
+    // Full mode with both schemes, even when /generate_204 was typed: the
+    // HTTP answer carries the verdict and must be checked against the key.
+    for main in ["https://j.example/judge", "https://j.example/generate_204"] {
+        assert_eq!(
+            judge_baseline_url(true, http, main).as_deref(),
+            Some("http://j.example/judge"),
+            "{main}"
+        );
+    }
+    assert_eq!(
+        judge_baseline_url(true, None, "http://j.example/judge").as_deref(),
+        Some("http://j.example/judge")
+    );
+    // Nothing goes over plain HTTP, or no judge at all.
+    assert_eq!(
+        judge_baseline_url(true, None, "https://j.example/judge"),
+        None
+    );
+    assert_eq!(
+        judge_baseline_url(true, None, "http://j.example/generate_204"),
+        None
+    );
+    assert_eq!(
+        judge_baseline_url(false, http, "https://j.example/judge"),
+        None
+    );
+}
+
+#[test]
+fn a_forged_judge_answer_leaves_no_exit_ip_or_geo() {
+    use crate::commands::check::forget_judge_answer;
+    let mut res =
+        crate::commands::check::dead_result("1.2.3.4:8080".into(), "HTTP".into(), 1, String::new());
+    res.alive = true;
+    res.ip = Some("203.0.113.9".into());
+    res.country_code = Some("US".into());
+    res.country = Some("United States".into());
+    res.city = Some("Ashburn".into());
+    res.asn = Some("64500".into());
+    res.org = Some("Example".into());
+    res.ip_type = Some("residential".into());
+    res.anonymity = Some("elite".into());
+    forget_judge_answer(&mut res);
+    assert!(res.ip.is_none() && res.country_code.is_none() && res.country.is_none());
+    assert!(res.city.is_none() && res.asn.is_none() && res.org.is_none());
+    assert!(res.ip_type.is_none() && res.anonymity.is_none());
+    assert!(res.alive);
+}
+
+#[test]
 fn judge_direct_url_rules() {
     assert_eq!(
         judge_direct_url("https://proxycheck.lmtunnel.com/judge"),

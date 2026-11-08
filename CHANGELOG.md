@@ -23,6 +23,13 @@ All notable changes to ProxPulse. The format follows
   table, CSV exports, the status line and notifications.
 - Releases are published only after every platform is built: until then the
   release is a draft, so the updater never sees a partial `latest.json`.
+- With a judge checked over both HTTPS and HTTP, the HTTP answer, which
+  carries the anonymity verdict, is checked against the judge's key even when
+  the main address ends in `/generate_204`. Before, no key was fetched and any
+  proxy could rewrite the verdict.
+- An answer whose signature fails loses its exit IP, country, city, ASN and IP
+  type as well as its anonymity verdict, so forged geo no longer reaches the
+  pool, the dispatcher's country filter, DNSBL or the geo cache.
 
 ### Added
 

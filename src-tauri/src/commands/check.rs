@@ -466,6 +466,9 @@ async fn check_candidate_inner(
                 )
                 .await;
                 apply_judge_integrity(&mut res, &baseline, check, proxy_sha.as_deref());
+                if check == judge_sig::SignatureCheck::Invalid {
+                    forget_judge_answer(&mut res);
+                }
             } else {
                 // Inside a TLS tunnel the proxy can neither add headers nor
                 // change the body: "elite" would be a guess, not a result.
@@ -582,6 +585,42 @@ fn signature_header(r: &reqwest::Response) -> Option<String> {
         .get(judge_sig::SIGNATURE_HEADER)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string)
+}
+
+/// Where the run takes the judge's content hash and key from: the judge
+/// answer that goes over plain HTTP needs both. That is the HTTP judge
+/// whenever there is one, whatever the main address (an HTTPS /generate_204
+/// included), else a plain-HTTP main /judge. An HTTPS body cannot be modified
+/// by the proxy and /generate_204 is empty, so those need neither.
+pub(crate) fn judge_baseline_url(
+    judge: bool,
+    judge_http: Option<&str>,
+    test_url: &str,
+) -> Option<String> {
+    if !judge {
+        return None;
+    }
+    if let Some(http) = judge_http {
+        return judge_direct_url(http);
+    }
+    if is_tls_target(test_url) || test_url.trim_end_matches('/').ends_with("/generate_204") {
+        return None;
+    }
+    judge_direct_url(test_url)
+}
+
+/// Drop everything a rewritten judge answer said: its exit IP and geo would
+/// otherwise reach the pool's countries, the dispatcher's country filter,
+/// DNSBL and the geo cache.
+pub(crate) fn forget_judge_answer(res: &mut ProxyResult) {
+    res.ip = None;
+    res.country = None;
+    res.country_code = None;
+    res.city = None;
+    res.asn = None;
+    res.org = None;
+    res.ip_type = None;
+    res.anonymity = None;
 }
 
 /// Anonymity and integrity from a judge answer reached over HTTP. A judge
@@ -839,16 +878,7 @@ pub(crate) async fn run_checks(
             .collect(),
     );
 
-    // Direct judge content hash (for tamper check in judge mode). The fast
-    // mode returns an empty 204 body, and an HTTPS body cannot be modified by
-    // the proxy, so in both cases skip the extra /judge request entirely.
-    let judge_url = if !flags.judge || test_url.trim_end_matches('/').ends_with("/generate_204") {
-        None
-    } else if !is_tls_target(&test_url) {
-        judge_direct_url(&test_url)
-    } else {
-        flags.judge_http.as_deref().and_then(judge_direct_url)
-    };
+    let judge_url = judge_baseline_url(flags.judge, flags.judge_http.as_deref(), &test_url);
     let baseline_phase = async {
         tokio::join!(
             tokio::time::timeout(
