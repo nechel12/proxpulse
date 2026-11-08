@@ -45,7 +45,7 @@ use commands::prefs::{
 };
 use commands::speed::speed_test;
 use commands::tray::{refresh_tray_menu, update_tray_status, TrayState};
-use commands::webhook::{send_webhook, send_webhooks};
+use commands::webhook::send_webhooks;
 
 // ================= results =================
 
@@ -327,7 +327,6 @@ pub fn run() {
             start_local_proxy,
             stop_local_proxy,
             local_proxy_status,
-            send_webhook,
             send_webhooks,
             set_auto_config,
             run_auto_now,

@@ -1017,7 +1017,6 @@ async fn fetch_baseline(flags: CheckFlags, want_ip: bool, judge_ip: Option<Strin
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_checks(
     proxies: Vec<String>,
     cfg: CheckConfig,

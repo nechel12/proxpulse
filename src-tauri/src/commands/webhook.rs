@@ -436,18 +436,6 @@ pub(crate) async fn send_webhooks(
     Ok(send_webhooks_inner(&urls, &opts, Arc::new(items), delivery).await)
 }
 
-#[tauri::command]
-pub(crate) async fn send_webhook(
-    url: String,
-    format: String,
-    include_credentials: Option<bool>,
-    template: Option<String>,
-    items: Vec<DispatchItem>,
-) -> Result<String, String> {
-    let opts = options(format, include_credentials, template);
-    send_webhook_one(&url, &opts, &items, None).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

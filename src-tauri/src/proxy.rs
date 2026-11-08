@@ -497,10 +497,7 @@ pub(crate) fn normalize_proxy(raw: &str, default_proto: &str) -> Option<(String,
 }
 
 pub(crate) fn normalize_candidates(raw: &str, default_proto: &str) -> Vec<(String, String)> {
-    let dual = matches!(
-        default_proto.to_lowercase().as_str(),
-        "dual" | "auto" | "http+socks5" | "http_socks5" | "both"
-    );
+    let dual = default_proto.eq_ignore_ascii_case("http+socks5");
     let has_scheme = raw.contains("://");
     if dual && !has_scheme {
         let mut out = Vec::new();

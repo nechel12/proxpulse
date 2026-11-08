@@ -198,12 +198,12 @@ pub(crate) fn build_client(
     timeout: Duration,
     no_proxy: bool,
 ) -> Result<reqwest::Client, String> {
-    let key = (
-        proxy_url.unwrap_or_default().to_string(),
-        timeout.as_millis() as u64,
-        no_proxy,
-    );
-    {
+    // Only direct clients are cached: a client through a checked proxy is
+    // used for that proxy alone, and caching it only kept its password in
+    // memory.
+    let cacheable = proxy_url.is_none();
+    let key = (String::new(), timeout.as_millis() as u64, no_proxy);
+    if cacheable {
         let cache = client_cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(client) = cache.map.get(&key) {
             return Ok(client.clone());
@@ -229,6 +229,9 @@ pub(crate) fn build_client(
         b = b.proxy(p).pool_max_idle_per_host(0);
     }
     let client = b.build().map_err(|e| short_error(&e.to_string()))?;
+    if !cacheable {
+        return Ok(client);
+    }
     let mut cache = client_cache().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(existing) = cache.map.get(&key) {
         return Ok(existing.clone());
