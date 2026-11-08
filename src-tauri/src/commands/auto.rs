@@ -9,9 +9,7 @@ use crate::commands::webhook::{
 };
 use crate::extract::extract_proxies;
 use crate::proxy::normalize_candidates;
-use crate::{
-    epoch_secs, is_http_url, GeoCacheEntry, ProxyResult, WebhookResult,
-};
+use crate::{epoch_secs, is_http_url, GeoCacheEntry, ProxyResult, WebhookResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
