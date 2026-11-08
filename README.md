@@ -305,7 +305,7 @@ Clash (`url-test` group; no SOCKS4), sing-box (`urltest` outbound), a
 Proxifier profile whose default rule uses the fastest proxy (no HTTPS
 proxies), and a PAC file (up to 50 proxies, then `DIRECT`; PAC cannot carry
 logins). **By template** writes one line per proxy from placeholders such as
-`{scheme}://{user}:{pass}@{host}:{port}`. The **dead** toggle includes unavailable proxies. A sparkline
+`{scheme}://{auth}{host}:{port}` (`{auth}` is `user:pass@`, or nothing without a login). The **dead** toggle includes unavailable proxies. A sparkline
 under the toolbar shows the average ping of alive proxies across checks.
 
 ## Dispatcher
