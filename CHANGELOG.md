@@ -150,6 +150,9 @@ All notable changes to ProxPulse. The format follows
   and a manual check in progress is noticed before subscriptions are fetched.
   **Check now** moves the schedule on, so a scheduled run due seconds later no
   longer checks the pool and posts the webhooks a second time.
+- A fractional number in the check settings (2.5 threads) no longer makes
+  every proxy dead with a raw error, and 0 no longer silently becomes the
+  default: values are rounded and clamped, and the field shows what is used.
 
 ## [0.6.1] — 2026-11-07
 

@@ -35,7 +35,7 @@ import { formatWebhookResults } from "./webhooks.ts";
 import { SubscriptionPanel, formatSubscriptionResults, type SubscriptionResult } from "./subscriptions.ts";
 import { askConfirm, askText, flashLabel, screenVisible, setProgress } from "./ui.ts";
 import { NetStatus } from "./net-status.ts";
-import { CHECK_LIMITS, runCheckList, type CheckSettings } from "./check-client.ts";
+import { CHECK_LIMITS, clampInt, runCheckList, type CheckSettings } from "./check-client.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
 import type { ProxyResult } from "./types.ts";
 
@@ -264,8 +264,12 @@ function syncMaxPingInputs(): void {
 
 const geoCache = new GeoCacheStore();
 
-function numberIn(id: string, [min, max]: readonly [number, number], fallback: number): number {
-  return Math.max(min, Math.min(max, Number(($(id) as HTMLInputElement).value) || fallback));
+/** The field's value as the check will use it, written back so it is seen. */
+function numberIn(id: string, limits: readonly [number, number], fallback: number): number {
+  const el = $(id) as HTMLInputElement;
+  const value = clampInt(el.value, limits, fallback);
+  if (el.value !== String(value)) el.value = String(value);
+  return value;
 }
 
 function readCheckSettings(): CheckSettings {

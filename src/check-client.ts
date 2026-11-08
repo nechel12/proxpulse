@@ -11,6 +11,17 @@ export const CHECK_LIMITS = {
   precheckTimeoutMs: [300, 10000],
 } as const;
 
+/**
+ * A whole number within the limits. The backend takes integers only: "2.5"
+ * threads made it reject the whole check. An empty or unreadable field takes
+ * the default; 0 is a number, so it becomes the minimum, not the default.
+ */
+export function clampInt(raw: string, [min, max]: readonly [number, number], fallback: number): number {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
 export type CheckSettings = {
   testUrl: string;
   timeoutMs: number;

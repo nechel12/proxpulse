@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { deadStub, runCheckList, type CheckSettings } from "./check-client.ts";
+import { clampInt, deadStub, runCheckList, type CheckSettings } from "./check-client.ts";
 import type { CheckEvent } from "./types.ts";
 
 const backend = vi.hoisted(() => ({ events: [] as unknown[] }));
@@ -43,5 +43,16 @@ describe("check client", () => {
 
     expect(onUnreachable).toHaveBeenCalledOnce();
     expect(out.map((r) => r.proxy)).toEqual(["1.2.3.4:80"]);
+  });
+});
+
+describe("clampInt", () => {
+  it("gives the backend whole numbers within the limits", () => {
+    expect(clampInt("2.5", [1, 500], 50)).toBe(3);
+    expect(clampInt("0", [1, 500], 50)).toBe(1);
+    expect(clampInt("9999", [1, 500], 50)).toBe(500);
+    expect(clampInt("", [1, 500], 50)).toBe(50);
+    expect(clampInt("abc", [1, 500], 50)).toBe(50);
+    expect(clampInt(" 20 ", [1, 500], 50)).toBe(20);
   });
 });
