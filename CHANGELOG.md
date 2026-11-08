@@ -191,6 +191,9 @@ All notable changes to ProxPulse. The format follows
   first checked with its RFC 5782 test entry, a list that does not answer it
   counts as unknown, and results with unknown lists are not cached for an
   hour.
+- The window may open only the app's own GitHub pages and the ip-api
+  members page, and show message dialogs: the default permissions also let it
+  open any URL, reveal folders and show file dialogs, which it never uses.
 
 ## [0.6.1] — 2026-11-07
 
