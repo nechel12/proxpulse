@@ -196,6 +196,11 @@ All notable changes to ProxPulse. The format follows
   open any URL, reveal folders and show file dialogs, which it never uses.
 - The prompts for importing or resetting settings say that the check results
   and the pasted list are lost when the window reloads.
+- Statuses match what happens: a check says "Checking 0/N" from the start
+  instead of "Parsing the list…" and its empty table no longer asks for a
+  list; the speed test reports its own errors and a stop as a speed test;
+  Clear and Remove are refused during a check, whose next result brought the
+  rows back.
 - Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
   and the odd releases 23 and 25 were accepted before.
 

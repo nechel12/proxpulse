@@ -694,6 +694,8 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
   ($("btn-stop") as HTMLButtonElement).disabled = false;
   setNet("work", "net_work", { s: 0 });
   setProgress(0, list.length);
+  // Not "parsing" until the first result: the list is parsed already.
+  setStatusT("st_checking", { done: 0, total: list.length });
   const t0 = performance.now();
 
   let busy = false;
@@ -777,6 +779,7 @@ async function speedTest(rows: ProxyResult[]): Promise<void> {
     let done = 0;
     let best = 0;
     let ok = 0;
+    let failed: string | null = null;
     setStatusT("speed_running", { done, total });
     setProgress(0, total);
     try {
@@ -792,13 +795,15 @@ async function speedTest(rows: ProxyResult[]): Promise<void> {
         render();
       });
     } catch (e) {
-      if (String(e).includes("another check is running")) setStatusT("auto_skip");
-      else logErr("speed: " + String(e).slice(0, 200));
+      failed = String(e);
+      logErr("speed: " + failed.slice(0, 200));
     } finally {
       running = false;
       ($("btn-stop") as HTMLButtonElement).disabled = !autoStatus.running;
     }
-    if (stopFlag) setStatusT("st_stopped", { alive: ok, total: done });
+    if (failed?.includes("another check is running")) setStatusT("auto_skip");
+    else if (failed) setStatusT("speed_err", { e: failed.slice(0, 120) });
+    else if (stopFlag) setStatusT("speed_stopped", { ok, done, total });
     else if (ok === 0) setStatusT("speed_none");
     else setStatusT("speed_done", { ok, total, best: formatMbps(best) });
     setNet("done", stopFlag ? "net_stopped" : "net_done");
@@ -993,6 +998,7 @@ window.addEventListener("DOMContentLoaded", () => {
     onChange: () => render(),
     onAction: (action, rows) => void rowAction(action, rows),
     canRecheck: () => !running && !starting && !autoStatus.running,
+    checking: () => running || starting,
   });
   $("search").addEventListener("input", () => { resultsView.reset(); render(); });
   $("btn-recheck-dead").addEventListener("click", () => {
@@ -1063,6 +1069,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
   $("btn-clear-out").addEventListener("click", async () => {
     if (results.length === 0) return;
+    // The next result of a running check would bring them back.
+    if (running || starting) {
+      setStatusT("st_clear_busy");
+      return;
+    }
     if (!(await askConfirm(t("results_clear_confirm", { n: results.length })))) return;
     results = [];
     render(); updateCounts(); setProgress(0, 1);

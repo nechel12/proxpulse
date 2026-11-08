@@ -34,6 +34,8 @@ type Deps = {
   onChange: () => void;
   onAction: (action: RowAction, rows: ProxyResult[]) => void;
   canRecheck: () => boolean;
+  /** A manual check is running: an empty table is waiting, not idle. */
+  checking?: () => boolean;
 };
 
 const COLS = 14;
@@ -177,7 +179,9 @@ export class ResultsView {
       tr.className = "empty";
       const td = document.createElement("td");
       td.colSpan = COLS;
-      td.textContent = t(results.length === 0 ? "empty_idle" : "empty_filter");
+      td.textContent = t(
+        results.length > 0 ? "empty_filter" : this.deps?.checking?.() ? "empty_running" : "empty_idle",
+      );
       tr.appendChild(td);
       body.replaceChildren(tr);
       return;
@@ -223,7 +227,8 @@ export class ResultsView {
     label("recheck", t("ctx_recheck", { n: rows.length }), !this.deps.canRecheck());
     label("speed", t("ctx_speed", { n: alive }), alive === 0 || !this.deps.canRecheck());
     label("pool", t("ctx_pool", { n: alive }), alive === 0);
-    label("remove", t("ctx_remove", { n: rows.length }));
+    // A running check would put removed rows back with its next result.
+    label("remove", t("ctx_remove", { n: rows.length }), !this.deps.canRecheck());
     menu.classList.remove("hidden");
     const w = menu.offsetWidth;
     const h = menu.offsetHeight;
