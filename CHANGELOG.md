@@ -83,6 +83,8 @@ All notable changes to ProxPulse. The format follows
 
 ### Fixed
 
+- A pool's scheduled webhook delivery, with retries up to about a minute, no
+  longer holds back the other pools' schedules; it runs in the background.
 - Errors say what happened again (`timeout`, `connection refused`,
   `proxy auth required`): with reqwest 0.13 the cause was lost, so with the
   default judge every failure read "proxy error". A refused connection is

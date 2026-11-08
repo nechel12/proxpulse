@@ -507,7 +507,7 @@ async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
     if auto.running.swap(true, Ordering::SeqCst) {
         return AutoOutcome::Busy;
     }
-    let _run_guard = BusyGuard(auto.running.clone());
+    let run_guard = BusyGuard(auto.running.clone());
 
     let settings = auto.settings.lock().await.clone();
     let pool_now = pool_items(&disp).await;
@@ -667,35 +667,43 @@ async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
                         country: p.country.clone(),
                     })
                     .collect();
-                let opts = WebhookOptions {
-                    format: settings.webhook_format.clone(),
-                    include_credentials: settings.webhook_include_credentials,
-                    template: settings.webhook_template.clone(),
-                };
-                let delivery = Delivery {
-                    retry: true,
-                    changes_only: settings.webhook_changes_only,
-                    sent: Some(&auto.sent),
-                };
-                let results = send_webhooks_inner(
-                    &settings.webhook_urls,
-                    &opts,
-                    Arc::new(webhook_items),
-                    delivery,
-                )
-                .await;
-                let _ = app.emit(
-                    "auto://webhook",
-                    AutoWebhookPayload {
-                        pool: pool_id,
-                        results,
-                    },
-                );
-                // The lists just delivered, for change-only delivery after a
-                // restart.
-                if settings.webhook_changes_only {
-                    save_schedule(app, pool, &auto, &disp).await;
-                }
+                // Delivery with retries can take a minute: in the background,
+                // so other pools' schedules do not wait for it. This pool
+                // stays running until it ends, so its next cycle cannot
+                // deliver over it.
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _run_guard = run_guard;
+                    let opts = WebhookOptions {
+                        format: settings.webhook_format.clone(),
+                        include_credentials: settings.webhook_include_credentials,
+                        template: settings.webhook_template.clone(),
+                    };
+                    let delivery = Delivery {
+                        retry: true,
+                        changes_only: settings.webhook_changes_only,
+                        sent: Some(&auto.sent),
+                    };
+                    let results = send_webhooks_inner(
+                        &settings.webhook_urls,
+                        &opts,
+                        Arc::new(webhook_items),
+                        delivery,
+                    )
+                    .await;
+                    let _ = app.emit(
+                        "auto://webhook",
+                        AutoWebhookPayload {
+                            pool: pool_id.clone(),
+                            results,
+                        },
+                    );
+                    // The lists just delivered, for change-only delivery
+                    // after a restart.
+                    if settings.webhook_changes_only {
+                        save_schedule(&app, &pool_id, &auto, &disp).await;
+                    }
+                });
             }
             AutoOutcome::Finished
         }
@@ -757,10 +765,17 @@ fn schedule_path(app: &tauri::AppHandle, id: &str) -> Option<std::path::PathBuf>
         .map(|d| d.join(schedule_file_name(id)))
 }
 
+/// Saves of schedule files one at a time: a cycle's book-keeping and its
+/// background webhook delivery can save the same file at once, and both
+/// write through one temporary file.
+static SCHEDULE_SAVE: Mutex<()> = Mutex::const_new(());
+
 async fn save_schedule(app: &tauri::AppHandle, id: &str, auto: &AutoInner, disp: &DispatchInner) {
     let Some(path) = schedule_path(app, id) else {
         return;
     };
+    // Taken before reading the state, so the last save has the newest.
+    let _saving = SCHEDULE_SAVE.lock().await;
     let file = ScheduleFile {
         last_run: auto.last_run.load(Ordering::SeqCst),
         fails: disp.fails.lock().await.clone(),
