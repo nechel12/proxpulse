@@ -1000,7 +1000,12 @@ pub(crate) async fn run_checks(
                 let e2 = r2.error.unwrap_or_default();
                 let mut combined = format!("http: {e1} / socks5: {e2}");
                 truncate_utf8(&mut combined, 120);
-                dead_result(raw, "HTTP/SOCKS5".to_string(), r1.attempts, combined)
+                let mut dead = dead_result(raw, "HTTP/SOCKS5".to_string(), r1.attempts, combined);
+                // Keyed like the alive results, by a normalized URL: the raw
+                // line would split the history and, as `host:port:user:pass`,
+                // put the password into it.
+                dead.url = r1.url;
+                dead
             }
         });
         task_raw.insert(handle.id(), raw_key);

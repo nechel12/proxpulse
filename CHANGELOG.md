@@ -82,6 +82,10 @@ All notable changes to ProxPulse. The format follows
   directly either says so, and is not written to the proxies' history, where
   it marked every proxy down.
 - A hidden DNSBL filter no longer keeps filtering after DNSBL is turned off.
+- A proxy that failed both as HTTP and as SOCKS5 is recorded in the history
+  under its address, like a live one, instead of the raw line: its uptime no
+  longer splits in two, and a `host:port:user:pass` line no longer puts the
+  password into `history.json`.
 
 ## [0.6.1] — 2026-11-07
 

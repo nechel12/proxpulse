@@ -11,6 +11,30 @@ fn alive(url: &str, ms: u64) -> crate::ProxyResult {
 }
 
 #[test]
+fn raw_lines_never_key_the_history() {
+    // A raw `host:port:user:pass` line would split the proxy's history and
+    // put its password into the key; only normalized URLs are recorded.
+    let mut map = HashMap::new();
+    let raw = dead_result(
+        "1.2.3.4:8080:user:secret".into(),
+        "HTTP/SOCKS5".into(),
+        1,
+        "timeout".into(),
+    );
+    record(&mut map, &[raw], 10);
+    assert!(map.is_empty());
+    let mut keyed = dead_result(
+        "1.2.3.4:8080:user:secret".into(),
+        "HTTP/SOCKS5".into(),
+        1,
+        "timeout".into(),
+    );
+    keyed.url = "http://user:secret@1.2.3.4:8080".into();
+    record(&mut map, &[keyed], 20);
+    assert_eq!(map.keys().collect::<Vec<_>>(), vec!["http://1.2.3.4:8080"]);
+}
+
+#[test]
 fn history_counts_checks_and_smooths_ping() {
     let mut map = HashMap::new();
     record(&mut map, &[alive("http://u:p@1.2.3.4:80", 100)], 10);

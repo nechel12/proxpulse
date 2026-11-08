@@ -74,6 +74,11 @@ pub(crate) fn record(map: &mut HashMap<String, HistEntry>, results: &[ProxyResul
         if r.error.as_deref() == Some("cancelled") || r.proto == "BAD" {
             continue;
         }
+        // Only normalized URLs: a raw line such as `host:port:user:pass`
+        // would split a proxy's history and put its password into the key.
+        if !r.url.contains("://") {
+            continue;
+        }
         let e = map.entry(history_key(&r.url)).or_default();
         e.checks = e.checks.saturating_add(1);
         e.last_check = now;
