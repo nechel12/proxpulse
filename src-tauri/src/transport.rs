@@ -522,10 +522,12 @@ pub(crate) async fn socks_target_host(
         return Ok(t_host.to_string());
     }
     match tokio::time::timeout(timeout, tokio::net::lookup_host((t_host, t_port))).await {
+        // SOCKS4 carries only IPv4: on a machine whose resolver lists IPv6
+        // first, the first address could not be sent at all.
         Ok(Ok(mut addrs)) => addrs
-            .next()
+            .find(|a| a.is_ipv4())
             .map(|a| a.ip().to_string())
-            .ok_or_else(|| Error::new(ErrorKind::NotFound, "socks target did not resolve")),
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "socks4 target has no IPv4 address")),
         Ok(Err(e)) => Err(e),
         Err(_) => Err(Error::new(ErrorKind::TimedOut, "socks dns timeout")),
     }

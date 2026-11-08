@@ -42,7 +42,9 @@ async fn socks_local_dns_modes() {
     let local = socks_target_host("socks4", "localhost", 80, timeout)
         .await
         .unwrap();
-    assert!(local.parse::<IpAddr>().unwrap().is_loopback());
+    // IPv4 even where the resolver lists ::1 first (Windows does).
+    let local = local.parse::<IpAddr>().unwrap();
+    assert!(local.is_loopback() && local.is_ipv4(), "{local}");
 
     // SOCKS5 always lets the proxy resolve: no local DNS leak.
     for scheme in ["socks5", "socks5h", "socks4a"] {

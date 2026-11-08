@@ -119,6 +119,9 @@ All notable changes to ProxPulse. The format follows
   headers, which inflated it; a failed TLS handshake keeps the connect time;
   and a slow proxy returns what it measured within a minute instead of a bare
   "timeout".
+- SOCKS4 proxies work on machines whose resolver lists an IPv6 address first:
+  the TLS check, the speed test and the dispatcher took the first address,
+  which SOCKS4 cannot carry, and failed.
 
 ## [0.6.1] — 2026-11-07
 
