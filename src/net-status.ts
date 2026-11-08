@@ -1,4 +1,4 @@
-type Translate = (key: string, params?: Record<string, string | number>) => string;
+import type { Translate } from "./ui-types.ts";
 
 export class NetStatus {
   private key = "net_idle";

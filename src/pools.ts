@@ -1,3 +1,4 @@
+import type { Translate } from "./ui-types.ts";
 // Named pools: ids, labels and per-pool storage keys.
 
 export const MAIN_POOL = "main";
@@ -7,7 +8,6 @@ export const MAX_POOLS = 10;
 /** `PoolMeta` in pools.rs. */
 export type PoolMeta = { id: string; name: string };
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 /** Settings that belong to one pool: the schedule, webhooks, subscriptions. */
 export const POOL_KEYS = [

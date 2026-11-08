@@ -1,8 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { Translate, StatusSetter } from "./ui-types.ts";
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
-type StatusSetter = (id: string, render: () => string) => void;
 
 export type UpdaterDeps = {
   t: Translate;

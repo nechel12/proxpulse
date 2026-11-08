@@ -11,9 +11,8 @@ import {
   type PrefsUpdate,
 } from "./settings-io.ts";
 import { MAIN_POOL, forgetPoolSettings, type PoolMeta } from "./pools.ts";
+import type { Translate, StatusSetter } from "./ui-types.ts";
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
-type StatusSetter = (id: string, render: () => string) => void;
 
 type Deps = {
   t: Translate;

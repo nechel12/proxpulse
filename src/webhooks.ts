@@ -2,10 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type { PoolItem } from "./pool.ts";
 import { parseUrlList, renderUrlList } from "./url-list.ts";
 import { MAIN_POOL, scopedKey } from "./pools.ts";
+import type { Translate, StatusSetter } from "./ui-types.ts";
+export type { Translate, StatusSetter };
 
 export type WebhookResult = { index: number; ok: boolean; message: string };
-export type Translate = (key: string, params?: Record<string, string | number>) => string;
-export type StatusSetter = (id: string, render: () => string) => void;
 
 export function formatWebhookResults(results: WebhookResult[], t: Translate): string {
   return results

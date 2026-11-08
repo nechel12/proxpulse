@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { flashLabel } from "./ui.ts";
+import type { Translate } from "./ui-types.ts";
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 type Deps = {
   t: Translate;

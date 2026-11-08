@@ -3,9 +3,10 @@ import {
   sanitizeProfile,
   type ProfileData,
 } from "./profiles.ts";
+import type { Translate } from "./ui-types.ts";
+export type { Translate };
 
 export type ProfileEntry = { name: string; data: ProfileData };
-export type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 export class ProfilePanel {
   custom: ProfileEntry[] = [];

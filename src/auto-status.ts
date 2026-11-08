@@ -1,3 +1,4 @@
+import type { Translate, StatusSetter } from "./ui-types.ts";
 export type AutoStatusEvent = {
   /** The pool whose schedule ran. */
   pool?: string;
@@ -9,8 +10,6 @@ export type AutoStatusEvent = {
   at: number;
 };
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
-type StatusSetter = (id: string, render: () => string) => void;
 
 type Deps = {
   t: Translate;

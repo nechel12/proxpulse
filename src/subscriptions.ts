@@ -1,5 +1,6 @@
 import { parseUrlList, renderUrlList } from "./url-list.ts";
 import { MAIN_POOL, scopedKey } from "./pools.ts";
+import type { Translate } from "./ui-types.ts";
 
 export type SubscriptionResult = {
   index: number;
@@ -9,7 +10,6 @@ export type SubscriptionResult = {
   error: string | null;
 };
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 const STORAGE_KEY = "pp-subscriptions";
 const MAX = 10;

@@ -7,11 +7,11 @@ import {
   type ProfileData,
   type TargetMode,
 } from "./profiles.ts";
+import type { Translate } from "./ui-types.ts";
 
 /** The built-in judge; it answers over both HTTPS and HTTP. */
 export const JUDGE_DEFAULT = "proxycheck.lmtunnel.com";
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 type Deps = {
   t: Translate;

@@ -27,10 +27,6 @@ export class VirtualRows<T> {
     }
   }
 
-  get count(): number {
-    return this.items.length;
-  }
-
   /** Show a new list; keeps the scroll position when `keepScroll` is set. */
   set(items: T[], keepScroll = true): void {
     this.items = items;
@@ -42,15 +38,6 @@ export class VirtualRows<T> {
   repaint(): void {
     this.range = [-1, -1];
     this.paint();
-  }
-
-  /** Scroll so that the row is visible. */
-  reveal(index: number): void {
-    const head = this.headHeight();
-    const top = index * this.rowHeight;
-    const view = this.wrap.clientHeight - head;
-    if (top < this.wrap.scrollTop) this.wrap.scrollTop = top;
-    else if (top + this.rowHeight > this.wrap.scrollTop + view) this.wrap.scrollTop = top + this.rowHeight - view;
   }
 
   private headHeight(): number {

@@ -1,12 +1,11 @@
 import type { PoolItem } from "./pool.ts";
 import { formatWebhookResults, type WebhookResult } from "./webhooks.ts";
+import type { Translate, StatusSetter } from "./ui-types.ts";
 
 /** Scheduler events name the pool they belong to. */
 export type AutoPoolEvent = { pool?: string; items: PoolItem[] };
 export type AutoWebhookEvent = { pool?: string; results: WebhookResult[] };
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
-type StatusSetter = (id: string, render: () => string) => void;
 
 export function applyAutoPool(
   ev: AutoPoolEvent,

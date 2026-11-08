@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { MAIN_POOL } from "./pools.ts";
+import type { Translate, StatusSetter } from "./ui-types.ts";
 
 export type DispatchStatus = {
   running: boolean;
@@ -15,8 +16,6 @@ export type DispatchStatus = {
   last_error: string | null;
 };
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
-type StatusSetter = (id: string, render: () => string) => void;
 
 export class DispatchMonitor {
   /** The pool whose dispatcher is shown. */

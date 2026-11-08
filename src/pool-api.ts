@@ -1,8 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { MAIN_POOL } from "./pools.ts";
+import type { Translate, StatusSetter } from "./ui-types.ts";
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
-type StatusSetter = (id: string, render: () => string) => void;
 
 /** `PoolApiStatus` in pool_api.rs. */
 type PoolApiStatus = { running: boolean; port: number; last_error: string | null };

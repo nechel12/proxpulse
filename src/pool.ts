@@ -1,6 +1,8 @@
 import { escapeHtml, maskProxy, pingClass } from "./format.ts";
 import { VirtualRows } from "./virtual-rows.ts";
 import { historyTitle, uptimeClass, uptimeLabel, type HistSummary } from "./history.ts";
+import type { Translate } from "./ui-types.ts";
+export type { Translate };
 
 export type PoolItem = {
   raw: string;
@@ -11,7 +13,6 @@ export type PoolItem = {
   history?: HistSummary;
 };
 
-export type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 export class PoolView {
   items: PoolItem[] = [];

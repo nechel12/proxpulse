@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Translate } from "./ui-types.ts";
 
 /** `HistSummary` in history.rs. */
 export type HistSummary = {
@@ -13,7 +14,6 @@ export type HistSummary = {
   avgMs: number | null;
 };
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 /** History of the given proxy URLs; empty outside the desktop app. */
 export async function fetchHistory(urls: string[]): Promise<Record<string, HistSummary>> {
