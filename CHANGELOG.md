@@ -187,6 +187,10 @@ All notable changes to ProxPulse. The format follows
   proxy last clicked, not a row position that changed with a re-sort.
 - A problem notification (offline, pool unchanged, webhook failed) is no
   longer lost when the problem first came up while the window was in front.
+- DNSBL no longer shows an IP as clean when the resolver fails: each list is
+  first checked with its RFC 5782 test entry, a list that does not answer it
+  counts as unknown, and results with unknown lists are not cached for an
+  hour.
 
 ## [0.6.1] — 2026-11-07
 

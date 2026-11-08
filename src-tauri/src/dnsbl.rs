@@ -18,6 +18,8 @@ pub(crate) const ZONES: [(&str, &str); 4] = [
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(4);
 const CACHE_TTL: Duration = Duration::from_secs(3600);
 const CACHE_MAX: usize = 20_000;
+/// How long a zone's health check (see [`zone_works`]) is trusted.
+const ZONE_CHECK_TTL: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DnsblResult {
@@ -69,6 +71,26 @@ async fn lookup(name: String) -> Answer {
     }
 }
 
+/// Whether a zone answers through this machine's resolver. A resolver error
+/// cannot be told from NXDOMAIN, which means "not listed", so a broken
+/// resolver, or a zone refusing it, would show every IP clean. RFC 5782 has
+/// every DNSBL list 127.0.0.2 as a test entry: a zone that does not list it
+/// here gives no answers for this run.
+async fn zone_works(zone: &'static str) -> bool {
+    static CHECKED: OnceLock<Mutex<HashMap<&'static str, (bool, Instant)>>> = OnceLock::new();
+    let checked = CHECKED.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((ok, at)) = checked.lock().ok().and_then(|c| c.get(zone).copied()) {
+        if at.elapsed() < ZONE_CHECK_TTL {
+            return ok;
+        }
+    }
+    let ok = lookup(query_name(Ipv4Addr::new(127, 0, 0, 2), zone)).await == Answer::Listed;
+    if let Ok(mut c) = checked.lock() {
+        c.insert(zone, (ok, Instant::now()));
+    }
+    ok
+}
+
 fn cache() -> &'static Mutex<HashMap<Ipv4Addr, (DnsblResult, Instant)>> {
     static CACHE: OnceLock<Mutex<HashMap<Ipv4Addr, (DnsblResult, Instant)>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -85,7 +107,12 @@ pub(crate) async fn check_ip(ip: &str) -> Option<DnsblResult> {
     }
     let mut set = tokio::task::JoinSet::new();
     for (zone, label) in ZONES {
-        set.spawn(async move { (label, lookup(query_name(v4, zone)).await) });
+        set.spawn(async move {
+            if !zone_works(zone).await {
+                return (label, Answer::Unknown);
+            }
+            (label, lookup(query_name(v4, zone)).await)
+        });
     }
     let mut result = DnsblResult::default();
     while let Some(Ok((label, answer))) = set.join_next().await {
@@ -97,6 +124,11 @@ pub(crate) async fn check_ip(ip: &str) -> Option<DnsblResult> {
     }
     result.listed.sort();
     result.unknown.sort();
+    // A lookup that failed is asked again next time, not remembered for an
+    // hour.
+    if !result.unknown.is_empty() {
+        return Some(result);
+    }
     if let Ok(mut c) = cache().lock() {
         if c.len() >= CACHE_MAX {
             c.clear();
