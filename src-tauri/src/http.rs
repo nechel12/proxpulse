@@ -174,6 +174,25 @@ pub(crate) fn reqwest_proxy_url(url: &str) -> Result<String, String> {
     Ok(format!("{scheme}://{rest}"))
 }
 
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxPulse/",
+    env!("CARGO_PKG_VERSION")
+);
+
+/// A direct client that does not follow redirects, for answers that must come
+/// from the address asked: a redirect could hand the judge's key lookup to
+/// another host, and make a key from it look delivered over TLS.
+pub(crate) fn build_client_no_redirects(timeout: Duration) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .tls_backend_preconfigured((*tls_client_config()).clone())
+        .user_agent(USER_AGENT)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| short_error(&e.to_string()))
+}
+
 pub(crate) fn build_client(
     proxy_url: Option<&str>,
     timeout: Duration,
@@ -195,10 +214,7 @@ pub(crate) fn build_client(
         // Reuse the process-wide rustls config instead of rebuilding the
         // webpki root store for every proxy client.
         .tls_backend_preconfigured((*tls_client_config()).clone())
-        .user_agent(concat!(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProxPulse/",
-            env!("CARGO_PKG_VERSION")
-        ));
+        .user_agent(USER_AGENT);
     if no_proxy {
         b = b.no_proxy();
     }

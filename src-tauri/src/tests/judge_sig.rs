@@ -233,8 +233,18 @@ async fn key_lookup_tells_no_key_from_no_answer() {
         }
     };
     assert_eq!(lookup("200 OK", &key_json()).await, KeyLookup::Key(key()));
-    assert_eq!(lookup("404 Not Found", "").await, KeyLookup::NotSigned);
-    assert_eq!(lookup("200 OK", "<html>").await, KeyLookup::NotSigned);
+    // These servers speak plain HTTP: "no key" from them is only as good as
+    // the direct path, and the user is told.
+    assert_eq!(
+        lookup("404 Not Found", "").await,
+        KeyLookup::NotSignedOverHttp
+    );
+    assert_eq!(
+        lookup("200 OK", "<html>").await,
+        KeyLookup::NotSignedOverHttp
+    );
+    assert!(key_over_http(&KeyLookup::NotSignedOverHttp));
+    assert!(!key_over_http(&KeyLookup::NotSigned));
     assert_eq!(
         lookup("500 Internal Server Error", "").await,
         KeyLookup::Unavailable
@@ -254,6 +264,26 @@ async fn key_lookup_tells_no_key_from_no_answer() {
         fetch_key(&format!("http://127.0.0.1:{port}/judge"), t, false).await,
         KeyLookup::Unavailable
     );
+}
+
+#[tokio::test]
+async fn the_key_lookup_does_not_follow_redirects() {
+    // A redirect could hand the lookup to another host and make its key look
+    // delivered over TLS.
+    let (elsewhere, served) = key_server("200 OK", key_json()).await;
+    let target = elsewhere.replace("/judge", "/key");
+    let status: &'static str = Box::leak(
+        format!(
+            "302 Found
+Location: {target}"
+        )
+        .into_boxed_str(),
+    );
+    let (url, asked) = key_server(status, String::new()).await;
+    let found = fetch_key(&url, Duration::from_secs(5), false).await;
+    assert_eq!(found, KeyLookup::Unavailable);
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+    assert_eq!(served.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

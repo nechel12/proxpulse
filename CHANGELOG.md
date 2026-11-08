@@ -27,6 +27,11 @@ All notable changes to ProxPulse. The format follows
   carries the anonymity verdict, is checked against the judge's key even when
   the main address ends in `/generate_204`. Before, no key was fetched and any
   proxy could rewrite the verdict.
+- The judge's key is no longer fetched through redirects, which could hand the
+  lookup to another host and make its key look delivered over HTTPS. A "this
+  judge does not sign" answer that came over plain HTTP now shows the same
+  note as a key that did: anyone on the direct path could send it to switch
+  signatures off.
 - An answer whose signature fails loses its exit IP, country, city, ASN and IP
   type as well as its anonymity verdict, so forged geo no longer reaches the
   pool, the dispatcher's country filter, DNSBL or the geo cache.

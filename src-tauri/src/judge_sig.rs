@@ -3,7 +3,7 @@
 //! the answer; the judge signs the body together with our nonce and
 //! direct IP, so a rewritten or replayed answer is caught here.
 
-use crate::http::{build_client, read_body_capped, BODY_LIMIT_SMALL};
+use crate::http::{build_client_no_redirects, read_body_capped, BODY_LIMIT_SMALL};
 use base64::Engine;
 use ring::rand::SecureRandom;
 use ring::signature::{UnparsedPublicKey, ED25519};
@@ -28,6 +28,10 @@ pub(crate) enum KeyLookup {
     Key(JudgeKey),
     /// A clear answer that there is no key: an older or third-party judge.
     NotSigned,
+    /// The same answer over plain HTTP. Anyone on the direct path could have
+    /// given it to switch signatures off, so the user is told, as for a key
+    /// that came over HTTP.
+    NotSignedOverHttp,
     /// No clear answer (network error, 429, 5xx): the judge may well sign.
     Unavailable,
 }
@@ -149,37 +153,48 @@ pub(crate) async fn fetch_key(judge_url: &str, timeout: Duration, https_only: bo
     if !https_only || url.starts_with("https://") {
         tries.push(url);
     }
-    let Ok(client) = build_client(None, timeout, true) else {
+    // Redirects are not followed: the key must come from the address asked,
+    // and TLS only vouches for it when that address is https.
+    let Ok(client) = build_client_no_redirects(timeout) else {
         return KeyLookup::Unavailable;
     };
     let mut found = KeyLookup::Unavailable;
     for u in tries {
+        let over_tls = u.starts_with("https://");
         let Ok(r) = client.get(&u).send().await else {
             continue;
         };
-        let over_tls = r.url().scheme() == "https";
-        if https_only && !over_tls {
-            continue;
-        }
         let status = r.status();
-        if status.is_success() {
+        let no_key = if status.is_success() {
             let Ok(body) = read_body_capped(r, BODY_LIMIT_SMALL).await else {
                 continue;
             };
             match parse_key(&body) {
                 Some(key) => return KeyLookup::Key(JudgeKey { over_tls, ..key }),
-                None => found = KeyLookup::NotSigned,
+                None => true,
             }
-        } else if status == reqwest::StatusCode::NOT_FOUND {
-            found = KeyLookup::NotSigned;
+        } else {
+            status == reqwest::StatusCode::NOT_FOUND
+        };
+        // "No key" over TLS outweighs the same answer over plain HTTP.
+        if no_key && found != KeyLookup::NotSigned {
+            found = if over_tls {
+                KeyLookup::NotSigned
+            } else {
+                KeyLookup::NotSignedOverHttp
+            };
         }
     }
     found
 }
 
-/// Whether this lookup found a key that came over plain HTTP.
+/// Whether this lookup's answer, a key or "no key", came over plain HTTP.
 pub(crate) fn key_over_http(lookup: &KeyLookup) -> bool {
-    matches!(lookup, KeyLookup::Key(key) if !key.over_tls)
+    match lookup {
+        KeyLookup::Key(key) => !key.over_tls,
+        KeyLookup::NotSignedOverHttp => true,
+        KeyLookup::NotSigned | KeyLookup::Unavailable => false,
+    }
 }
 
 /// Check an answer's signature with the key from the start of the run. When
@@ -196,7 +211,7 @@ pub(crate) async fn check_signature<'a>(
 ) -> SignatureCheck {
     let holds = |key: &JudgeKey| verify(key, challenge, direct_ip, body, signature);
     match first {
-        KeyLookup::NotSigned => return SignatureCheck::NotSigned,
+        KeyLookup::NotSigned | KeyLookup::NotSignedOverHttp => return SignatureCheck::NotSigned,
         KeyLookup::Key(key) if holds(key) => return SignatureCheck::Valid,
         _ => {}
     }
@@ -204,7 +219,7 @@ pub(crate) async fn check_signature<'a>(
         (_, KeyLookup::Key(key)) if holds(key) => SignatureCheck::Valid,
         // This judge had a key, and the answer does not match it.
         (_, KeyLookup::Key(_)) | (KeyLookup::Key(_), _) => SignatureCheck::Invalid,
-        (_, KeyLookup::NotSigned) => SignatureCheck::NotSigned,
+        (_, KeyLookup::NotSigned | KeyLookup::NotSignedOverHttp) => SignatureCheck::NotSigned,
         (_, KeyLookup::Unavailable) => SignatureCheck::Unchecked,
     }
 }
