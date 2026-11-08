@@ -45,6 +45,8 @@ export function askText(title: string, value = "", maxLength = 40): Promise<stri
   const cancel = document.getElementById("text-modal-cancel") as HTMLButtonElement | null;
   const titleEl = document.getElementById("text-modal-title");
   if (!overlay || !input || !ok || !cancel || !titleEl) return Promise.resolve(null);
+  // Focus goes back where it was when the dialog closes.
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   titleEl.textContent = title;
   input.maxLength = maxLength;
   input.value = value;
@@ -57,7 +59,9 @@ export function askText(title: string, value = "", maxLength = 40): Promise<stri
       ok.onclick = null;
       cancel.onclick = null;
       overlay.onclick = null;
+      overlay.onkeydown = null;
       input.onkeydown = null;
+      opener?.focus({ preventScroll: true });
       resolve(v);
     };
     ok.onclick = () => done(input.value);
@@ -69,10 +73,24 @@ export function askText(title: string, value = "", maxLength = 40): Promise<stri
       if (e.key === "Enter") {
         e.preventDefault();
         done(input.value);
-      } else if (e.key === "Escape") {
+      }
+    };
+    // Escape closes the dialog from any of its controls, and Tab stays
+    // inside it: the page behind is inert while it is open.
+    overlay.onkeydown = (e) => {
+      if (e.key === "Escape") {
         e.preventDefault();
         done(null);
+        return;
       }
+      if (e.key !== "Tab") return;
+      e.preventDefault();
+      const items = [input, cancel, ok];
+      const at = items.indexOf(document.activeElement as HTMLInputElement);
+      const next = at < 0
+        ? (e.shiftKey ? items.length - 1 : 0)
+        : (at + (e.shiftKey ? items.length - 1 : 1)) % items.length;
+      items[next].focus();
     };
   });
 }

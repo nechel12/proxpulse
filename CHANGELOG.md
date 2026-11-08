@@ -59,6 +59,11 @@ All notable changes to ProxPulse. The format follows
   and `?tls` marks.
 - A pool backup, `pool.json.bak` (or `pool-<id>.json.bak`) in the app data
   folder, written before a scheduled check removes entries.
+- Keyboard use of the results table: the arrow keys select rows (Shift
+  extends), the Menu key or Shift+F10 opens the row menu, whose items the
+  arrow keys move through. The Import buttons are reachable with Tab, the
+  name dialog keeps focus inside and returns it on close, and the status
+  filters and pool sort menus are announced to screen readers.
 
 ### Changed
 

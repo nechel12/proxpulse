@@ -52,6 +52,8 @@ export class ResultsView {
   private selected = new Set<string>();
   /** The proxy a Shift range starts from: an index goes stale on re-sort. */
   private anchor: string | null = null;
+  /** The row the arrow keys move from: the last one clicked or reached. */
+  private cursor: string | null = null;
   private virtual: VirtualRows<ProxyResult> | null = null;
   private t: Translate = (k) => k;
   locale = "ru";
@@ -110,10 +112,42 @@ export class ResultsView {
       } else if (e.key === "Escape" && this.selected.size > 0) {
         e.preventDefault();
         this.clearSelection();
+      } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && this.rows.length > 0) {
+        // Arrows move the selection, Shift extends it: the table works
+        // without a mouse.
+        e.preventDefault();
+        const at = this.cursorIndex();
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        const i = at < 0 ? 0 : Math.max(0, Math.min(this.rows.length - 1, at + step));
+        this.select(i, e.shiftKey, false);
+        this.virtual?.reveal(i);
+      } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+        // The keyboard's way to the row menu.
+        e.preventDefault();
+        this.openMenuForKeyboard(wrap);
       }
+    });
+    // The Menu key can also arrive as a contextmenu event on the table
+    // itself (a row's own handler takes clicks on rows).
+    wrap.addEventListener("contextmenu", (e) => {
+      if (e.defaultPrevented || e.target !== wrap || this.rows.length === 0) return;
+      e.preventDefault();
+      this.openMenuForKeyboard(wrap);
     });
 
     const menu = $("row-menu");
+    menu?.addEventListener("contextmenu", (e) => e.preventDefault());
+    menu?.addEventListener("keydown", (e) => {
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+      e.preventDefault();
+      const items = [...menu.querySelectorAll<HTMLButtonElement>("button[data-act]:not(:disabled)")];
+      if (items.length === 0) return;
+      const at = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = e.key === "Home" ? 0
+        : e.key === "End" ? items.length - 1
+        : (at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      items[next].focus();
+    });
     menu?.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-act]");
       if (!b || b.disabled) return;
@@ -137,6 +171,7 @@ export class ResultsView {
   reset(): void {
     this.selected.clear();
     this.anchor = null;
+    this.cursor = null;
     this.virtual?.set([], false);
   }
 
@@ -191,9 +226,28 @@ export class ResultsView {
     this.virtual.set(this.rows);
   }
 
+  private cursorIndex(): number {
+    return this.cursor === null ? -1 : this.rows.findIndex((x) => x.proxy === this.cursor);
+  }
+
+  /** The row menu for the selection, under its current row. */
+  private openMenuForKeyboard(wrap: HTMLElement): void {
+    if (this.rows.length === 0) return;
+    let i = this.cursorIndex();
+    if (this.selected.size === 0 || i < 0) {
+      i = Math.max(0, i);
+      this.select(i, false, false);
+      this.virtual?.reveal(i);
+    }
+    const tr = wrap.querySelector<HTMLElement>(`tr[data-index="${i}"]`);
+    const box = (tr ?? wrap).getBoundingClientRect();
+    this.openMenu(box.left + 24, tr ? box.bottom : box.top + 24);
+  }
+
   private select(i: number, range: boolean, toggle: boolean): void {
     const r = this.rows[i];
     if (!r) return;
+    this.cursor = r.proxy;
     const from = this.anchor === null ? -1 : this.rows.findIndex((x) => x.proxy === this.anchor);
     if (range && from >= 0) {
       const [a, b] = from < i ? [from, i] : [i, from];
@@ -240,7 +294,12 @@ export class ResultsView {
   }
 
   private closeMenu(): void {
-    $("row-menu")?.classList.add("hidden");
+    const menu = $("row-menu");
+    if (!menu || menu.classList.contains("hidden")) return;
+    // Focus left inside a hidden menu would be lost: back to the table.
+    const hadFocus = menu.contains(document.activeElement);
+    menu.classList.add("hidden");
+    if (hadFocus) $("results-wrap")?.focus({ preventScroll: true });
   }
 
   private renderSortState(): void {

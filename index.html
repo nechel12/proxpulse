@@ -58,7 +58,7 @@
 
         <div class="row2">
           <button id="btn-clear-in" class="btn ghost" data-i18n="btn_clear">Очистить</button>
-          <label class="btn ghost file"><span data-i18n="btn_import">Импорт</span><input id="file-input" type="file" multiple hidden /></label>
+          <label class="btn ghost file"><span data-i18n="btn_import">Импорт</span><input id="file-input" class="sr-only" type="file" multiple /></label>
         </div>
         <div class="row2">
           <input id="import-url" data-i18n-ph="import_url_ph" placeholder="https://… — список прокси" style="flex:1" />
@@ -200,9 +200,9 @@
         <div class="panel-head">
           <span class="ph-title" data-i18n="res_title">▸ Результат</span>
           <div class="filters">
-            <button data-f="all" class="chip active"><span data-i18n="chip_all">Все</span> <b id="f-all">0</b></button>
-            <button data-f="alive" class="chip ok"><span data-i18n="chip_alive">Живые</span> <b id="f-alive">0</b></button>
-            <button data-f="dead" class="chip bad"><span data-i18n="chip_dead">Мёртвые</span> <b id="f-dead">0</b></button>
+            <button data-f="all" class="chip active" aria-pressed="true"><span data-i18n="chip_all">Все</span> <b id="f-all">0</b></button>
+            <button data-f="alive" class="chip ok" aria-pressed="false"><span data-i18n="chip_alive">Живые</span> <b id="f-alive">0</b></button>
+            <button data-f="dead" class="chip bad" aria-pressed="false"><span data-i18n="chip_dead">Мёртвые</span> <b id="f-dead">0</b></button>
           </div>
         </div>
 
@@ -350,7 +350,7 @@
           <button id="btn-pool-sync" class="btn ghost" data-i18n="pool_sync">Синхронизировать</button>
           <button id="btn-pool-clear" class="btn ghost" data-i18n="pool_clear">Очистить пул</button>
           <input class="pool-filter" data-pool-filter="pool-body" data-i18n-ph="pool_filter_ph" placeholder="Страна, IP…" />
-          <select class="pool-sort" data-pool-sort="pool-body">
+          <select class="pool-sort" data-pool-sort="pool-body" data-i18n-aria="pool_sort_t">
             <option value="added" data-i18n="pool_sort_added">Порядок</option>
             <option value="ping" data-i18n="pool_sort_ping">Пинг</option>
             <option value="country" data-i18n="pool_sort_country">Страна</option>
@@ -442,7 +442,7 @@
           <button id="btn-auto-pool-sync" class="btn ghost" data-i18n="pool_sync">Синхронизировать</button>
           <button id="btn-auto-pool-clear" class="btn ghost" data-i18n="pool_clear">Очистить пул</button>
           <input class="pool-filter" data-pool-filter="auto-pool-body" data-i18n-ph="pool_filter_ph" placeholder="Страна, IP…" />
-          <select class="pool-sort" data-pool-sort="auto-pool-body">
+          <select class="pool-sort" data-pool-sort="auto-pool-body" data-i18n-aria="pool_sort_t">
             <option value="added" data-i18n="pool_sort_added">Порядок</option>
             <option value="ping" data-i18n="pool_sort_ping">Пинг</option>
             <option value="country" data-i18n="pool_sort_country">Страна</option>
@@ -543,7 +543,7 @@
           <span class="set-text"><span class="set-name" data-i18n="pref_backup">Настройки приложения</span><span class="set-desc" data-i18n="pref_backup_d">Файл содержит адреса вебхуков и ключ ip-api</span></span>
           <div class="set-ctrl">
             <button id="btn-settings-export" class="btn ghost" data-i18n="btn_settings_export">Экспорт</button>
-            <label class="btn ghost file"><span data-i18n="btn_settings_import">Импорт</span><input id="settings-file" type="file" accept=".json,application/json" hidden /></label>
+            <label class="btn ghost file"><span data-i18n="btn_settings_import">Импорт</span><input id="settings-file" class="sr-only" type="file" accept=".json,application/json" /></label>
             <button id="btn-settings-reset" class="btn ghost" data-i18n="btn_settings_reset">Сбросить</button>
           </div>
         </div>
@@ -589,9 +589,9 @@
     </div>
 
     <div id="text-modal" class="modal-overlay hidden">
-      <div class="modal-box">
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="text-modal-title">
         <div class="modal-title" id="text-modal-title"></div>
-        <input id="text-modal-input" type="text" maxlength="40" autocomplete="off" spellcheck="false" />
+        <input id="text-modal-input" type="text" maxlength="40" autocomplete="off" spellcheck="false" aria-labelledby="text-modal-title" />
         <div class="modal-actions">
           <button id="text-modal-cancel" class="btn ghost" data-i18n="modal_cancel">Отмена</button>
           <button id="text-modal-ok" class="btn primary" data-i18n="modal_ok">OK</button>

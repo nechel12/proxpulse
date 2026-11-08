@@ -40,6 +40,17 @@ export class VirtualRows<T> {
     this.paint();
   }
 
+  /** Scroll just enough to bring row `i` into view below the sticky header. */
+  reveal(i: number): void {
+    const head = this.headHeight();
+    const top = head + i * this.rowHeight;
+    if (top - head < this.wrap.scrollTop) {
+      this.wrap.scrollTop = top - head;
+    } else if (top + this.rowHeight > this.wrap.scrollTop + this.wrap.clientHeight) {
+      this.wrap.scrollTop = top + this.rowHeight - this.wrap.clientHeight;
+    }
+  }
+
   private headHeight(): number {
     return this.body.parentElement?.querySelector("thead")?.getBoundingClientRect().height ?? 0;
   }

@@ -1023,8 +1023,12 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   document.querySelectorAll(".chip").forEach((c) => {
     c.addEventListener("click", () => {
-      document.querySelectorAll(".chip").forEach((x) => x.classList.remove("active"));
+      document.querySelectorAll(".chip").forEach((x) => {
+        x.classList.remove("active");
+        x.setAttribute("aria-pressed", "false");
+      });
       c.classList.add("active");
+      c.setAttribute("aria-pressed", "true");
       filter = (c as HTMLElement).dataset.f as typeof filter;
       resultsView.reset();
       render();
