@@ -333,7 +333,16 @@ tr.empty td { text-align: center; color: var(--mut); padding: 30px; font-family:
 .anon-elite { color: var(--ok); } .anon-anon { color: var(--warn); } .anon-trans { color: var(--bad); }
 .dim { color: var(--mut); cursor: help; }
 .cell-geo { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cell-err { color: var(--mut); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-err { color: var(--mut); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The row number and the proxy stay in view while the table scrolls sideways. */
+/* 64px fits a five-digit row number (up to 20 000 rows) with the padding. */
+#results-wrap th:nth-child(1), #results-wrap td:nth-child(1) { position: sticky; left: 0; width: 64px; min-width: 64px; max-width: 64px; }
+#results-wrap th:nth-child(2), #results-wrap td:nth-child(2) { position: sticky; left: 64px; }
+#results-wrap thead th:nth-child(-n+2) { z-index: 3; }
+#results-wrap tbody td:nth-child(-n+2) { z-index: 1; background: var(--field); }
+#results-wrap tbody td:nth-child(2) { box-shadow: inset -1px 0 0 var(--line); }
+#results-wrap tbody tr:hover td:nth-child(-n+2) { background: linear-gradient(rgba(255,30,45,.06), rgba(255,30,45,.06)), var(--field); }
+#results-wrap tbody tr.selected td:nth-child(-n+2) { background: linear-gradient(var(--red-dim), var(--red-dim)), var(--field); }
 
 .foot {
   display: flex; justify-content: flex-end; padding: 8px 18px;

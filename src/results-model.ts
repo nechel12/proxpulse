@@ -22,11 +22,18 @@ export type ResultFilters = {
   site: string;
   /** "clean" or "listed" by DNS blocklists, or "" for any. */
   dnsbl: string;
+  /** "clean" (no ?mod or ?tls), "modified" (either), "unverified" (?unv), or "" for any. */
+  tamper: string;
 };
 
 export type Dedupe = "" | "ip" | "asn";
 
-export const NO_FILTERS: ResultFilters = { status: "all", query: "", proto: "", anon: "", country: "", dedupe: "", site: "", dnsbl: "" };
+export const NO_FILTERS: ResultFilters = { status: "all", query: "", proto: "", anon: "", country: "", dedupe: "", site: "", dnsbl: "", tamper: "" };
+
+/** Whether the answer through this proxy was found rewritten (?mod or ?tls). */
+export function isModified(r: ProxyResult): boolean {
+  return r.tamper === "modified" || r.tls === "modified";
+}
 
 export function countryOf(r: ProxyResult): string {
   return r.country ?? r.country_code ?? "";
@@ -42,6 +49,9 @@ export function filterResults(results: ProxyResult[], f: ResultFilters): ProxyRe
     if (f.country && countryOf(r) !== f.country) return false;
     if (f.site && !(r.sites ?? []).some((s) => s.ok && siteHost(s.url) === f.site)) return false;
     if (f.dnsbl && (!r.dnsbl || (r.dnsbl.listed.length > 0) !== (f.dnsbl === "listed"))) return false;
+    if (f.tamper === "clean" && isModified(r)) return false;
+    if (f.tamper === "modified" && !isModified(r)) return false;
+    if (f.tamper === "unverified" && r.tamper !== "unverified") return false;
     if (q) {
       const hay = [r.proxy, r.proto, r.error ?? "", r.ip ?? "", r.country ?? "", r.country_code ?? "", r.city ?? "", r.isp ?? "", r.org ?? "", r.asn ?? "", r.ip_type ?? "", r.anonymity ?? "", r.tls ?? ""].join(" ").toLowerCase();
       if (!hay.includes(q)) return false;

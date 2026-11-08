@@ -27,8 +27,19 @@ All notable changes to ProxPulse. The format follows
 - Answers whose signature could not be checked, because the judge's key could
   not be fetched, are marked `?unv`, with `unverified` in exports.
 - A note under the status line when the judge's key came over plain HTTP.
+- An integrity filter in the results: without rewrites, rewritten (`?mod`,
+  `?tls`), or signature not checked (`?unv`).
+- Tooltips on the result column headers, and translated tooltips on the `?mod`
+  and `?tls` marks.
 - A pool backup, `pool.json.bak` (or `pool-<id>.json.bak`) in the app data
   folder, written before a scheduled check removes entries.
+
+### Changed
+
+- The Info column, with the exit IP, the `?mod`, `?unv`, `?tls` and blocklist
+  marks, and the reason a proxy is dead, follows Status instead of being the
+  last column, off-screen in the default window. The row number and proxy
+  columns stay in place while the table scrolls sideways.
 
 ### Fixed
 
@@ -48,6 +59,7 @@ All notable changes to ProxPulse. The format follows
 - A manual check where no proxy answered and the check server does not answer
   directly either says so, and is not written to the proxies' history, where
   it marked every proxy down.
+- A hidden DNSBL filter no longer keeps filtering after DNSBL is turned off.
 
 ## [0.6.1] — 2026-11-07
 

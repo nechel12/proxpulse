@@ -68,7 +68,7 @@ export class ResultsView {
         deps.onChange();
       });
     });
-    for (const id of ["f-proto", "f-anon", "f-country", "f-site", "f-dnsbl", "f-dedupe"]) {
+    for (const id of ["f-proto", "f-anon", "f-country", "f-site", "f-tamper", "f-dnsbl", "f-dedupe"]) {
       $(id)?.addEventListener("change", () => {
         this.clearSelection();
         wrap.scrollTop = 0;
@@ -146,15 +146,9 @@ export class ResultsView {
     return this.rows.filter((r) => this.selected.has(r.proxy));
   }
 
-  render(results: ProxyResult[], status: ResultFilter, t: Translate, visible: () => boolean): void {
-    this.t = t;
-    if (!visible()) return;
-    this.updateOptions(results);
-    this.renderSortState();
-    this.shared = exitIpCounts(results);
-    const body = $<HTMLTableSectionElement>("tbody");
-    if (!body || !this.virtual) return;
-    this.rows = sortResults(filterResults(results, {
+  /** The rows the table shows for these results: filtered, deduplicated, sorted. */
+  shown(results: ProxyResult[], status: ResultFilter): ProxyResult[] {
+    return sortResults(filterResults(results, {
       status,
       query: $<HTMLInputElement>("search")?.value ?? "",
       proto: $<HTMLSelectElement>("f-proto")?.value ?? "",
@@ -163,7 +157,19 @@ export class ResultsView {
       dedupe: ($<HTMLSelectElement>("f-dedupe")?.value ?? "") as Dedupe,
       site: $<HTMLSelectElement>("f-site")?.value ?? "",
       dnsbl: $<HTMLSelectElement>("f-dnsbl")?.value ?? "",
+      tamper: $<HTMLSelectElement>("f-tamper")?.value ?? "",
     }), this.sort);
+  }
+
+  render(results: ProxyResult[], status: ResultFilter, t: Translate, visible: () => boolean): void {
+    this.t = t;
+    if (!visible()) return;
+    this.updateOptions(results);
+    this.renderSortState();
+    this.shared = exitIpCounts(results);
+    const body = $<HTMLTableSectionElement>("tbody");
+    if (!body || !this.virtual) return;
+    this.rows = this.shown(results, status);
     if (this.rows.length === 0) {
       this.virtual.set([]);
       const tr = document.createElement("tr");
@@ -241,6 +247,16 @@ export class ResultsView {
   private updateOptions(results: ProxyResult[]): void {
     const t = this.t;
     const opts = filterOptions(results);
+    // Filters for data this run has. Hidden otherwise, and reset when hidden:
+    // a filter left on with no visible control would empty the table.
+    const offer = (id: string, has: boolean) => {
+      const sel = $<HTMLSelectElement>(id);
+      if (!sel) return;
+      sel.classList.toggle("hidden", !has);
+      if (!has) sel.value = "";
+    };
+    offer("f-dnsbl", results.some((r) => r.dnsbl));
+    offer("f-tamper", results.some((r) => r.tamper || r.tls === "modified"));
     const countries = opts.country.map(([c]) => c).sort((a, b) => a.localeCompare(b));
     const key = [t("f_proto_all"), opts.proto.join(","), countries.join(","), opts.site.join(",")].join("|");
     if (key === this.optionsKey) return;
@@ -257,7 +273,6 @@ export class ResultsView {
     fill("f-country", t("f_country_all"), countries.map((c) => [c, c]));
     fill("f-site", t("f_site_all"), opts.site.map((h) => [h, t("f_site_opens", { site: h })]));
     $("f-site")?.classList.toggle("hidden", opts.site.length === 0);
-    $("f-dnsbl")?.classList.toggle("hidden", !results.some((r) => r.dnsbl));
   }
 
   private sitesCell(r: ProxyResult): string {
@@ -298,9 +313,9 @@ export class ResultsView {
     const an = anonShort(r.anonymity);
     const tls = tlsShort(r.tls);
     const marks = [
-      r.tamper === "modified" ? `<span class="anon-trans" title="tamper">?mod</span>` : "",
+      r.tamper === "modified" ? `<span class="anon-trans" title="${escapeHtml(t("tamper_modified_t"))}">?mod</span>` : "",
       r.tamper === "unverified" ? `<span class="anon-anon" title="${escapeHtml(t("tamper_unverified_t"))}">?unv</span>` : "",
-      r.tls === "modified" ? `<span class="anon-trans" title="tls">?tls</span>` : "",
+      r.tls === "modified" ? `<span class="anon-trans" title="${escapeHtml(t("tls_modified_t"))}">?tls</span>` : "",
       r.dnsbl?.listed.length
         ? `<span class="anon-trans" title="${escapeHtml(t("dnsbl_listed_t", { lists: r.dnsbl.listed.join(", ") }))}">bl ${r.dnsbl.listed.length}</span>`
         : "",
@@ -319,15 +334,15 @@ export class ResultsView {
         : escapeHtml(txt);
     tr.innerHTML =
       `<td>${i + 1}</td><td>${escapeHtml(this.hideCreds ? maskProxy(r.proxy, r.url) : r.proxy)}</td><td>${escapeHtml(r.proto)}</td>` +
-      `<td>${pill}</td><td class="${pingClass(r.latency_ms)}">${ping}</td>` +
+      `<td>${pill}</td><td class="cell-err" title="${infoTitle}">${info}</td>` +
+      `<td class="${pingClass(r.latency_ms)}">${ping}</td>` +
       `<td>${escapeHtml(stabilityShort(r))}</td><td class="${an.cls}">${cell("anon", an.txt)}</td>` +
       `<td class="cell-geo" title="${infoTitle}">${cell("geo", geoShort(r))}</td>` +
       `<td>${escapeHtml(r.ip_type ?? "-")}</td>` +
       `<td class="${tls.cls}" title="${infoTitle}">${cell("tls", tls.txt)}</td>` +
       this.sitesCell(r) +
       this.speedCell(r) +
-      `<td class="${uptimeClass(r.history)}" title="${escapeHtml(historyTitle(r.history, t, this.locale))}">${uptimeLabel(r.history)}</td>` +
-      `<td class="cell-err" title="${infoTitle}">${info}</td>`;
+      `<td class="${uptimeClass(r.history)}" title="${escapeHtml(historyTitle(r.history, t, this.locale))}">${uptimeLabel(r.history)}</td>`;
     return tr;
   }
 }

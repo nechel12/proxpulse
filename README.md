@@ -249,8 +249,11 @@ flowchart TD
 
 The table shows every result, however long the list: only the rows in view
 are drawn. A click on a column header sorts by it (ascending, descending,
-off); the text filter (Ctrl+F) and the **Protocol**, **Anonymity** and
-**Country** menus narrow the list. A click selects a row, Ctrl+click and
+off); the text filter (Ctrl+F) and the **Protocol**, **Anonymity**,
+**Country** and **Integrity** menus narrow the list. The Info column, right
+after Status, holds the exit IP, the marks below and the reason a proxy is
+dead; the row number and proxy columns stay in place while the table scrolls
+sideways, and every column header explains itself in a tooltip. A click selects a row, Ctrl+click and
 Shift+click select several, Ctrl+A selects all shown. Right-click opens
 actions for the selection: copy (with credentials), re-check, speed test, add
 the alive ones to the pool, remove from the list (also Delete). **Re-check

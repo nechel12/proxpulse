@@ -32,6 +32,17 @@ describe("filterResults", () => {
     expect(filterResults(all, { ...NO_FILTERS, country: "Germany" })).toEqual([de]);
     expect(filterResults(all, { ...NO_FILTERS, query: " TIMEOUT " })).toEqual([dead]);
   });
+
+  it("filters by answer integrity", () => {
+    const ok = alive("5.5.5.5:80", { tamper: "ok" });
+    const mod = alive("6.6.6.6:80", { tamper: "modified" });
+    const tls = alive("7.7.7.7:80", { tamper: "ok", tls: "modified" });
+    const unv = alive("8.8.8.8:80", { tamper: "unverified" });
+    const rows = [ok, mod, tls, unv];
+    expect(filterResults(rows, { ...NO_FILTERS, tamper: "clean" })).toEqual([ok, unv]);
+    expect(filterResults(rows, { ...NO_FILTERS, tamper: "modified" })).toEqual([mod, tls]);
+    expect(filterResults(rows, { ...NO_FILTERS, tamper: "unverified" })).toEqual([unv]);
+  });
 });
 
 describe("sortResults", () => {
