@@ -181,6 +181,10 @@ All notable changes to ProxPulse. The format follows
   window, after which Start and Check now stayed locked until the app was
   restarted. After any reload during a check, the buttons unlock once the
   check ends.
+- "One per IP" and "One per ASN" no longer hide alive proxies whose IP or ASN
+  is unknown (geo skipped at a limit); Geo sorts by the code and city it
+  shows and Uptime by the uptime it shows; and a Shift range starts from the
+  proxy last clicked, not a row position that changed with a re-sort.
 
 ## [0.6.1] — 2026-11-07
 

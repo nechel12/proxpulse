@@ -8,6 +8,7 @@ import {
   filterResults,
   mergeResults,
   nextSort,
+  onePerGroup,
   sortResults,
   visibleRange,
 } from "./results-model.ts";
@@ -125,5 +126,17 @@ describe("DNSBL filter", () => {
     expect(filterResults(rows, { ...NO_FILTERS, dnsbl: "listed" })).toEqual([listed]);
     expect(filterResults(rows, { ...NO_FILTERS, dnsbl: "clean" })).toEqual([clean]);
     expect(filterResults(rows, NO_FILTERS)).toHaveLength(3);
+  });
+});
+
+describe("one per group keeps what has no group", () => {
+  it("keeps an alive proxy whose ASN is unknown", () => {
+    const base = { alive: true, proto: "HTTP" } as ProxyResult;
+    const rows = [
+      { ...base, proxy: "a", asn: "AS1 X", latency_ms: 50 },
+      { ...base, proxy: "b", asn: "AS1 X", latency_ms: 20 },
+      { ...base, proxy: "c", asn: null, latency_ms: 10 },
+    ] as ProxyResult[];
+    expect(onePerGroup(rows, "asn").map((r) => r.proxy)).toEqual(["b", "c"]);
   });
 });

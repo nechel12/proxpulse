@@ -46,7 +46,8 @@ export class ResultsView {
   sort: Sort = null;
   private rows: ProxyResult[] = [];
   private selected = new Set<string>();
-  private anchor = -1;
+  /** The proxy a Shift range starts from: an index goes stale on re-sort. */
+  private anchor: string | null = null;
   private virtual: VirtualRows<ProxyResult> | null = null;
   private t: Translate = (k) => k;
   locale = "ru";
@@ -131,14 +132,14 @@ export class ResultsView {
   /** A new check: no selection, back to the top. */
   reset(): void {
     this.selected.clear();
-    this.anchor = -1;
+    this.anchor = null;
     this.virtual?.set([], false);
   }
 
   clearSelection(): void {
     if (this.selected.size === 0) return;
     this.selected.clear();
-    this.anchor = -1;
+    this.anchor = null;
     this.virtual?.repaint();
   }
 
@@ -187,8 +188,9 @@ export class ResultsView {
   private select(i: number, range: boolean, toggle: boolean): void {
     const r = this.rows[i];
     if (!r) return;
-    if (range && this.anchor >= 0) {
-      const [a, b] = this.anchor < i ? [this.anchor, i] : [i, this.anchor];
+    const from = this.anchor === null ? -1 : this.rows.findIndex((x) => x.proxy === this.anchor);
+    if (range && from >= 0) {
+      const [a, b] = from < i ? [from, i] : [i, from];
       if (!toggle) this.selected.clear();
       for (let k = a; k <= b; k++) {
         const row = this.rows[k];
@@ -197,10 +199,10 @@ export class ResultsView {
     } else if (toggle) {
       if (this.selected.has(r.proxy)) this.selected.delete(r.proxy);
       else this.selected.add(r.proxy);
-      this.anchor = i;
+      this.anchor = r.proxy;
     } else {
       this.selected = new Set([r.proxy]);
-      this.anchor = i;
+      this.anchor = r.proxy;
     }
     this.virtual?.repaint();
   }

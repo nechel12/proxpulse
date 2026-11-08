@@ -1,6 +1,7 @@
 // Pure helpers for the results table: filtering, column sorting and merging
 // re-checked entries.
 
+import { geoShort } from "./format.ts";
 import { siteHost } from "./sites.ts";
 import type { ProxyResult } from "./types.ts";
 
@@ -66,7 +67,11 @@ function groupKey(r: ProxyResult, by: Exclude<Dedupe, "">): string | null {
   return (by === "ip" ? r.ip : r.asn?.split(/\s/)[0]) || null;
 }
 
-/** The fastest alive proxy of each exit IP or ASN, in the original order. */
+/**
+ * The fastest alive proxy of each exit IP or ASN, in the original order. An
+ * alive proxy whose IP or ASN is unknown (geo skipped at a limit) is kept:
+ * it is in no group, so nothing stands for it.
+ */
 export function onePerGroup(rows: ProxyResult[], by: Exclude<Dedupe, "">): ProxyResult[] {
   const best = new Map<string, ProxyResult>();
   for (const r of rows) {
@@ -76,7 +81,7 @@ export function onePerGroup(rows: ProxyResult[], by: Exclude<Dedupe, "">): Proxy
     if (!cur || (r.latency_ms ?? 1e12) < (cur.latency_ms ?? 1e12)) best.set(key, r);
   }
   const keep = new Set(best.values());
-  return rows.filter((r) => keep.has(r));
+  return rows.filter((r) => keep.has(r) || (r.alive && !groupKey(r, by)));
 }
 
 /** How many alive proxies share each exit IP. */
@@ -99,12 +104,13 @@ function sortValue(r: ProxyResult, key: SortKey): string | number | null {
     case "ping": return r.latency_ms;
     case "stab": return r.jitter_ms;
     case "anon": return r.anonymity == null ? null : (ANON_RANK[r.anonymity] ?? 3);
-    case "geo": return countryOf(r).toLowerCase() || null;
+    // As the column shows it: the country code and city, not the full name.
+    case "geo": { const g = geoShort(r); return g === "—" ? null : g.toLowerCase(); }
     case "iptype": return r.ip_type;
     case "tls": return r.tls;
     case "sites": return r.sites?.length ? r.sites.filter((s) => s.ok).length : null;
     case "speed": return r.speed?.ok ? r.speed.mbps : null;
-    case "uptime": return r.history ? r.history.score : null;
+    case "uptime": return r.history ? r.history.uptime : null;
     case "info": return r.alive ? r.ip : r.error;
   }
 }
