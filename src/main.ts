@@ -16,7 +16,7 @@ import { WebhookPanel } from "./webhooks.ts";
 import { type Lang, detectLang, translate } from "./i18n.ts";
 import { parseTextAsync, type ParseResult } from "./parse-runner.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
-import { type TargetMode } from "./profiles.ts";
+import { type TargetMode, withOwnAddresses } from "./profiles.ts";
 import { SettingsPanel } from "./settings-panel.ts";
 import { initUpdater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
@@ -1077,8 +1077,9 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     const chip = node.closest<HTMLElement>("[data-preset-id]");
     const id = chip?.dataset.presetId ?? "";
-    const data = profiles.find(id);
-    if (!data) return;
+    const found = profiles.find(id);
+    if (!found) return;
+    const data = id.startsWith("builtin:") ? withOwnAddresses(found, settings.snapshotProfile()) : found;
     profiles.currentId = id;
     settings.applyProfile(data);
     profiles.render(t);

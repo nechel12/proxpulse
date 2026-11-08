@@ -125,6 +125,20 @@ export function sanitizeProfile(raw: unknown): ProfileData | null {
   };
 }
 
+/**
+ * A built-in preset over the current settings: it sets how to check, never
+ * where. Your own judge and custom URL stay, so a click on "Standard" does not
+ * wipe the judge address that took setting up.
+ */
+export function withOwnAddresses(preset: ProfileData, current: ProfileData): ProfileData {
+  return {
+    ...preset,
+    customUrl: current.customUrl,
+    judgeServer: current.judgeServer,
+    judgeUrl: current.judgeUrl,
+  };
+}
+
 export const BUILTIN_PROFILES: {
   id: string;
   nameKey: string;

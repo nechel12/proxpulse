@@ -6,6 +6,7 @@ import {
   PROFILE_DEFAULTS,
   PUBLIC_CUSTOM,
   sanitizeProfile,
+  withOwnAddresses,
 } from "./profiles.ts";
 
 const LEGACY = {
@@ -152,5 +153,24 @@ describe("sanitizeProfile", () => {
       testUrlSel: PUBLIC_CUSTOM,
       customUrl: "https://my.example/list",
     });
+  });
+});
+
+describe("withOwnAddresses", () => {
+  it("keeps your own judge and custom URL when a built-in preset is applied", () => {
+    const current = {
+      ...PROFILE_DEFAULTS,
+      judgeServer: "custom" as const,
+      judgeUrl: "judge.example.com",
+      customUrl: "https://my.site/ping",
+    };
+    const standard = BUILTIN_PROFILES.find((b) => b.id === "builtin:standard")!.data;
+    const applied = withOwnAddresses(standard, current);
+    expect(applied.judgeServer).toBe("custom");
+    expect(applied.judgeUrl).toBe("judge.example.com");
+    expect(applied.customUrl).toBe("https://my.site/ping");
+    // What the preset is for still applies.
+    expect(applied.timeout).toBe(standard.timeout);
+    expect(applied.target).toBe(standard.target);
   });
 });

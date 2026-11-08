@@ -160,6 +160,8 @@ All notable changes to ProxPulse. The format follows
   check, Start stayed locked until the next cycle ended. While a scheduled
   check runs, the Check tab now says which pool it checks and that Stop
   cancels it.
+- A click on a built-in preset no longer wipes your own judge address and
+  custom check URL; it sets how to check, and keeps where.
 
 ## [0.6.1] — 2026-11-07
 
