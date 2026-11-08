@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   anonShort,
   errorText,
+  formatDuration,
   escapeHtml,
   geoShort,
   maskProxy,
@@ -107,5 +108,13 @@ describe("errorText", () => {
     expect(errorText("unexpected answer (http 200)", t)).toBe("err_unexpected_http:200");
     expect(errorText("http: timeout / socks5: connection refused", t)).toBe("http: err_timeout / socks5: err_refused");
     expect(errorText("something new", t)).toBe("something new");
+  });
+});
+
+describe("formatDuration", () => {
+  it("reads at a glance", () => {
+    expect(formatDuration(45)).toBe("45 s");
+    expect(formatDuration(200)).toBe("3 min 20 s");
+    expect(formatDuration(3900)).toBe("1 h 05 min");
   });
 });

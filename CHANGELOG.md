@@ -230,6 +230,8 @@ All notable changes to ProxPulse. The format follows
 - Check settings say what they do: "Requests per proxy", "Protocol for lines
   without a scheme", "Check the port first" with a visible timeout and unit,
   "Speed test size", "Max ping, ms (0 — no limit)", each with a tooltip.
+- A check shows about how long is left once its pace is clear, and its timer
+  keeps ticking while no result arrives instead of freezing.
 - Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
   and the odd releases 23 and 25 were accepted before.
 

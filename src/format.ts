@@ -94,6 +94,14 @@ export function errorText(e: string, t: (key: string, params?: Record<string, st
   return e;
 }
 
+/** Seconds as "45 s", "3 min 20 s" or "1 h 05 min" (units stay neutral). */
+export function formatDuration(secs: number): string {
+  const s = Math.max(0, Math.round(secs));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+  return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
+}
+
 export function poolCountry(r: ProxyResult): string | null {
   return r.country_code ?? r.country ?? null;
 }

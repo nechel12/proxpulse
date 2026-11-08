@@ -10,7 +10,7 @@ import { PoolView, type PoolItem } from "./pool.ts";
 import { exportList, type ExportKind } from "./export-panel.ts";
 import { loadPingHist, pushPingPointStats, renderPingGraph, type PingPoint } from "./pinggraph.ts";
 import { refreshStatusTexts, setStatusText } from "./status.ts";
-import { poolCountry } from "./format.ts";
+import { formatDuration, poolCountry } from "./format.ts";
 import { GeoCacheStore } from "./geo-store.ts";
 import { WebhookPanel } from "./webhooks.ts";
 import { type Lang, detectLang, translate } from "./i18n.ts";
@@ -700,15 +700,23 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
   // Not "parsing" until the first result: the list is parsed already.
   setStatusT("st_checking", { done: 0, total: list.length });
   const t0 = performance.now();
+  // The elapsed time ticks on its own, also while no result arrives.
+  const ticker = window.setInterval(() => {
+    setNet("work", "net_work", { s: Math.floor((performance.now() - t0) / 1000) });
+  }, 1000);
 
   let busy = false;
   let unreachable = false;
   try {
     const fresh = await runCheckList(list, readCheckSettings(), geoCache.fresh(), (done, total) => {
-      lastStatus = { key: "st_checking", params: { done, total } };
-      $("status-line").textContent = t("st_checking", lastStatus.params);
-      const secs = Math.floor((performance.now() - t0) / 1000);
-      setNet("work", "net_work", { s: secs });
+      const secs = (performance.now() - t0) / 1000;
+      // Left at the pace so far, once there is a pace to go by.
+      const left = done >= 5 && done < total && secs > 2 ? Math.ceil(((total - done) * secs) / done) : null;
+      lastStatus = left == null
+        ? { key: "st_checking", params: { done, total } }
+        : { key: "st_checking_eta", params: { done, total, left: formatDuration(left) } };
+      $("status-line").textContent = t(lastStatus.key, lastStatus.params);
+      setNet("work", "net_work", { s: Math.floor(secs) });
       render();
       updateCounts();
       setProgress(done, total);
@@ -731,7 +739,9 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
     running = false;
     ($("btn-start") as HTMLButtonElement).disabled = false;
     ($("btn-stop") as HTMLButtonElement).disabled = !autoStatus.running;
+    window.clearInterval(ticker);
   }
+
   if (busy) {
     if (base) results = base;
     setStatusT("auto_skip");
