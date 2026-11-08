@@ -290,14 +290,9 @@ Location: {target}"
 async fn a_run_makes_one_more_key_request_at_most() {
     let (url, requests) = key_server("200 OK", key_json()).await;
     let baseline = Baseline {
-        direct_ip: None,
-        example_len: None,
-        example_hash: None,
-        example_cert_fp: None,
-        judge_content_sha: None,
         judge_key: KeyLookup::Key(old_key()),
         judge_key_source: Some((url, Duration::from_secs(5))),
-        judge_key_retry: tokio::sync::OnceCell::new(),
+        ..Baseline::default()
     };
     let check = |body, sig| check_answer_signature(&baseline, NONCE, DIRECT_IP, body, sig);
     assert_eq!(check(BODY, Some(SIG)).await, SignatureCheck::Valid);
@@ -317,17 +312,12 @@ async fn a_key_from_https_is_not_replaced_over_http() {
     assert_eq!(requests.load(Ordering::SeqCst), 0);
 
     let baseline = Baseline {
-        direct_ip: None,
-        example_len: None,
-        example_hash: None,
-        example_cert_fp: None,
-        judge_content_sha: None,
         judge_key: KeyLookup::Key(JudgeKey {
             over_tls: true,
             ..old_key()
         }),
         judge_key_source: Some((url, t)),
-        judge_key_retry: tokio::sync::OnceCell::new(),
+        ..Baseline::default()
     };
     // The answer really was signed by the key on offer, but that key only came
     // over plain HTTP, so it cannot replace one that TLS vouched for.

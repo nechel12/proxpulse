@@ -206,6 +206,8 @@ async fn fetch_direct_judge_sha(judge_url: &str, timeout: Duration) -> Option<St
     v.get("content_sha256")?.as_str().map(|s| s.to_string())
 }
 
+/// What a run measured directly, without a proxy, to compare answers with.
+/// The default knows nothing and expects no signature.
 struct Baseline {
     direct_ip: Option<String>,
     example_len: Option<usize>,
@@ -218,6 +220,21 @@ struct Baseline {
     judge_key_source: Option<(String, Duration)>,
     /// The one further `/key` request of a run, shared by all its checks.
     judge_key_retry: tokio::sync::OnceCell<judge_sig::KeyLookup>,
+}
+
+impl Default for Baseline {
+    fn default() -> Self {
+        Self {
+            direct_ip: None,
+            example_len: None,
+            example_hash: None,
+            example_cert_fp: None,
+            judge_content_sha: None,
+            judge_key: judge_sig::KeyLookup::NotSigned,
+            judge_key_source: None,
+            judge_key_retry: tokio::sync::OnceCell::new(),
+        }
+    }
 }
 
 #[derive(Default)]

@@ -231,6 +231,22 @@ async fn within<T>(
         .unwrap_or(Deep::Skipped)
 }
 
+/// A deep stage: not run when not wanted, skipped when its concurrency
+/// limit is reached (waiting would eat the proxy's budget).
+async fn gated<T>(
+    want: bool,
+    limit: &'static std::sync::OnceLock<Semaphore>,
+    stage: impl std::future::Future<Output = Option<T>>,
+) -> Deep<T> {
+    if !want {
+        return Deep::Ran(None);
+    }
+    let Ok(_permit) = deep_semaphore(limit).try_acquire() else {
+        return Deep::Skipped;
+    };
+    Deep::Ran(stage.await)
+}
+
 pub(crate) async fn wait_cancelled(flag: &AtomicBool) {
     while !flag.load(Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -388,32 +404,29 @@ pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckF
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn check_candidate(
-    raw: String,
-    url: String,
-    proto: String,
+/// What every check of one run shares.
+struct Run {
     test_url: String,
     timeout: Duration,
     repeats: usize,
     flags: CheckFlags,
     baseline: Arc<Baseline>,
-    geo_cache: Arc<HashMap<String, GeoCacheEntry>>,
+    geo_cache: HashMap<String, GeoCacheEntry>,
     cancel: Arc<AtomicBool>,
-) -> ProxyResult {
+}
+
+async fn check_candidate(run: &Run, raw: String, url: String, proto: String) -> ProxyResult {
     // The budget bounds the deep stages from inside (they are skipped when it
     // runs out), so a proxy measured alive stays alive. The outer ceiling
     // is only a safety net for a step that ignores its own timeout.
-    let budget = candidate_budget(timeout, repeats, &flags);
+    let budget = candidate_budget(run.timeout, run.repeats, &run.flags);
     let deadline = tokio::time::Instant::now() + budget;
     let raw_fb = raw.clone();
     let proto_fb = proto.clone();
     let url_fb = url.clone();
     let mut r = match tokio::time::timeout(
-        budget + timeout,
-        check_candidate_inner(
-            raw, url, proto, test_url, timeout, repeats, flags, baseline, geo_cache, cancel,
-            deadline,
-        ),
+        budget + run.timeout,
+        check_candidate_inner(run, raw, url, proto, deadline),
     )
     .await
     {
@@ -426,20 +439,23 @@ async fn check_candidate(
     r
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn check_candidate_inner(
+    run: &Run,
     raw: String,
     url: String,
     proto: String,
-    test_url: String,
-    timeout: Duration,
-    repeats: usize,
-    flags: CheckFlags,
-    baseline: Arc<Baseline>,
-    geo_cache: Arc<HashMap<String, GeoCacheEntry>>,
-    cancel: Arc<AtomicBool>,
     deadline: tokio::time::Instant,
 ) -> ProxyResult {
+    let Run {
+        test_url,
+        timeout,
+        repeats,
+        flags,
+        baseline,
+        geo_cache,
+        cancel,
+    } = run;
+    let (test_url, timeout, repeats) = (test_url.as_str(), *timeout, *repeats);
     // stage 1: fast tcp precheck
     if flags.precheck {
         if let Some((h, p)) = host_port_of_url(&url) {
@@ -467,10 +483,10 @@ async fn check_candidate_inner(
     // gets no reason to learn our IP.
     let nonce = judge_sig::new_nonce();
     let direct_ip = baseline.direct_ip.as_deref().unwrap_or("");
-    let req_url = if flags.judge && !is_tls_target(&test_url) {
-        judge_sig::judge_query(&test_url, Some(direct_ip), &nonce)
+    let req_url = if flags.judge && !is_tls_target(test_url) {
+        judge_sig::judge_query(test_url, Some(direct_ip), &nonce)
     } else {
-        test_url.clone()
+        test_url.to_string()
     };
 
     let mut latencies: Vec<u64> = Vec::new();
@@ -478,7 +494,7 @@ async fn check_candidate_inner(
     let mut first_sig: Option<String> = None;
     let mut first_in_clear = false;
     let mut last_err: Option<String> = None;
-    let expect = Expect::for_url(&test_url, flags.judge);
+    let expect = Expect::for_url(test_url, flags.judge);
 
     for _ in 0..repeats {
         if cancel.load(Ordering::Relaxed) {
@@ -591,14 +607,14 @@ async fn check_candidate_inner(
             let proxy_sha = try_parse_judge_body(&mut res, &b);
             if first_in_clear {
                 let check = check_answer_signature(
-                    &baseline,
+                    baseline,
                     &nonce,
                     direct_ip,
                     b.as_bytes(),
                     first_sig.as_deref(),
                 )
                 .await;
-                apply_judge_integrity(&mut res, &baseline, check, proxy_sha.as_deref());
+                apply_judge_integrity(&mut res, baseline, check, proxy_sha.as_deref());
                 if check == judge_sig::SignatureCheck::Invalid {
                     forget_judge_answer(&mut res);
                 }
@@ -608,7 +624,7 @@ async fn check_candidate_inner(
                 res.anonymity = None;
             }
         } else {
-            try_parse_test_body(&mut res, &test_url, &b);
+            try_parse_test_body(&mut res, test_url, &b);
         }
     }
     // Reuse previously seen geo. When the test URL does not reveal the exit
@@ -649,35 +665,28 @@ async fn check_candidate_inner(
                 };
                 Deep::Ran(fetch_geo(&client, flags.ipapi_key.as_deref()).await)
             }),
-            within(deadline, async {
-                if !want_anon {
-                    return Deep::Ran(None);
-                }
-                let Ok(_permit) = deep_semaphore(&ANON_SEM).try_acquire() else {
-                    return Deep::Skipped;
-                };
-                Deep::Ran(detect_anonymity(&client, direct_ip.as_deref()).await)
-            }),
-            within(deadline, async {
-                if !want_tamper {
-                    return Deep::Ran(None);
-                }
-                let Ok(_permit) = deep_semaphore(&TAMPER_SEM).try_acquire() else {
-                    return Deep::Skipped;
-                };
-                Deep::Ran(detect_tamper(&client, ex_len, ex_hash).await)
-            }),
-            within(deadline, async {
-                if !want_tls {
-                    return Deep::Ran(None);
-                }
-                let Ok(_permit) = deep_semaphore(&TLS_SEM).try_acquire() else {
-                    return Deep::Skipped;
-                };
-                Deep::Ran(Some(
-                    tls_via_proxy(&url_c, timeout, cert_fp.as_deref()).await,
-                ))
-            }),
+            within(
+                deadline,
+                gated(
+                    want_anon,
+                    &ANON_SEM,
+                    detect_anonymity(&client, direct_ip.as_deref())
+                )
+            ),
+            within(
+                deadline,
+                gated(
+                    want_tamper,
+                    &TAMPER_SEM,
+                    detect_tamper(&client, ex_len, ex_hash)
+                )
+            ),
+            within(
+                deadline,
+                gated(want_tls, &TLS_SEM, async {
+                    Some(tls_via_proxy(&url_c, timeout, cert_fp.as_deref()).await)
+                })
+            ),
         );
         let mut skipped = Vec::new();
         if let Some(g) = geo_r.value("geo", &mut skipped) {
@@ -696,8 +705,8 @@ async fn check_candidate_inner(
         res.skipped = skipped;
     }
     if let Some(http_url) = flags.judge_http.as_deref() {
-        if is_tls_target(&test_url) && !cancel.load(Ordering::Relaxed) {
-            let asked = judge_over_http(&client, http_url, &nonce, direct_ip, &baseline, &mut res);
+        if is_tls_target(test_url) && !cancel.load(Ordering::Relaxed) {
+            let asked = judge_over_http(&client, http_url, &nonce, direct_ip, baseline, &mut res);
             if tokio::time::timeout_at(deadline, asked).await.is_err() {
                 res.skipped.push("anon".to_string());
             }
@@ -1010,11 +1019,28 @@ async fn fetch_baseline(flags: CheckFlags, want_ip: bool, judge_ip: Option<Strin
         example_len: len,
         example_hash: hash,
         example_cert_fp: cert,
-        judge_content_sha: None,
-        judge_key: judge_sig::KeyLookup::NotSigned,
-        judge_key_source: None,
-        judge_key_retry: tokio::sync::OnceCell::new(),
+        ..Baseline::default()
     }
+}
+
+/// The result when no candidate worked: the only one tried as it is, or
+/// both errors of the http+socks5 mode in one ("http: … / socks5: …").
+fn none_worked(raw: String, mut dead: Vec<ProxyResult>) -> ProxyResult {
+    if dead.len() < 2 {
+        return dead
+            .pop()
+            .unwrap_or_else(|| dead_result(raw, "BAD".to_string(), 0, "bad format".to_string()));
+    }
+    let error = |r: &ProxyResult| r.error.clone().unwrap_or_default();
+    let mut combined = format!("http: {} / socks5: {}", error(&dead[0]), error(&dead[1]));
+    truncate_utf8(&mut combined, 120);
+    let first = dead.swap_remove(0);
+    let mut out = dead_result(raw, "HTTP/SOCKS5".to_string(), first.attempts, combined);
+    // Keyed like the alive results, by a normalized URL: the raw line would
+    // split the history and, as `host:port:user:pass`, put the password
+    // into it.
+    out.url = first.url;
+    out
 }
 
 pub(crate) async fn run_checks(
@@ -1058,12 +1084,10 @@ pub(crate) async fn run_checks(
         }
     }
 
-    let geo_map: Arc<HashMap<String, GeoCacheEntry>> = Arc::new(
-        geo_cache
-            .into_iter()
-            .map(|e| (e.proxy.clone(), e))
-            .collect(),
-    );
+    let geo_map: HashMap<String, GeoCacheEntry> = geo_cache
+        .into_iter()
+        .map(|e| (e.proxy.clone(), e))
+        .collect();
 
     let judge_url = judge_baseline_url(flags.judge, flags.judge_http.as_deref(), &test_url);
     let baseline_phase = async {
@@ -1092,16 +1116,7 @@ pub(crate) async fn run_checks(
         r = baseline_phase => r,
         _ = wait_cancelled(&cancel) => return Ok(Vec::new()),
     };
-    let mut baseline_inner = baseline_res.unwrap_or(Baseline {
-        direct_ip: None,
-        example_len: None,
-        example_hash: None,
-        example_cert_fp: None,
-        judge_content_sha: None,
-        judge_key: judge_sig::KeyLookup::NotSigned,
-        judge_key_source: None,
-        judge_key_retry: tokio::sync::OnceCell::new(),
-    });
+    let mut baseline_inner = baseline_res.unwrap_or_default();
     baseline_inner.judge_content_sha = judge_sha;
     baseline_inner.judge_key = judge_key;
     baseline_inner.judge_key_source = judge_url.map(|u| (u, timeout));
@@ -1113,6 +1128,15 @@ pub(crate) async fn run_checks(
         }
     }
 
+    let run = Arc::new(Run {
+        test_url: test_url.clone(),
+        timeout,
+        repeats,
+        flags: flags.clone(),
+        baseline: baseline.clone(),
+        geo_cache: geo_map,
+        cancel: cancel.clone(),
+    });
     let sem = Arc::new(Semaphore::new(conc));
     let mut set = tokio::task::JoinSet::new();
     let mut task_raw: HashMap<tokio::task::Id, String> = HashMap::new();
@@ -1126,78 +1150,24 @@ pub(crate) async fn run_checks(
             continue;
         }
         let sem_c = sem.clone();
-        let tu = test_url.clone();
-        let base = baseline.clone();
-        let gc = geo_map.clone();
-        let cl = cancel.clone();
-        let fl = flags.clone();
+        let run = run.clone();
         let raw_key = raw.clone();
         let handle = set.spawn(async move {
             let _p = sem_c.acquire_owned().await.unwrap();
-            if cands.len() == 1 {
-                let (url, proto) = &cands[0];
-                check_candidate(
-                    raw,
-                    url.clone(),
-                    proto.clone(),
-                    tu,
-                    timeout,
-                    repeats,
-                    fl,
-                    base,
-                    gc,
-                    cl,
-                )
-                .await
-            } else {
-                let (u1, p1) = &cands[0];
-                let r1 = check_candidate(
-                    raw.clone(),
-                    u1.clone(),
-                    p1.clone(),
-                    tu.clone(),
-                    timeout,
-                    repeats,
-                    fl.clone(),
-                    base.clone(),
-                    gc.clone(),
-                    cl.clone(),
-                )
-                .await;
-                if r1.alive {
-                    return r1;
+            // The http+socks5 mode gives two candidates: the first that
+            // works is the result.
+            let mut dead = Vec::new();
+            for (url, proto) in &cands {
+                if !dead.is_empty() && run.cancel.load(Ordering::Relaxed) {
+                    break;
                 }
-                if cl.load(Ordering::Relaxed) {
-                    return r1;
+                let r = check_candidate(&run, raw.clone(), url.clone(), proto.clone()).await;
+                if r.alive {
+                    return r;
                 }
-                let (u2, p2) = &cands[1];
-                let r2 = check_candidate(
-                    raw.clone(),
-                    u2.clone(),
-                    p2.clone(),
-                    tu,
-                    timeout,
-                    repeats,
-                    fl,
-                    base,
-                    gc,
-                    cl,
-                )
-                .await;
-                if r2.alive {
-                    return r2;
-                }
-                let e1 = r1.error.unwrap_or_default();
-                let e2 = r2.error.unwrap_or_default();
-                let mut combined = format!("http: {e1} / socks5: {e2}");
-                truncate_utf8(&mut combined, 120);
-                let mut dead = dead_result(raw, "HTTP/SOCKS5".to_string(), r1.attempts, combined);
-                // Keyed like the alive results, by a normalized URL: the raw
-                // line would split the history and, as `host:port:user:pass`,
-                // put the password into it.
-                dead.url = r1.url;
-                dead
+                dead.push(r);
             }
+            none_worked(raw, dead)
         });
         task_raw.insert(handle.id(), raw_key);
     }
