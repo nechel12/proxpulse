@@ -59,6 +59,41 @@ export function rowTitle(r: ProxyResult): string {
   return parts.join(" | ");
 }
 
+/** The backend's short error words and the keys that translate them. */
+const ERROR_KEYS: Record<string, string> = {
+  "timeout": "err_timeout",
+  "connection refused": "err_refused",
+  "connection reset": "err_reset",
+  "connection closed": "err_closed",
+  "proxy auth required": "err_proxy_auth",
+  "proxy error": "err_proxy",
+  "socks error": "err_socks",
+  "dns error": "err_dns",
+  "tls error": "err_tls",
+  "network unreachable": "err_unreachable",
+  "incomplete response": "err_incomplete",
+  "unexpected answer": "err_unexpected",
+  "bad format": "err_bad_format",
+  "rate limited": "err_rate_limited",
+};
+
+/**
+ * A backend error in the interface's language: the backend speaks short
+ * English words ("timeout", "http 502"); unknown text stays as it is.
+ */
+export function errorText(e: string, t: (key: string, params?: Record<string, string | number>) => string): string {
+  // "http: … / socks5: …" from the http+socks5 mode: each part on its own.
+  const both = /^http: (.*) \/ socks5: (.*)$/.exec(e);
+  if (both) return `http: ${errorText(both[1], t)} / socks5: ${errorText(both[2], t)}`;
+  const key = ERROR_KEYS[e.trim()];
+  if (key) return t(key);
+  const http = /^http (\d{3})$/.exec(e.trim());
+  if (http) return t("err_http", { code: http[1] });
+  const unexpected = /^unexpected answer \(http (\d{3})\)$/.exec(e.trim());
+  if (unexpected) return t("err_unexpected_http", { code: unexpected[1] });
+  return e;
+}
+
 export function poolCountry(r: ProxyResult): string | null {
   return r.country_code ?? r.country ?? null;
 }

@@ -101,7 +101,7 @@ export function initUpdater({ t, setStatusText, logErr, isTauriRuntime, onFound 
       }
     } catch (e) {
       logErr("update-install: " + String(e).slice(0, 200));
-      setStatusText("upd-status", () => t("upd_fail"));
+      setStatusText("upd-status", () => t("upd_install_fail", { e: String(e).slice(0, 120) }));
     } finally {
       install.disabled = false;
     }

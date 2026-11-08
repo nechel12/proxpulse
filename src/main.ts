@@ -344,8 +344,9 @@ async function syncPool(notify: boolean): Promise<number> {
     });
     if (notify) setStatusT("pool_synced", { n });
     return n;
-  } catch {
-    if (notify) setStatusT("pool_sync_err");
+  } catch (e) {
+    logErr("pool-sync: " + String(e).slice(0, 200));
+    if (notify) setStatusT("pool_sync_err_why", { e: String(e).slice(0, 120) });
     return -1;
   }
 }
@@ -507,7 +508,9 @@ async function renamePool(): Promise<void> {
     const out = await invoke<PoolMeta>("rename_pool", { id: meta.id, name });
     pools = pools.map((p) => (p.id === out.id ? out : p));
     renderPoolSwitchers();
-  } catch { /* older backend */ }
+  } catch (e) {
+    setStatusT("pool_rename_err", { e: String(e).slice(0, 120) });
+  }
 }
 
 async function deletePool(): Promise<void> {
@@ -603,7 +606,7 @@ async function recheck(list: string[]) {
   await withStart(async () => {
     if (!(await checkerFree())) return;
     if (!/^https?:\/\//i.test(settings.effectiveTestUrl())) {
-      setStatusT("st_badurl");
+      setStatusT(settings.effectiveTestUrl() ? "st_badurl" : "st_nourl");
       return;
     }
     await runList(list, { recheck: true, truncated: false });
@@ -634,7 +637,7 @@ async function startInner() {
     return;
   }
   if (!/^https?:\/\//i.test(settings.effectiveTestUrl())) {
-    setStatusT("st_badurl");
+    setStatusT(settings.effectiveTestUrl() ? "st_badurl" : "st_nourl");
     return;
   }
   setStatusT("st_parsing");

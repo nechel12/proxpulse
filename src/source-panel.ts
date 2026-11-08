@@ -58,6 +58,7 @@ export function initSourcePanel(deps: Deps): void {
     const field = document.getElementById("import-url") as HTMLInputElement | null;
     const u = (field?.value || "").trim();
     if (!u) return;
+    deps.setStatus("url_loading");
     try {
       const txt = await deps.fetchUrl(u);
       const found = (await deps.parseTextAsync(txt, deps.maxProxies, true)).list ?? [];
@@ -67,8 +68,9 @@ export function initSourcePanel(deps: Deps): void {
       }
       append(found);
       deps.setStatus("url_loaded", { n: found.length });
-    } catch {
-      deps.setStatus("url_fail");
+    } catch (e) {
+      // The backend says why: "http 404", "too many redirects", "private address".
+      deps.setStatus("url_fail_why", { e: String(e).replace(/^Error:\s*/, "").slice(0, 120) });
     }
   });
 

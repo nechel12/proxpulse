@@ -221,6 +221,12 @@ All notable changes to ProxPulse. The format follows
 - The built-in updater downloads updates from `github.com` instead of
   `api.github.com`, which allows 60 requests an hour per IP without a token:
   many users behind one address could not update.
+- Messages say why: a failed URL import shows the reason (`http 404`, too many
+  redirects) and that it is loading; pool sync and rename errors are shown;
+  a failed update install no longer says "Check failed"; an empty judge
+  address gets its own message instead of the one about `http(s)://`; and the
+  backend's error words (`timeout`, `connection refused`, `http 502`) appear
+  in the interface's language.
 - Building from source needs Node.js 22.13 or 24+, as ESLint 10 does; 22.12
   and the odd releases 23 and 25 were accepted before.
 

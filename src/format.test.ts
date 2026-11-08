@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   anonShort,
+  errorText,
   escapeHtml,
   geoShort,
   maskProxy,
@@ -95,5 +96,16 @@ describe("maskProxy", () => {
     expect(maskProxy("user:pass@1.2.3.4:8080")).toBe("•••@1.2.3.4:8080");
     expect(maskProxy("http://user:pass@1.2.3.4:8080", null)).toBe("http://•••@1.2.3.4:8080");
     expect(maskProxy("1.2.3.4:8080")).toBe("1.2.3.4:8080");
+  });
+});
+
+describe("errorText", () => {
+  const t = (key: string, p?: Record<string, string | number>) => `${key}${p?.code ? `:${p.code}` : ""}`;
+  it("translates the backend's short error words", () => {
+    expect(errorText("timeout", t)).toBe("err_timeout");
+    expect(errorText("http 502", t)).toBe("err_http:502");
+    expect(errorText("unexpected answer (http 200)", t)).toBe("err_unexpected_http:200");
+    expect(errorText("http: timeout / socks5: connection refused", t)).toBe("http: err_timeout / socks5: err_refused");
+    expect(errorText("something new", t)).toBe("something new");
   });
 });

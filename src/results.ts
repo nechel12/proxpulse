@@ -1,5 +1,6 @@
 import type { ProxyResult } from "./types.ts";
 import {
+  errorText,
   anonShort,
   escapeHtml,
   geoShort,
@@ -331,7 +332,7 @@ export class ResultsView {
     // Several "different" proxies often leave through one exit IP.
     const same = r.ip ? this.shared.get(r.ip) ?? 0 : 0;
     const shared = same > 1 ? ` <span class="geo-tag" title="${escapeHtml(t("same_ip_t", { n: same }))}">×${same}</span>` : "";
-    const info = r.alive ? `${escapeHtml(r.ip ?? "ok")}${shared} ${marks}` : escapeHtml(r.error ?? "fail");
+    const info = r.alive ? `${escapeHtml(r.ip ?? "ok")}${shared} ${marks}` : escapeHtml(errorText(r.error ?? "fail", t));
     const infoTitle = escapeHtml(rowTitle(r));
     // An empty cell for a stage skipped at its limit gets an explanation
     // instead of looking like "no data".
