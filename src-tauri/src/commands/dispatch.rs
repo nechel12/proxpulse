@@ -525,47 +525,55 @@ pub(crate) fn parse_socks_auth(body: &[u8]) -> Option<(&[u8], &[u8])> {
     Some((user, pass))
 }
 
-pub(crate) struct CountingIo<T> {
+/// How long an upstream may take to start answering a forwarded request
+/// before the next one is tried.
+const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(30);
+/// A connection that moves no data either way for this long is closed, so a
+/// silent upstream cannot hold a connection slot forever.
+pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// A stream that records when data last moved through it.
+struct Touch<T> {
     inner: T,
-    written: Arc<AtomicU64>,
+    started: Instant,
+    last_ms: Arc<AtomicU64>,
 }
 
-impl<T> CountingIo<T> {
-    pub(crate) fn new(inner: T, written: Arc<AtomicU64>) -> Self {
-        Self { inner, written }
-    }
-
-    fn into_inner(self) -> T {
-        self.inner
+impl<T> Touch<T> {
+    fn mark(&self) {
+        self.last_ms
+            .store(self.started.elapsed().as_millis() as u64, Ordering::Relaxed);
     }
 }
 
-impl<T: AsyncRead + Unpin> AsyncRead for CountingIo<T> {
+impl<T: AsyncRead + Unpin> AsyncRead for Touch<T> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+        let this = self.get_mut();
+        let before = buf.filled().len();
+        let res = Pin::new(&mut this.inner).poll_read(cx, buf);
+        if matches!(res, Poll::Ready(Ok(()))) && buf.filled().len() > before {
+            this.mark();
+        }
+        res
     }
 }
 
-impl<T: AsyncWrite + Unpin> AsyncWrite for CountingIo<T> {
+impl<T: AsyncWrite + Unpin> AsyncWrite for Touch<T> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         let this = self.get_mut();
-        match Pin::new(&mut this.inner).poll_write(cx, buf) {
-            Poll::Ready(Ok(n)) => {
-                if n > 0 {
-                    this.written.fetch_add(n as u64, Ordering::Relaxed);
-                }
-                Poll::Ready(Ok(n))
-            }
-            other => other,
+        let res = Pin::new(&mut this.inner).poll_write(cx, buf);
+        if matches!(res, Poll::Ready(Ok(n)) if n > 0) {
+            this.mark();
         }
+        res
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
@@ -574,6 +582,44 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for CountingIo<T> {
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
+/// `copy_bidirectional` that gives up once no data moved for `idle`.
+pub(crate) async fn copy_until_idle<A, B>(
+    a: &mut A,
+    b: &mut B,
+    idle: Duration,
+) -> std::io::Result<()>
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+    B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
+    let started = Instant::now();
+    let last_ms = Arc::new(AtomicU64::new(0));
+    let mut ta = Touch {
+        inner: a,
+        started,
+        last_ms: last_ms.clone(),
+    };
+    let mut tb = Touch {
+        inner: b,
+        started,
+        last_ms: last_ms.clone(),
+    };
+    let copy = tokio::io::copy_bidirectional(&mut ta, &mut tb);
+    tokio::pin!(copy);
+    let tick = (idle / 4).max(Duration::from_millis(10));
+    loop {
+        tokio::select! {
+            res = &mut copy => return res.map(|_| ()),
+            _ = tokio::time::sleep(tick) => {
+                let last = Duration::from_millis(last_ms.load(Ordering::Relaxed));
+                if started.elapsed().saturating_sub(last) >= idle {
+                    return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "idle connection"));
+                }
+            }
+        }
     }
 }
 
@@ -665,8 +711,9 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
             Ok(mut ups) => {
                 *st.current.lock().await = Some(strip_credentials(&up.url));
                 st.requests.fetch_add(1, Ordering::Relaxed);
-                note_success(&st, &t_host, &up.url).await;
                 if is_connect {
+                    // The tunnel handshake through the upstream succeeded.
+                    note_success(&st, &t_host, &up.url).await;
                     // The client already received 200 before the tunnel
                     // starts, so a failure here cannot be retried.
                     let res: std::io::Result<()> = async {
@@ -676,7 +723,7 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                         if hdr_end < buf.len() {
                             ups.write_all(&buf[hdr_end..]).await?;
                         }
-                        tokio::io::copy_bidirectional(&mut client, &mut ups).await?;
+                        copy_until_idle(&mut client, &mut ups, IDLE_TIMEOUT).await?;
                         Ok(())
                     }
                     .await;
@@ -708,16 +755,39 @@ pub(crate) async fn handle_http(mut client: TcpStream, st: Arc<DispatchInner>) {
                     }
                     return;
                 }
-                let written = Arc::new(AtomicU64::new(0));
-                let mut counted = CountingIo::new(client, written.clone());
-                let copy_res = tokio::io::copy_bidirectional(&mut counted, &mut ups).await;
-                client = counted.into_inner();
-                if let Err(e) = copy_res {
-                    st.errors.fetch_add(1, Ordering::Relaxed);
-                    last_err = e.to_string();
-                    if can_retry && written.load(Ordering::Relaxed) == 0 {
-                        continue;
+                if can_retry {
+                    // Nothing has reached the client yet: an upstream that
+                    // stays silent, closes at once or fails before its first
+                    // byte is marked failed and the next one is tried, and
+                    // sticky sessions bind only to one that answered.
+                    let mut first = vec![0u8; 16 * 1024];
+                    let n = match tokio::time::timeout(FIRST_BYTE_TIMEOUT, ups.read(&mut first))
+                        .await
+                    {
+                        Ok(Ok(n)) if n > 0 => n,
+                        other => {
+                            note_failure(&st, &up.url).await;
+                            st.errors.fetch_add(1, Ordering::Relaxed);
+                            last_err = match other {
+                                Ok(Ok(_)) => "upstream closed the connection".to_string(),
+                                Ok(Err(e)) => e.to_string(),
+                                Err(_) => "upstream did not answer".to_string(),
+                            };
+                            continue;
+                        }
+                    };
+                    note_success(&st, &t_host, &up.url).await;
+                    if client.write_all(&first[..n]).await.is_err() {
+                        return;
                     }
+                } else {
+                    note_success(&st, &t_host, &up.url).await;
+                }
+                if copy_until_idle(&mut client, &mut ups, IDLE_TIMEOUT)
+                    .await
+                    .is_err()
+                {
+                    st.errors.fetch_add(1, Ordering::Relaxed);
                 }
                 return;
             }
@@ -883,7 +953,7 @@ pub(crate) async fn handle_socks5(mut client: TcpStream, st: Arc<DispatchInner>)
                     st.errors.fetch_add(1, Ordering::Relaxed);
                     return;
                 }
-                if tokio::io::copy_bidirectional(&mut client, &mut u)
+                if copy_until_idle(&mut client, &mut u, IDLE_TIMEOUT)
                     .await
                     .is_err()
                 {

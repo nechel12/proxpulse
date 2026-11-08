@@ -1,14 +1,13 @@
 use crate::commands::dispatch::{
     abort_connections, handle_http, handle_socks5, http_auth_ok, is_self_literal, is_self_upstream,
     is_self_upstream_async, parse_socks_auth, parse_target, pick_order, plan_upstreams, pool_items,
-    read_pool_file, store_pool, upstream_from_item, write_pool_file, CountingIo, DispatchItem,
-    DispatchOptions, DispatchPoolItem,
+    read_pool_file, store_pool, upstream_from_item, write_pool_file, DispatchItem, DispatchOptions,
+    DispatchPoolItem,
 };
 use crate::transport::Upstream;
 use crate::*;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, AtomicUsize};
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -110,15 +109,75 @@ async fn abort_connections_drains_active_tasks() {
 }
 
 #[tokio::test]
-async fn counting_io_tracks_written_bytes() {
-    let (client, mut peer) = tokio::io::duplex(64);
-    let written = Arc::new(AtomicU64::new(0));
-    let mut counted = CountingIo::new(client, written.clone());
-    counted.write_all(b"hello").await.unwrap();
-    assert_eq!(written.load(Ordering::Relaxed), 5);
-    let mut got = [0u8; 5];
-    peer.read_exact(&mut got).await.unwrap();
-    assert_eq!(&got, b"hello");
+async fn an_idle_connection_is_closed() {
+    use crate::commands::dispatch::copy_until_idle;
+    let (mut a, _a_peer) = tokio::io::duplex(64);
+    let (mut b, _b_peer) = tokio::io::duplex(64);
+    let t = std::time::Instant::now();
+    let res = copy_until_idle(&mut a, &mut b, Duration::from_millis(200)).await;
+    assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+    assert!(t.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn a_silent_or_closing_upstream_hands_over_to_the_next() {
+    // The first upstream accepts and closes without a byte, the second
+    // answers: the client gets the answer, and the first is cooled down.
+    let closing = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let closing_port = closing.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = closing.accept().await {
+            let mut tmp = [0u8; 1024];
+            let _ = s.read(&mut tmp).await;
+            let _ = s.shutdown().await;
+        }
+    });
+    let good = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let good_port = good.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut s, _) = good.accept().await.unwrap();
+        let mut tmp = [0u8; 1024];
+        let _ = s.read(&mut tmp).await;
+        let _ = s
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await;
+        let _ = s.shutdown().await;
+    });
+    let up = |port: u16| Upstream {
+        raw: format!("http://127.0.0.1:{port}"),
+        url: format!("http://127.0.0.1:{port}"),
+        scheme: "http".to_string(),
+        host: "127.0.0.1".to_string(),
+        port,
+        user: None,
+        pass: None,
+        latency: None,
+        country: None,
+    };
+    let proxy = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let proxy_port = proxy.local_addr().unwrap().port();
+    let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
+    let (server, _) = proxy.accept().await.unwrap();
+    let st = DispatchState::default();
+    *st.inner.port.lock().await = proxy_port;
+    *st.inner.mode.lock().await = "failover".to_string();
+    *st.inner.pool.lock().await = vec![up(closing_port), up(good_port)];
+    let inner = st.inner.clone();
+    let h = tokio::spawn(async move { handle_http(server, inner).await });
+    client
+        .write_all(b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
+        .await
+        .unwrap();
+    let _ = client.shutdown().await;
+    let mut resp = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut resp)).await;
+    tokio::time::timeout(Duration::from_secs(5), h)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&resp).contains("200 OK"));
+    let cooled = st.inner.cooldown.lock().await;
+    assert!(cooled.contains_key(&format!("http://127.0.0.1:{closing_port}")));
 }
 
 #[test]

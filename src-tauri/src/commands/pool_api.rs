@@ -419,8 +419,12 @@ async fn handle(mut stream: TcpStream, source: PoolSource) {
         return;
     };
     let reply = answer(&head, &source).await;
-    let _ = stream.write_all(&reply).await;
-    let _ = stream.shutdown().await;
+    // A client that does not read must not hold one of the few slots.
+    let _ = tokio::time::timeout(READ_TIMEOUT, async {
+        let _ = stream.write_all(&reply).await;
+        let _ = stream.shutdown().await;
+    })
+    .await;
 }
 
 /// Serve until the task is aborted; dropping the set ends open requests.

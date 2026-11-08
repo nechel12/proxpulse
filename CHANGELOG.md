@@ -130,6 +130,14 @@ All notable changes to ProxPulse. The format follows
   counts against the proxy, which delivered it; a judge answer without the
   content hash the direct one had is `?mod`; and a site answering 403 or 451
   no longer counts as open.
+- The dispatcher no longer hangs on an upstream that accepts and stays
+  silent: a GET, HEAD or OPTIONS request moves on to the next upstream when
+  one does not start answering within 30 seconds, or closes without a byte,
+  and that upstream is paused like a failed one. A session sticks to an
+  upstream only once it answered, and any connection that moves no data for
+  5 minutes is closed, so silent upstreams can no longer use up the 1024
+  connection slots. The Pool API stops writing to a client that does not
+  read after 10 seconds.
 
 ## [0.6.1] — 2026-11-07
 
