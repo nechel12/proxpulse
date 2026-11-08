@@ -68,6 +68,11 @@ All notable changes to ProxPulse. The format follows
   columns stay in place while the table scrolls sideways.
 - Export and Copy in the export menu take the rows the table shows, with its
   filters and grouping; the status line says "N of M" when filters hid some.
+- macOS builds are signed ad hoc, so Apple Silicon no longer calls an
+  unsigned download "damaged". The README describes opening it on macOS 15
+  and later (Privacy & Security → Open Anyway), the AppImage's FUSE need, and
+  checking a Windows download against `SHA256SUMS.txt` in PowerShell, and
+  shows what each webhook format sends.
 
 ### Fixed
 

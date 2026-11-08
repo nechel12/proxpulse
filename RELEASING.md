@@ -69,6 +69,14 @@ publishes the GitHub release with `latest.json` for the built-in updater.
      git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers tag -v vX.Y.Z
      ```
 
+     In PowerShell:
+
+     ```powershell
+     $key = ((Get-Content docs/proxpulse-release.pub -Raw).Split(" ")[0..1]) -join " "
+     Set-Content "$env:TEMP\allowed_signers" "proxpulse-release namespaces=`"git`" $key"
+     git -c gpg.ssh.allowedSignersFile="$env:TEMP\allowed_signers" tag -v vX.Y.Z
+     ```
+
    - Every expected asset is attached, and `latest.json` lists
      `windows-x86_64-nsis`, `linux-x86_64-appimage` and both `darwin`
      targets.

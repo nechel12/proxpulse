@@ -55,7 +55,7 @@ Builds for every platform are attached to each
 |---|---|---|
 | Windows x64 | `…_x64-setup.exe` — NSIS installer (recommended) | built-in |
 | | `…_x64_en-US.msi` — MSI installer | manual |
-| | `…-portable.exe` — no install | replace the file |
+| | `…-portable.exe` — no installer (data still goes to `%APPDATA%\com.nechel12.proxpulse`) | replace the file |
 | Linux x64 | `…_amd64.AppImage` | built-in |
 | | `…_amd64.deb`, `…x86_64.rpm` | package manager |
 | macOS | `…_aarch64.dmg` (Apple Silicon), `…_x64.dmg` (Intel) | built-in |
@@ -67,13 +67,23 @@ the SSH key in [`docs/proxpulse-release.pub`](docs/proxpulse-release.pub);
 
 > [!NOTE]
 > **Windows:** builds are not Authenticode-signed, so SmartScreen may show
-> "Windows protected your PC": **More info → Run anyway**.
+> "Windows protected your PC": **More info → Run anyway**. Before that, the
+> file can be checked against `SHA256SUMS.txt` in PowerShell:
+> `(Get-FileHash .\ProxPulse_X.Y.Z_x64-setup.exe).Hash` (compare
+> case-insensitively).
 >
-> **macOS:** builds are not signed with an Apple certificate. The app is opened
-> through the context menu → **Open** on first launch, or with
-> `xattr -cr ProxPulse.app`. The author has no Mac: macOS builds are verified by
-> compilation only and are not guaranteed to work. Problem reports should
-> include the diagnostics from the Settings tab.
+> **macOS:** builds are signed ad hoc, not with an Apple certificate. On first
+> launch macOS refuses to open the app; on macOS 15 and later the context
+> menu's **Open** no longer helps: **System Settings → Privacy & Security →
+> Open Anyway** (shown right after the refused launch). Or, after copying the
+> app to Applications: `xattr -dr com.apple.quarantine /Applications/ProxPulse.app`.
+> The author has no Mac: macOS builds are verified by compilation only and are
+> not guaranteed to work. Problem reports should include the diagnostics from
+> the Settings tab.
+>
+> **Linux:** an AppImage needs `chmod +x ProxPulse_*.AppImage` and FUSE 2
+> (`libfuse2`, `libfuse2t64` on Ubuntu 24.04); without FUSE it runs with
+> `--appimage-extract-and-run`.
 
 ## Quick start
 
@@ -426,6 +436,30 @@ credentials** is on, which requires an `https://` webhook. Webhooks must be
 public hosts; redirects are not followed, and a non-2xx answer is shown as an
 error.
 
+What a receiver gets (`latency_ms` is the ping, `null` when unknown):
+
+```text
+TXT        socks5://1.2.3.4:1080            one proxy per line
+JSON       [{"proxy":"socks5://1.2.3.4:1080","latency_ms":120}]
+JSON, changes only
+           {"added":[{"proxy":"socks5://1.2.3.4:1080","latency_ms":120}],
+            "removed":["http://5.6.7.8:3128"]}
+CSV        proxy,latency_ms
+           socks5://1.2.3.4:1080,120
+CSV, changes only
+           change,proxy,latency_ms
+           added,socks5://1.2.3.4:1080,120
+           removed,http://5.6.7.8:3128,
+Telegram   {"text":"ProxPulse: 1 proxies
+…","disable_web_page_preview":true}
+Discord    {"content":"ProxPulse: 1 proxies
+…"}
+```
+
+The Telegram URL is
+`https://api.telegram.org/bot<token>/sendMessage?chat_id=<chat id>`; a long
+list is cut to 4096 characters (Discord: 2000).
+
 The scheduler and webhooks run in the backend, so they keep working while the
 window is in the tray.
 
@@ -521,7 +555,7 @@ Stored locally:
 | The pool API answers `401` | The pool has a dispatcher login: send it, for example `curl -u user:pass`. |
 | The pool API answers `403` | The `Host` header is not `127.0.0.1` or `localhost`. |
 | The pool API does not start | The port is taken, for example by a dispatcher: choose another. |
-| macOS: "the app is damaged" | The build is unsigned: `xattr -cr ProxPulse.app`, then open it again. |
+| macOS: "the app is damaged" or "cannot be opened" | Not signed by an Apple developer: **System Settings → Privacy & Security → Open Anyway**, or `xattr -dr com.apple.quarantine /Applications/ProxPulse.app`, then open it again. |
 
 ## Limitations
 
