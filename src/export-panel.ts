@@ -13,7 +13,15 @@ type Deps = {
   includeDead: boolean;
   /** Asks for the line template; null cancels. */
   askTemplate?: () => Promise<string | null>;
+  /** Set when the table's filters hide part of the results. */
+  filtered?: { shown: number; total: number };
 };
+
+/** The status key, with "N of M" when filters left part of the list out. */
+function done(deps: Deps, key: string, params: Record<string, string | number>): void {
+  if (deps.filtered) deps.notify(`${key}_part`, { ...params, shown: deps.filtered.shown, total: deps.filtered.total });
+  else deps.notify(key, params);
+}
 
 function browserDownload(name: string, text: string, mime = "text/plain;charset=utf-8") {
   const blob = new Blob([text], { type: mime });
@@ -34,7 +42,7 @@ async function saveViaDialog(
 ): Promise<void> {
   if (!deps.isTauriRuntime()) {
     browserDownload(suggested, text);
-    deps.notify("st_downloaded", { name: suggested });
+    done(deps, "st_downloaded", { name: suggested });
     return;
   }
   try {
@@ -45,7 +53,7 @@ async function saveViaDialog(
       extensions: filters[0]?.extensions ?? [],
     });
     if (!path) return;
-    deps.notify("st_saved", { path });
+    done(deps, "st_saved", { path });
   } catch (e) {
     deps.notify("st_savefail", { e: String(e).slice(0, 120) });
   }
@@ -64,7 +72,7 @@ export async function exportList(
     }
     try {
       await navigator.clipboard.writeText(txt);
-      deps.notify("st_copied", { n: txt.split("\n").length });
+      done(deps, "st_copied", { n: txt.split("\n").length });
     } catch {
       deps.notify("st_nocopy");
     }

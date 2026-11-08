@@ -794,12 +794,19 @@ async function rowAction(action: RowAction, rows: ProxyResult[]): Promise<void> 
 
 // ---------- export ----------
 
-function exportScope(): ProxyResult[] {
-  return includeDead ? results : results.filter((r) => r.alive);
+/** What the table shows, as the user sees it: filters, grouping and order. */
+function exportScope(): { list: ProxyResult[]; total: number } {
+  const keep = (r: ProxyResult) => includeDead || r.alive;
+  return {
+    list: resultsView.shown(results, filter).filter(keep),
+    total: results.filter(keep).length,
+  };
 }
 
 async function doExport(kind: ExportKind): Promise<void> {
-  await exportList(kind, exportScope(), { isTauriRuntime, notify: setStatusT, includeDead, askTemplate });
+  const { list, total } = exportScope();
+  const filtered = list.length < total ? { shown: list.length, total } : undefined;
+  await exportList(kind, list, { isTauriRuntime, notify: setStatusT, includeDead, askTemplate, filtered });
 }
 
 /** The line template for "Export by template", remembered between uses. */

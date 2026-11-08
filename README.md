@@ -271,7 +271,9 @@ dead** checks only the dead proxies again and updates their rows in place.
 
 ### Export
 
-**Export** saves `.txt` (normalized proxy URLs), `.json` (full results) or
+**Export** takes the rows the table shows, with its filters, grouping and
+order (the status line says "N of M" when filters hid some). It saves `.txt`
+(normalized proxy URLs), `.json` (full results) or
 `.csv` (table with the original line and URL; the `dnsbl` column holds the
 lists that have the exit IP, `clean`, or nothing when not checked) through the
 system dialog, or

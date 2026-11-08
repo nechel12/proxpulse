@@ -40,6 +40,8 @@ All notable changes to ProxPulse. The format follows
   marks, and the reason a proxy is dead, follows Status instead of being the
   last column, off-screen in the default window. The row number and proxy
   columns stay in place while the table scrolls sideways.
+- Export and Copy in the export menu take the rows the table shows, with its
+  filters and grouping; the status line says "N of M" when filters hid some.
 
 ### Fixed
 
