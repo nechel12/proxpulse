@@ -157,6 +157,26 @@ fn unsupported_schemes_are_not_proxies() {
 }
 
 #[test]
+fn geo_keys_tell_logins_apart_without_passwords() {
+    use crate::proxy::geo_key;
+    // Gateways choose the exit country by username. The same values are
+    // pinned in geo-store.test.ts: both sides must build the same key.
+    assert_eq!(
+        geo_key("http://user-country-de:pw@gw.example:8000"),
+        "http://gw.example:8000#ue40cd397"
+    );
+    assert_eq!(
+        geo_key("http://user-country-us:pw@gw.example:8000"),
+        "http://gw.example:8000#uf1e685c8"
+    );
+    assert_eq!(
+        geo_key("socks5://gw.example:1080"),
+        "socks5://gw.example:1080"
+    );
+    assert!(!geo_key("http://u:secret@gw.example:8000").contains("secret"));
+}
+
+#[test]
 fn checks_never_go_out_without_the_proxy() {
     use crate::http::reqwest_proxy_url;
     assert_eq!(

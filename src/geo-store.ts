@@ -22,17 +22,33 @@ export function stripProxyCredentials(raw: string): string {
   return host;
 }
 
-/** `scheme://host:port` without userinfo. */
-const URL_KEY_RE = /^[a-z][a-z0-9+.-]*:\/\/[^\s@/]+$/i;
+/** `scheme://host:port` without userinfo, and the login's hash if any. */
+const URL_KEY_RE = /^[a-z][a-z0-9+.-]*:\/\/[^\s@/#]+(#u[0-9a-f]{8})?$/i;
+
+/** 32-bit FNV-1a of the UTF-8 bytes, as hex; `fnv1a32` in proxy.rs. */
+export function fnv1a32(s: string): string {
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(s)) {
+    h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
 
 /**
  * Cache key for a checked proxy: the normalized URL from the backend with
- * credentials removed. Raw input lines cannot be used: column formats such
- * as `host:port:user:pass` carry the password without an `@`.
+ * credentials removed, plus a hash of the username, since gateways choose
+ * the exit country by username. Raw input lines cannot be used: column
+ * formats such as `host:port:user:pass` carry the password without an `@`.
+ * Must match `geo_key` in proxy.rs.
  */
 export function geoKey(r: Pick<ProxyResult, "url" | "proxy">): string | null {
-  const key = stripProxyCredentials(r.url || r.proxy);
-  return URL_KEY_RE.test(key) ? key : null;
+  const url = r.url || r.proxy;
+  const base = stripProxyCredentials(url);
+  if (!URL_KEY_RE.test(base)) return null;
+  const rest = url.includes("://") ? url.slice(url.indexOf("://") + 3) : url;
+  const at = rest.lastIndexOf("@");
+  const user = at < 0 ? "" : rest.slice(0, at).split(":")[0];
+  return user ? `${base}#u${fnv1a32(user)}` : base;
 }
 
 export class GeoCacheStore {

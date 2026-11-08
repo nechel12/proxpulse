@@ -51,7 +51,8 @@ describe("GeoCacheStore", () => {
     store.learn([result]);
     const entries = store.fresh();
     expect(entries).toHaveLength(1);
-    expect(entries[0].proxy).toBe("http://1.2.3.4:8080");
+    // No password; the login only as a hash.
+    expect(entries[0].proxy).toBe("http://1.2.3.4:8080#uf00c3c10");
     expect(entries[0].country).toBe("Testland");
   });
 
@@ -77,8 +78,17 @@ describe("GeoCacheStore", () => {
   it("never keys by a raw column line with a password", () => {
     // `host:port:user:pass` has no `@`; the normalized URL does.
     expect(geoKey({ proxy: "1.2.3.4:8080:user:secret", url: "http://user:secret@1.2.3.4:8080" }))
-      .toBe("http://1.2.3.4:8080");
+      .toBe("http://1.2.3.4:8080#u60785ef2");
     expect(geoKey({ proxy: "1.2.3.4:8080:user:secret", url: "" })).toBeNull();
+  });
+
+  it("tells gateway logins apart, as the backend does", () => {
+    // Same values as geo_keys_tell_logins_apart_without_passwords in Rust.
+    expect(geoKey({ proxy: "", url: "http://user-country-de:pw@gw.example:8000" }))
+      .toBe("http://gw.example:8000#ue40cd397");
+    expect(geoKey({ proxy: "", url: "http://user-country-us:pw@gw.example:8000" }))
+      .toBe("http://gw.example:8000#uf1e685c8");
+    expect(geoKey({ proxy: "", url: "socks5://gw.example:1080" })).toBe("socks5://gw.example:1080");
   });
 
   it("drops legacy raw keys from storage on load", () => {

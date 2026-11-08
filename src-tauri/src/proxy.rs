@@ -41,6 +41,29 @@ pub(crate) fn strip_credentials(raw: &str) -> String {
     }
 }
 
+/// Geo cache key for a proxy URL: `scheme://host:port`, plus a hash of the
+/// username when there is one. Gateways choose the exit country by username
+/// (`user-country-de`), so two logins on one host are two proxies; the
+/// password never goes into the key. `geoKey` in geo-store.ts must match.
+pub(crate) fn geo_key(url: &str) -> String {
+    let base = strip_credentials(url);
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    match rest
+        .rsplit_once('@')
+        .map(|(info, _)| info.split(':').next().unwrap_or(""))
+    {
+        Some(user) if !user.is_empty() => format!("{base}#u{:08x}", fnv1a32(user.as_bytes())),
+        _ => base,
+    }
+}
+
+/// 32-bit FNV-1a: short, stable, and easy to repeat in TypeScript.
+fn fnv1a32(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(0x811c_9dc5, |h, &b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    })
+}
+
 pub(crate) fn is_http_url(s: &str) -> bool {
     let s = s.trim();
     s.get(..7)

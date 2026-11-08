@@ -10,7 +10,7 @@ use crate::commands::webhook::{
 use crate::extract::extract_proxies;
 use crate::proxy::normalize_candidates;
 use crate::{
-    epoch_secs, is_http_url, strip_credentials, GeoCacheEntry, ProxyResult, WebhookResult,
+    epoch_secs, is_http_url, GeoCacheEntry, ProxyResult, WebhookResult,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -359,7 +359,7 @@ pub(crate) fn pool_geo_cache(pool: &[DispatchPoolItem]) -> Vec<GeoCacheEntry> {
             let country = p.country.clone().filter(|c| !c.trim().is_empty())?;
             let is_code = country.len() == 2 && country.chars().all(|c| c.is_ascii_uppercase());
             Some(GeoCacheEntry {
-                proxy: strip_credentials(&p.url),
+                proxy: crate::proxy::geo_key(&p.url),
                 ip: None,
                 country: (!is_code).then(|| country.clone()),
                 country_code: is_code.then_some(country),
@@ -994,7 +994,8 @@ mod tests {
             2,
             "entries without a country still get a lookup"
         );
-        assert_eq!(cache[0].proxy, "http://1.2.3.4:8080");
+        // The login's hash, never the password.
+        assert_eq!(cache[0].proxy, "http://1.2.3.4:8080#uf00c3c10");
         assert_eq!(cache[0].country_code.as_deref(), Some("DE"));
         assert_eq!(cache[1].country.as_deref(), Some("Testland"));
         assert!(cache[1].country_code.is_none());

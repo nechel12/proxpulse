@@ -483,12 +483,16 @@ async fn check_candidate_inner(
     // a geo lookup for the default generate_204 URL.
     // Keyed by the normalized URL without credentials: raw column formats
     // (`host:port:user:pass`) would put the password into the key.
-    if let Some(entry) = geo_cache.get(&strip_credentials(&url)) {
+    if let Some(entry) = geo_cache.get(&geo_key(&url)) {
         apply_cached_geo(&mut res, entry);
     }
     // deep stages run concurrently: worst case ~1 timeout instead of 4 in a row
     if !flags.judge && !cancel.load(Ordering::Relaxed) {
-        let need_geo = flags.geo && res.country.is_none() && res.ip_type.is_none();
+        // The pool's cache knows only the country code; that is enough.
+        let need_geo = flags.geo
+            && res.country.is_none()
+            && res.country_code.is_none()
+            && res.ip_type.is_none();
         let want_anon = flags.anon;
         let want_tamper = flags.tamper;
         let want_tls = flags.tls;

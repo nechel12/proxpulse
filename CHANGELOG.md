@@ -86,6 +86,11 @@ All notable changes to ProxPulse. The format follows
   under its address, like a live one, instead of the raw line: its uptime no
   longer splits in two, and a `host:port:user:pass` line no longer puts the
   password into `history.json`.
+- Proxies on one gateway with different logins (`user-country-de`,
+  `user-country-us`) no longer share a cached country for six hours; the geo
+  cache tells them apart by a hash of the username, never the password.
+- Scheduled checks use the pool's known countries instead of looking geo up
+  again through every live proxy each cycle, which used up the ip-api limit.
 
 ## [0.6.1] — 2026-11-07
 
