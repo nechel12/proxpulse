@@ -144,7 +144,7 @@ export class ResultsView {
       if (items.length === 0) return;
       const at = items.indexOf(document.activeElement as HTMLButtonElement);
       const next = e.key === "Home" ? 0
-        : e.key === "End" ? items.length - 1
+        : e.key === "End" || (at < 0 && e.key === "ArrowUp") ? items.length - 1
         : (at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
       items[next].focus();
     });
@@ -234,10 +234,14 @@ export class ResultsView {
   private openMenuForKeyboard(wrap: HTMLElement): void {
     if (this.rows.length === 0) return;
     let i = this.cursorIndex();
-    if (this.selected.size === 0 || i < 0) {
+    if (this.selected.size === 0) {
       i = Math.max(0, i);
       this.select(i, false, false);
       this.virtual?.reveal(i);
+    } else if (i < 0 || !this.selected.has(this.rows[i].proxy)) {
+      // A selection made without a current row (Ctrl+A) stays as it is: the
+      // menu opens at its first row.
+      i = Math.max(0, this.rows.findIndex((r) => this.selected.has(r.proxy)));
     }
     const tr = wrap.querySelector<HTMLElement>(`tr[data-index="${i}"]`);
     const box = (tr ?? wrap).getBoundingClientRect();

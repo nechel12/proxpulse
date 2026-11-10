@@ -219,7 +219,6 @@ impl<T> Deep<T> {
     }
 }
 
-/// Resolves once Stop is pressed, so a long phase can be abandoned at once.
 /// A deep stage, skipped (as at a concurrency limit) when the proxy's time
 /// budget runs out before it ends.
 async fn within<T>(
@@ -247,6 +246,7 @@ async fn gated<T>(
     Deep::Ran(stage.await)
 }
 
+/// Resolves once Stop is pressed, so a long phase can be abandoned at once.
 pub(crate) async fn wait_cancelled(flag: &AtomicBool) {
     while !flag.load(Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -267,9 +267,6 @@ pub(crate) fn is_tls_target(url: &str) -> bool {
         .is_some_and(|p| p.eq_ignore_ascii_case("https://"))
 }
 
-/// Whether the proxy could see a judge request and alter its answer. A
-/// redirect to HTTPS (some hosts force it) hides them again, so the final URL
-/// counts as well as the requested one.
 /// What a check URL must answer for the proxy to count as working. A known
 /// address has a known answer: a captive portal, a login page or any web
 /// server that answers 200 to everything is not a working proxy. A custom
@@ -354,6 +351,9 @@ pub(crate) fn judge_busy(status: u16, body: &str) -> bool {
             .is_ok_and(|v| v.get("error").is_some_and(|e| e.is_string()))
 }
 
+/// Whether the proxy could see a judge request and alter its answer. A
+/// redirect to HTTPS (some hosts force it) hides them again, so the final URL
+/// counts as well as the requested one.
 pub(crate) fn answered_in_clear(requested: &str, final_url: &str) -> bool {
     !is_tls_target(requested) && !is_tls_target(final_url)
 }
@@ -403,7 +403,6 @@ pub(crate) fn candidate_budget(timeout: Duration, repeats: usize, flags: &CheckF
         + Duration::from_secs(5)
 }
 
-#[allow(clippy::too_many_arguments)]
 /// What every check of one run shares.
 struct Run {
     test_url: String,

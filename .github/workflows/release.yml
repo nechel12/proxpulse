@@ -82,10 +82,14 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: src-tauri
+      # cargo-audit directly, as in audit.yml: rustsec/audit-check reports
+      # warnings through the Checks API, which this job's read-only token
+      # cannot write. Vulnerabilities fail the release; warnings (unmaintained,
+      # yanked) are printed.
+      - name: RustSec audit
+        run: |
+          cargo install --locked cargo-audit --version 0.22.2
+          cargo audit --file src-tauri/Cargo.lock
 
   # The release is created as a draft and published only by `notes`, after
   # every platform is uploaded. A draft is invisible to the updater
@@ -315,8 +319,8 @@ jobs:
           node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/notes.md"
           gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
 
-      # Parallel platform jobs rewrite latest.json in turn and can drop one
-      # another's entry: publish only a manifest that has every platform.
+      # Publish only a manifest that has every platform: a platform job that
+      # uploaded no updater artifact would leave its users without updates.
       - name: Check the updater manifest
         run: |
           jq -e '.platforms | has("windows-x86_64") and has("linux-x86_64")
