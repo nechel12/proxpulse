@@ -1,8 +1,7 @@
-use crate::commands::check::{
-    answered_in_clear, candidate_budget, check_answer_signature, wants_direct_ip, CheckConfig,
-};
+use crate::baseline::{wants_direct_ip, Baseline};
+use crate::commands::check::{answered_in_clear, candidate_budget, CheckConfig};
+use crate::judge::check_answer_signature;
 use crate::judge_sig::*;
-use crate::Baseline;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;

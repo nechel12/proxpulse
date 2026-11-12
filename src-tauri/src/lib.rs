@@ -9,10 +9,14 @@ use tauri::{
 };
 use tokio::sync::{Mutex, Semaphore};
 
+mod baseline;
 mod dnsbl;
 mod extract;
 mod http;
+mod judge;
 mod judge_sig;
+use baseline::*;
+use judge::*;
 mod netguard;
 mod transport;
 use http::*;
@@ -122,47 +126,6 @@ struct HttpbinHeaders {
     headers: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct JudgeGeo {
-    country: Option<String>,
-    country_code: Option<String>,
-    city: Option<String>,
-    asn: Option<u64>,
-    aso: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct JudgeBody {
-    ip: Option<String>,
-    anonymity: Option<String>,
-    ip_type: Option<String>,
-    geo: Option<JudgeGeo>,
-    content_sha256: Option<String>,
-}
-
-fn try_parse_judge_body(res: &mut ProxyResult, body: &str) -> Option<String> {
-    let jb: JudgeBody = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(_) => return None,
-    };
-    if let Some(ip) = jb.ip {
-        let t = ip.trim().to_string();
-        if !t.is_empty() {
-            res.ip = Some(t);
-        }
-    }
-    res.anonymity = jb.anonymity;
-    res.ip_type = jb.ip_type;
-    if let Some(g) = jb.geo {
-        res.country = g.country;
-        res.country_code = g.country_code;
-        res.city = g.city;
-        res.asn = g.asn.map(|n| n.to_string());
-        res.org = g.aso;
-    }
-    jb.content_sha256
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct GeoCacheEntry {
     proxy: String,
@@ -175,79 +138,6 @@ struct GeoCacheEntry {
     asn: Option<String>,
     ip_type: Option<String>,
 }
-
-/// Direct judge endpoint used for the content hash baseline. For a custom
-/// path (e.g. `https://host/svc`) the URL is used as-is: the same endpoint
-/// is what the checked proxy requests.
-fn judge_direct_url(test_url: &str) -> Option<String> {
-    let t = test_url.trim_end_matches('/');
-    if t.is_empty() {
-        return None;
-    }
-    if t.ends_with("/judge") {
-        return Some(t.to_string());
-    }
-    if let Some(base) = t.strip_suffix("/generate_204") {
-        if !base.is_empty() {
-            return Some(format!("{base}/judge"));
-        }
-    }
-    Some(t.to_string())
-}
-
-async fn fetch_direct_judge_sha(judge_url: &str, timeout: Duration) -> Option<String> {
-    let client = build_client(None, timeout, true).ok()?;
-    let r = client.get(judge_url).send().await.ok()?;
-    if !r.status().is_success() {
-        return None;
-    }
-    let body = read_body_capped(r, BODY_LIMIT_PAGE).await.ok()?;
-    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
-    v.get("content_sha256")?.as_str().map(|s| s.to_string())
-}
-
-/// What a run measured directly, without a proxy, to compare answers with.
-/// The default knows nothing and expects no signature.
-struct Baseline {
-    direct_ip: Option<String>,
-    example_len: Option<usize>,
-    example_hash: Option<u64>,
-    example_cert_fp: Option<String>,
-    judge_content_sha: Option<String>,
-    /// The judge's key at the start of the run.
-    judge_key: judge_sig::KeyLookup,
-    /// Where `judge_key` came from: the judge URL and the request timeout.
-    judge_key_source: Option<(String, Duration)>,
-    /// The one further `/key` request of a run, shared by all its checks.
-    judge_key_retry: tokio::sync::OnceCell<judge_sig::KeyLookup>,
-}
-
-impl Default for Baseline {
-    fn default() -> Self {
-        Self {
-            direct_ip: None,
-            example_len: None,
-            example_hash: None,
-            example_cert_fp: None,
-            judge_content_sha: None,
-            judge_key: judge_sig::KeyLookup::NotSigned,
-            judge_key_source: None,
-            judge_key_retry: tokio::sync::OnceCell::new(),
-        }
-    }
-}
-
-#[derive(Default)]
-struct BaselineCache {
-    direct_ip: Option<(String, Instant)>,
-    example: Option<(usize, u64, Instant)>,
-    cert: Option<(String, Instant)>,
-}
-
-static BASELINE_CACHE: std::sync::OnceLock<Mutex<BaselineCache>> = std::sync::OnceLock::new();
-
-const BASELINE_IP_TTL: Duration = Duration::from_secs(300);
-const BASELINE_PAGE_TTL: Duration = Duration::from_secs(1800);
 
 /// The free ip-api tier is heavily rate-limited. Cap concurrent geo lookups
 /// instead of firing one request per checked proxy at 500-way concurrency.
@@ -273,14 +163,6 @@ fn geo_semaphore() -> &'static Semaphore {
 
 fn deep_semaphore(slot: &'static std::sync::OnceLock<Semaphore>) -> &'static Semaphore {
     slot.get_or_init(|| Semaphore::new(DEEP_CONCURRENCY))
-}
-
-fn baseline_cache() -> &'static Mutex<BaselineCache> {
-    BASELINE_CACHE.get_or_init(|| Mutex::const_new(BaselineCache::default()))
-}
-
-fn cache_fresh(ts: Instant, ttl: Duration) -> bool {
-    ts.elapsed() < ttl
 }
 
 fn body_hash(s: &str) -> u64 {

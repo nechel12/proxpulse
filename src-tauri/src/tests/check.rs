@@ -1,5 +1,6 @@
+use crate::baseline::wants_direct_ip;
 use crate::commands::check::{
-    candidate_budget, dead_result, is_tls_target, wants_direct_ip, CheckConfig, CheckFlags,
+    candidate_budget, dead_result, is_tls_target, CheckConfig, CheckFlags,
 };
 use crate::tls::{cert_fp_hex, is_cert_error, tls_client_config};
 use crate::*;
@@ -279,7 +280,7 @@ fn socket_errors_map_by_kind_not_by_text() {
 
 #[test]
 fn the_http_judge_always_gets_its_key() {
-    use crate::commands::check::judge_baseline_url;
+    use crate::judge::judge_baseline_url;
     let http = Some("http://j.example/judge");
     // Full mode with both schemes, even when /generate_204 was typed: the
     // HTTP answer carries the verdict and must be checked against the key.
@@ -311,7 +312,7 @@ fn the_http_judge_always_gets_its_key() {
 
 #[test]
 fn the_judge_tells_us_our_address_over_https_only() {
-    use crate::commands::check::judge_ip_url;
+    use crate::judge::judge_ip_url;
     assert_eq!(
         judge_ip_url("http://j.example/judge").as_deref(),
         Some("https://j.example/ip")
@@ -324,7 +325,7 @@ fn the_judge_tells_us_our_address_over_https_only() {
 
 #[test]
 fn a_forged_judge_answer_leaves_no_exit_ip_or_geo() {
-    use crate::commands::check::forget_judge_answer;
+    use crate::judge::forget_judge_answer;
     let mut res =
         crate::commands::check::dead_result("1.2.3.4:8080".into(), "HTTP".into(), 1, String::new());
     res.alive = true;

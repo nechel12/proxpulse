@@ -74,7 +74,9 @@ src-tauri/src/transport.rs          # SOCKS/HTTP CONNECT and TLS to proxies
 src-tauri/src/tls.rs                # TLS config and certificate fingerprints
 src-tauri/src/netguard.rs           # guard for user-supplied URLs
 src-tauri/src/dnsbl.rs              # blocklist lookups
+src-tauri/src/judge.rs              # judge answers: direct URLs, body, integrity
 src-tauri/src/judge_sig.rs          # judge answer signatures
+src-tauri/src/baseline.rs           # direct measurements a run compares answers with
 src-tauri/src/tests/*.rs            # backend tests
 scripts/*.mjs                       # version check, release description
 .github/workflows/ci.yml            # checks on every push and PR
