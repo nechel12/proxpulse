@@ -18,7 +18,7 @@ import { parseTextAsync, type ParseResult } from "./parse-runner.ts";
 import { ProfilePanel } from "./profiles-panel.ts";
 import { type TargetMode, withOwnAddresses } from "./profiles.ts";
 import { SettingsPanel } from "./settings-panel.ts";
-import { initUpdater } from "./updater.ts";
+import { initUpdater, type Updater } from "./updater.ts";
 import { errorLog, logErr } from "./diagnostics.ts";
 import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
 import { PoolApiPanel } from "./pool-api.ts";
@@ -26,6 +26,7 @@ import { AutoSettingsStore, storedAutoConfig } from "./auto-settings.ts";
 import { MAIN_POOL, MAX_POOLS, MAX_PROXIES, forgetPoolSettings, poolLabel, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { runButtons } from "./run-buttons.ts";
+import { initShortcuts } from "./shortcuts.ts";
 import { initSourcePanel } from "./source-panel.ts";
 import { initInfoPanel } from "./info-panel.ts";
 import { AppSettings, readFlag, writeFlag } from "./app-settings.ts";
@@ -34,7 +35,7 @@ import { applyTheme, loadThemePref } from "./theme.ts";
 import { Notifier } from "./notify.ts";
 import { formatWebhookResults } from "./webhooks.ts";
 import { SubscriptionPanel, formatSubscriptionResults, type SubscriptionResult } from "./subscriptions.ts";
-import { askConfirm, askText, flashLabel, screenVisible, setProgress } from "./ui.ts";
+import { askConfirm, askText, flashLabel, openExternal, screenVisible, setProgress } from "./ui.ts";
 import { NetStatus } from "./net-status.ts";
 import { CHECK_LIMITS, clampInt, runCheckList, type CheckSettings } from "./check-client.ts";
 import { applyAutoPool, showAutoWebhook, type AutoPoolEvent, type AutoWebhookEvent } from "./auto-events.ts";
@@ -971,8 +972,8 @@ window.addEventListener("unhandledrejection", (e) =>
   logErr("promise: " + clip(String((e as PromiseRejectionEvent).reason ?? "rejection"), 300))
 );
 
-window.addEventListener("DOMContentLoaded", () => {
-  // lang
+/** The language switch and the tabs. */
+function initLanguageAndTabs() {
   document.querySelectorAll(".lang button").forEach((b) => {
     b.addEventListener("click", () => {
       lang = (b as HTMLElement).dataset.lang as Lang;
@@ -1006,7 +1007,10 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     });
   });
+}
 
+/** The source panel, Start and Stop, the results table and its status filters. */
+function initCheckControls() {
   initSourcePanel({
     parseTextAsync: parseList,
     fetchUrl: (url) => invoke<string>("fetch_url_text", { url }),
@@ -1049,35 +1053,38 @@ window.addEventListener("DOMContentLoaded", () => {
       render();
     });
   });
+}
 
-  async function doPoolSync(statusElId: string): Promise<void> {
-    mergeAlive(results);
-    renderPool();
-    updateCounts();
-    const n = await syncPool(false);
-    if (n < 0) {
-      setStatusText(statusElId, () => t("pool_sync_err"));
-      lastStatus = { key: "pool_sync_err" };
-      return;
-    }
-    setStatusText(statusElId, () => t("pool_synced", { n }));
-    lastStatus = { key: "pool_synced", params: { n } };
+async function doPoolSync(statusElId: string): Promise<void> {
+  mergeAlive(results);
+  renderPool();
+  updateCounts();
+  const n = await syncPool(false);
+  if (n < 0) {
+    setStatusText(statusElId, () => t("pool_sync_err"));
+    lastStatus = { key: "pool_sync_err" };
+    return;
   }
+  setStatusText(statusElId, () => t("pool_synced", { n }));
+  lastStatus = { key: "pool_synced", params: { n } };
+}
 
-  async function doPoolClear(): Promise<void> {
-    // The pool is shared by both tabs, persisted, and clearing it stops a
-    // running dispatcher: ask first.
-    if (pool.count === 0) return;
-    if (!(await askConfirm(t("pool_clear_confirm", { n: pool.count })))) return;
-    pool.clear();
-    void syncPool(false).then(() => {
-      setStatusText("srv-status", () => t("srv_off"));
-      void dispatchMonitor.poll(t, setStatusText);
-    });
-    renderPool();
-    updateCounts();
-  }
+async function doPoolClear(): Promise<void> {
+  // The pool is shared by both tabs, persisted, and clearing it stops a
+  // running dispatcher: ask first.
+  if (pool.count === 0) return;
+  if (!(await askConfirm(t("pool_clear_confirm", { n: pool.count })))) return;
+  pool.clear();
+  void syncPool(false).then(() => {
+    setStatusText("srv-status", () => t("srv_off"));
+    void dispatchMonitor.poll(t, setStatusText);
+  });
+  renderPool();
+  updateCounts();
+}
 
+/** The buttons over the results and the pools: clear, export, direct check, sites, DNSBL, speed. */
+function initToolbarControls() {
   ($("btn-pool-clear") as HTMLButtonElement).addEventListener("click", () => void doPoolClear());
   ($("btn-auto-pool-clear") as HTMLButtonElement).addEventListener("click", () => void doPoolClear());
 
@@ -1139,8 +1146,10 @@ window.addEventListener("DOMContentLoaded", () => {
   const speedSel = $<HTMLSelectElement>("speed-mb");
   speedSel.value = String(loadSpeedMb());
   speedSel.addEventListener("change", () => saveSpeedMb(Number(speedSel.value)));
+}
 
-  // presets and check target
+/** Presets, the check target and the ip-api key. */
+function initPresetsAndTarget() {
   profiles.load();
   profiles.render(t);
 
@@ -1219,28 +1228,11 @@ window.addEventListener("DOMContentLoaded", () => {
   // proxies (the request must originate from the proxy); see README.
   ($("chk-ipapi-pro") as HTMLInputElement).addEventListener("change", () => settings.saveIpapiSettings());
   ($("ipapi-key") as HTMLInputElement).addEventListener("input", () => settings.saveIpapiSettings());
-  $("btn-ipapi-pro").addEventListener("click", async () => {
-    const url = "https://members.ip-api.com/";
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(url);
-    } catch {
-      window.open(url, "_blank");
-    }
-  });
+  $("btn-ipapi-pro").addEventListener("click", () => void openExternal("https://members.ip-api.com/"));
+}
 
-  // auto toggles (sqchk style)
-  const bindSqchk = (id: string, get: () => boolean, set: (v: boolean) => void) => {
-    $(id).addEventListener("click", () => {
-      set(!get());
-      ($(id) as HTMLButtonElement).setAttribute("aria-pressed", String(get()));
-      armTimers();
-    });
-  };
-  bindSqchk("auto-on", () => autoSettings.enabled, (v) => { autoSettings.enabled = v; });
-  bindSqchk("auto-webhook-on", () => autoSettings.sendWebhooks, (v) => { autoSettings.sendWebhooks = v; });
-
-  // dispatcher
+/** The dispatcher, the pool API and the tray button. */
+function initDispatcherControls() {
   ($("srv-port") as HTMLInputElement).addEventListener("input", () => dispatchMonitor.refreshAddr());
   dispatchMonitor.refreshAddr();
   ($("btn-pool-sync") as HTMLButtonElement).addEventListener("click", () => void doPoolSync("srv-status"));
@@ -1307,8 +1299,10 @@ window.addEventListener("DOMContentLoaded", () => {
       await invoke("hide_to_tray");
     } catch { /* ignore */ }
   });
+}
 
-  // diagnostics + updates
+/** Diagnostics, the updater, the Settings tab and the history. */
+function initDiagnosticsAndUpdates(): Updater {
   geoCache.load();
   errorLog.load();
   errorLog.render();
@@ -1352,7 +1346,32 @@ window.addEventListener("DOMContentLoaded", () => {
   resultsView.hideCreds = appSettings.hideCreds;
   pool.hideCreds = appSettings.hideCreds;
 
-  // auto timers + webhook
+  $("btn-hist-clear").addEventListener("click", async () => {
+    if (!(await askConfirm(t("hist_clear_confirm")))) return;
+    try {
+      await invoke("clear_history");
+    } catch { /* older backend */ }
+    results = results.map((r) => ({ ...r, history: undefined }));
+    for (const p of pool.items) p.history = undefined;
+    render();
+    renderPool();
+    void refreshHistorySize();
+  });
+  return updater;
+}
+
+/** The schedule, its pool view, subscriptions and webhooks. */
+function initAutoControls() {
+  const bindSqchk = (id: string, get: () => boolean, set: (v: boolean) => void) => {
+    $(id).addEventListener("click", () => {
+      set(!get());
+      ($(id) as HTMLButtonElement).setAttribute("aria-pressed", String(get()));
+      armTimers();
+    });
+  };
+  bindSqchk("auto-on", () => autoSettings.enabled, (v) => { autoSettings.enabled = v; });
+  bindSqchk("auto-webhook-on", () => autoSettings.sendWebhooks, (v) => { autoSettings.sendWebhooks = v; });
+
   document.getElementById("auto-min")?.addEventListener("change", armTimers);
   loadMaxPing();
   syncMaxPingInputs();
@@ -1441,6 +1460,10 @@ window.addEventListener("DOMContentLoaded", () => {
     scheduleAutoConfig();
     webhooks.renderFormat(t);
   });
+}
+
+/** What the backend reports: schedules, pool changes, webhook deliveries, failed saves. */
+function listenToBackend() {
   void listen<AutoStatusEvent>("auto://status", (e) => {
     const id = e.payload.pool ?? MAIN_POOL;
     autoStatus.handle(e.payload, shownPool(id));
@@ -1490,6 +1513,10 @@ window.addEventListener("DOMContentLoaded", () => {
       if (sent) writeFlag("pp-tray-hint", true);
     });
   }).catch(() => {});
+}
+
+/** The state the backend holds: a check in progress, the pools and the dispatcher. */
+function restoreBackendState() {
   // After a reload during a check the buttons stay locked, and a manual
   // check sends this page no events: ask the backend until it is free.
   const waitUntilFree = (): void => {
@@ -1516,53 +1543,19 @@ window.addEventListener("DOMContentLoaded", () => {
   void loadPools();
   void loadPoolItems();
   void dispatchMonitor.poll(t, setStatusText);
+}
 
-  $("btn-hist-clear").addEventListener("click", async () => {
-    if (!(await askConfirm(t("hist_clear_confirm")))) return;
-    try {
-      await invoke("clear_history");
-    } catch { /* older backend */ }
-    results = results.map((r) => ({ ...r, history: undefined }));
-    for (const p of pool.items) p.history = undefined;
-    render();
-    renderPool();
-    void refreshHistorySize();
-  });
-
-  // Keyboard shortcuts: Ctrl+Enter starts, Esc stops, Ctrl+F filters.
-  document.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented || !$("text-modal").classList.contains("hidden")) return;
-    const mod = e.ctrlKey || e.metaKey;
-    const onCheck = screenVisible("screen-check");
-    if (mod && e.key === "Enter" && onCheck) {
-      e.preventDefault();
-      const b = $("btn-start") as HTMLButtonElement;
-      if (!b.disabled) b.click();
-    } else if (e.key === "Escape") {
-      // Esc closes an open menu first; typing in a field never stops a run,
-      // which cannot be resumed and whose results Start would replace.
-      const open = document.querySelectorAll<HTMLElement>(".menu:not(.hidden)");
-      if (open.length > 0) {
-        e.preventDefault();
-        open.forEach((m) => m.classList.add("hidden"));
-        return;
-      }
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
-      if (!onCheck || !(running || autoStatus.running)) return;
-      e.preventDefault();
-      const b = $("btn-stop") as HTMLButtonElement;
-      if (!b.disabled) b.click();
-    } else if (mod && e.code === "KeyF") {
-      const field = onCheck
-        ? $<HTMLInputElement>("search")
-        : document.querySelector<HTMLInputElement>(".screen:not(.hidden) .pool-filter");
-      if (!field) return;
-      e.preventDefault();
-      field.focus();
-      field.select();
-    }
-  });
+window.addEventListener("DOMContentLoaded", () => {
+  initLanguageAndTabs();
+  initCheckControls();
+  initToolbarControls();
+  initPresetsAndTarget();
+  initDispatcherControls();
+  const updater = initDiagnosticsAndUpdates();
+  initAutoControls();
+  listenToBackend();
+  restoreBackendState();
+  initShortcuts({ running: () => running || autoStatus.running });
 
   applyI18n();
   armTimers();
