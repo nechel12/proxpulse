@@ -128,7 +128,6 @@ body {
   color: var(--strong); background: var(--panel); border-color: var(--line);
   box-shadow: inset 0 2px 0 var(--red), 0 0 18px rgba(255,30,45,.15);
 }
-.screen.hidden { display: none; }
 
 .lang { display: flex; gap: 4px; }
 .lang button {

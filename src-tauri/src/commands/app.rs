@@ -89,7 +89,6 @@ pub(crate) struct UpdateInfo {
     available: bool,
     version: Option<String>,
     current: String,
-    notes: Option<String>,
 }
 
 #[tauri::command]
@@ -101,13 +100,11 @@ pub(crate) async fn check_app_update(app: AppHandle) -> Result<UpdateInfo, Strin
             available: true,
             version: Some(u.version.clone()),
             current,
-            notes: u.body.clone(),
         }),
         None => Ok(UpdateInfo {
             available: false,
             version: None,
             current,
-            notes: None,
         }),
     }
 }

@@ -1,4 +1,4 @@
-import { IPAPI_FREE_URL, IPAPI_OLD_HTTPS_URL, maskKey, resolveTestUrl } from "./ipapi.ts";
+import { IPAPI_FREE_URL, maskKey, resolveTestUrl } from "./ipapi.ts";
 import { judgeUrls, type JudgeSchemes } from "./judge.ts";
 import {
   PUBLIC_CUSTOM,
@@ -86,7 +86,7 @@ export class SettingsPanel {
     const selected = sel === PUBLIC_CUSTOM ? custom : sel;
     const pro = el<HTMLInputElement>("chk-ipapi-pro")?.checked ?? false;
     const key = el<HTMLInputElement>("ipapi-key")?.value ?? "";
-    return resolveTestUrl(selected, "", pro, key);
+    return resolveTestUrl(selected, pro, key);
   }
 
   activeIpapiKey(): string | null {
@@ -129,7 +129,7 @@ export class SettingsPanel {
 
   private isIpapiSelected(): boolean {
     const sel = el<HTMLSelectElement>("test-url")?.value ?? "";
-    return sel === IPAPI_FREE_URL || sel === IPAPI_OLD_HTTPS_URL;
+    return sel === IPAPI_FREE_URL;
   }
 
   private renderJudgeMode(): void {

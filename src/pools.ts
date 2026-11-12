@@ -1,6 +1,8 @@
 import type { Translate } from "./ui-types.ts";
 // Named pools: ids, labels and per-pool storage keys.
 
+/** A check and a pool take this many proxies at most (as in the backend). */
+export const MAX_PROXIES = 20_000;
 export const MAIN_POOL = "main";
 /** The main pool plus nine named ones (`MAX_POOLS` in pools.rs). */
 export const MAX_POOLS = 10;

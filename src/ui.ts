@@ -38,6 +38,16 @@ export async function askChoice(message: string, yes: string, no: string): Promi
   }
 }
 
+/** Open a link in the system browser (a new tab in the browser preview). */
+export async function openExternal(url: string): Promise<void> {
+  try {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } catch {
+    window.open(url, "_blank");
+  }
+}
+
 export function askText(title: string, value = "", maxLength = 40): Promise<string | null> {
   const overlay = document.getElementById("text-modal");
   const input = document.getElementById("text-modal-input") as HTMLInputElement | null;

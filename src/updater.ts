@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Translate, StatusSetter } from "./ui-types.ts";
+import { openExternal } from "./ui.ts";
 
 
 export type UpdaterDeps = {
@@ -16,7 +17,6 @@ type UpdateInfo = {
   available: boolean;
   version: string | null;
   current: string;
-  notes: string | null;
 };
 
 export type Updater = {
@@ -107,14 +107,8 @@ export function initUpdater({ t, setStatusText, logErr, isTauriRuntime, onFound 
     }
   });
 
-  open.addEventListener("click", async () => {
-    if (!releaseUrl) return;
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(releaseUrl);
-    } catch {
-      window.open(releaseUrl, "_blank");
-    }
+  open.addEventListener("click", () => {
+    if (releaseUrl) void openExternal(releaseUrl);
   });
 
   return { checkQuietly: () => runCheck(true) };

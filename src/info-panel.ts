@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { flashLabel } from "./ui.ts";
+import { flashLabel, openExternal } from "./ui.ts";
 import type { Translate } from "./ui-types.ts";
 
 
@@ -28,14 +28,7 @@ export function initInfoPanel({ t, getData }: Deps): void {
     } catch { /* ignore */ }
   });
 
-  const openGh = (url: string) => async () => {
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(url);
-    } catch {
-      window.open(url, "_blank");
-    }
-  };
+  const openGh = (url: string) => () => void openExternal(url);
   document.getElementById("gh-card")?.addEventListener("click", openGh("https://github.com/nechel12/proxpulse"));
   document.getElementById("gh-card-judge")?.addEventListener("click", openGh("https://github.com/nechel12/proxpulse-judge"));
 }

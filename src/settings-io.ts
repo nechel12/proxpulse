@@ -1,6 +1,6 @@
 // Export, import and reset of the app settings kept in localStorage.
 
-import { MAIN_POOL, POOL_KEYS, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
+import { MAIN_POOL, MAX_PROXIES, POOL_KEYS, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
 
 /** Settings keys; caches, logs and the ping history are not settings. */
 export const SETTINGS_KEYS = [
@@ -31,8 +31,6 @@ export const SETTINGS_KEYS = [
 ] as const;
 
 const MAX_VALUE_CHARS = 1024 * 1024;
-/** Same cap as the pool in the app. */
-const MAX_POOL = 20_000;
 const MAX_NAMED_POOLS = 9;
 const FILE_VERSION = 1;
 
@@ -219,7 +217,7 @@ function pickPools(raw: unknown): ParsedSettings["pools"] {
 function pickPool(raw: unknown): PoolEntry[] | null {
   if (!Array.isArray(raw)) return null;
   const out: PoolEntry[] = [];
-  for (const it of raw.slice(0, MAX_POOL)) {
+  for (const it of raw.slice(0, MAX_PROXIES)) {
     if (!it || typeof it !== "object") continue;
     const p = it as Record<string, unknown>;
     if (typeof p.raw !== "string" || !p.raw || p.raw.length > 2048) continue;

@@ -22,27 +22,23 @@ describe("ipapi", () => {
   });
 
   it("keeps the free ip-api URL without a Pro key", () => {
-    expect(resolveTestUrl(IPAPI_FREE_URL, "", true, "  ")).toBe(IPAPI_FREE_URL);
-    expect(resolveTestUrl(IPAPI_FREE_URL, "", false, "key")).toBe(
+    expect(resolveTestUrl(IPAPI_FREE_URL, true, "  ")).toBe(IPAPI_FREE_URL);
+    expect(resolveTestUrl(IPAPI_FREE_URL, false, "key")).toBe(
       IPAPI_FREE_URL,
     );
   });
 
   it("upgrades ip-api to Pro when enabled", () => {
-    expect(resolveTestUrl(IPAPI_FREE_URL, "", true, "my-key")).toBe(
+    expect(resolveTestUrl(IPAPI_FREE_URL, true, "my-key")).toBe(
       "https://pro.ip-api.com/json/?key=my-key",
     );
-    expect(resolveTestUrl(IPAPI_OLD_HTTPS_URL, "", true, "my-key")).toBe(
+    expect(resolveTestUrl(IPAPI_OLD_HTTPS_URL, true, "my-key")).toBe(
       "https://pro.ip-api.com/json/?key=my-key",
     );
   });
 
-  it("does not touch non-ip-api or custom URLs", () => {
-    expect(
-      resolveTestUrl("https://example.com", "", true, "my-key"),
-    ).toBe("https://example.com");
-    expect(
-      resolveTestUrl(IPAPI_FREE_URL, "https://example.org", true, "my-key"),
-    ).toBe("https://example.org");
+  it("does not touch other URLs", () => {
+    expect(resolveTestUrl("https://example.com", true, "my-key")).toBe("https://example.com");
+    expect(resolveTestUrl(" https://example.org ", false, "")).toBe("https://example.org");
   });
 });

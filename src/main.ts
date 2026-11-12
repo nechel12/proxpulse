@@ -23,7 +23,7 @@ import { errorLog, logErr } from "./diagnostics.ts";
 import { DispatchMonitor, type DispatchStatus } from "./dispatch-monitor.ts";
 import { PoolApiPanel } from "./pool-api.ts";
 import { AutoSettingsStore, storedAutoConfig } from "./auto-settings.ts";
-import { MAIN_POOL, MAX_POOLS, forgetPoolSettings, poolLabel, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
+import { MAIN_POOL, MAX_POOLS, MAX_PROXIES, forgetPoolSettings, poolLabel, scopedKey, validPoolId, type PoolMeta } from "./pools.ts";
 import { AutoStatusController, type AutoStatusEvent } from "./auto-status.ts";
 import { runButtons } from "./run-buttons.ts";
 import { initSourcePanel } from "./source-panel.ts";
@@ -300,7 +300,6 @@ function readCheckSettings(): CheckSettings {
   };
 }
 
-const MAX_PROXIES = 20_000;
 const MAX_INPUT_CHARS = 10 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILE_MB = 10;

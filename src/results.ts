@@ -26,9 +26,7 @@ import { siteHost, siteSummary } from "./sites.ts";
 import { speedLabel } from "./speed-client.ts";
 import { historyTitle, uptimeClass, uptimeLabel } from "./history.ts";
 import type { Translate } from "./ui-types.ts";
-export type { Translate };
 
-export type { ResultFilter } from "./results-model.ts";
 export type RowAction = "copy" | "recheck" | "speed" | "pool" | "remove";
 
 type Deps = {

@@ -11,7 +11,7 @@ import {
   type PoolFileEntry,
   type PrefsUpdate,
 } from "./settings-io.ts";
-import { MAIN_POOL, forgetPoolSettings, type PoolMeta } from "./pools.ts";
+import { MAIN_POOL, MAX_PROXIES, forgetPoolSettings, type PoolMeta } from "./pools.ts";
 import type { Translate, StatusSetter } from "./ui-types.ts";
 
 
@@ -66,7 +66,7 @@ export function writeFlag(key: string, value: boolean): void {
 }
 
 export function clampPoolMin(v: number): number {
-  return Number.isFinite(v) ? Math.max(1, Math.min(20_000, Math.floor(v))) : 1;
+  return Number.isFinite(v) ? Math.max(1, Math.min(MAX_PROXIES, Math.floor(v))) : 1;
 }
 
 function readPoolMin(): number {

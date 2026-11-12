@@ -92,6 +92,7 @@ All notable changes to ProxPulse. The format follows
 
 ### Fixed
 
+- The ping graph under the toolbar shows its tooltip.
 - A pool, history, schedule or preferences file that cannot be saved (a full
   disk, a read-only folder) is reported in the status line and the error
   log instead of being lost silently at the next launch.

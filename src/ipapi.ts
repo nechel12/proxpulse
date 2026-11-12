@@ -18,14 +18,7 @@ export function maskKey(url: string): string {
  * free endpoint is HTTP-only; when Pro is enabled with a key, the same
  * selection is upgraded to the HTTPS Pro endpoint.
  */
-export function resolveTestUrl(
-  selected: string,
-  custom: string,
-  pro: boolean,
-  key: string,
-): string {
-  const c = custom.trim();
-  if (c) return c;
+export function resolveTestUrl(selected: string, pro: boolean, key: string): string {
   const sel = selected.trim();
   const k = key.trim();
   if (pro && k && (sel === IPAPI_FREE_URL || sel === IPAPI_OLD_HTTPS_URL)) {
