@@ -116,5 +116,6 @@ describe("formatDuration", () => {
     expect(formatDuration(45)).toBe("45 s");
     expect(formatDuration(200)).toBe("3 min 20 s");
     expect(formatDuration(3900)).toBe("1 h 05 min");
+    expect(formatDuration(200, { s: "с", min: "мин", h: "ч" })).toBe("3 мин 20 с");
   });
 });

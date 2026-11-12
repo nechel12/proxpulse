@@ -731,7 +731,7 @@ async function runList(list: string[], opts: { recheck: boolean; truncated: bool
       const left = done >= 5 && done < total && secs > 2 ? Math.ceil(((total - done) * secs) / done) : null;
       lastStatus = left == null
         ? { key: "st_checking", params: { done, total } }
-        : { key: "st_checking_eta", params: { done, total, left: formatDuration(left) } };
+        : { key: "st_checking_eta", params: { done, total, left: formatDuration(left, { s: t("unit_s"), min: t("unit_min"), h: t("unit_h") }) } };
       $("status-line").textContent = t(lastStatus.key, lastStatus.params);
       setNet("work", "net_work", { s: Math.floor(secs) });
       render();
