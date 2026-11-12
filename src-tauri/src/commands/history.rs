@@ -2,7 +2,7 @@
 //! last seen alive and its typical ping. Kept in `history.json` keyed by the
 //! proxy URL without credentials.
 
-use crate::commands::dispatch::write_private_file;
+use crate::commands::dispatch::{save_reported, write_private_file};
 use crate::{epoch_secs, strip_credentials, ProxyResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -135,7 +135,7 @@ async fn save_history(app: &AppHandle) {
     let Ok(json) = serde_json::to_vec(&*state.map.lock().await) else {
         return;
     };
-    let _ = tauri::async_runtime::spawn_blocking(move || write_private_file(&path, &json)).await;
+    save_reported(app, "history", move || write_private_file(&path, &json)).await;
 }
 
 /// Record a finished check and persist the history.

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { SETTINGS_KEYS, applySettings, clearSettings, collectSettings, parseSettingsFile } from "./settings-io.ts";
+import {
+  SETTINGS_KEYS,
+  applySettings,
+  clearSettings,
+  collectSettings,
+  mergeImportedPrefs,
+  parseSettingsFile,
+} from "./settings-io.ts";
 
 function memoryStorage(init: Record<string, string> = {}) {
   const data = new Map(Object.entries(init));
@@ -132,5 +139,28 @@ describe("settings export and import", () => {
     expect(parseSettingsFile(JSON.stringify(file))?.prefs.poolApi).toEqual({ enabled: true, port: 1090 });
     const bad = { ...file, prefs: { poolApi: { enabled: "yes", port: 70000 } } };
     expect(parseSettingsFile(JSON.stringify(bad))?.prefs.poolApi).toBeUndefined();
+  });
+
+  it("keeps on import what the file leaves out", () => {
+    const login = { countries: [], stickyMin: 0, authUser: "u", authPass: "p" };
+    const current = {
+      closeToTray: true,
+      dispatcher: { port: 1080, mode: "fastest", listener: "both", options: login },
+      poolDispatchers: { p1: { port: 1081, mode: "round-robin", listener: "both", options: login } },
+      poolApi: { enabled: true, port: 1090 },
+    };
+    // A file with nothing about the dispatchers changes nothing about them.
+    expect(mergeImportedPrefs({ closeToTray: false }, current)).toEqual({ closeToTray: false });
+    // An older export: the dispatcher without its filter and login.
+    const old = mergeImportedPrefs({ dispatcher: { port: 2000, mode: "failover", listener: "http" } }, current);
+    expect(old.dispatcher).toEqual({ port: 2000, mode: "failover", listener: "http", options: login });
+    // The file's own login wins, and pools it does not mention keep theirs.
+    const other = { countries: ["DE"], stickyMin: 5, authUser: "", authPass: "" };
+    const merged = mergeImportedPrefs(
+      { poolDispatchers: { p2: { port: 1082, mode: "fastest", listener: "both", options: other } } },
+      current,
+    );
+    expect(merged.poolDispatchers?.p1.options).toEqual(login);
+    expect(merged.poolDispatchers?.p2.options).toEqual(other);
   });
 });

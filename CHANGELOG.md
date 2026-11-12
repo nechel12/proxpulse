@@ -8,6 +8,10 @@ All notable changes to ProxPulse. The format follows
 
 ### Security
 
+- A settings import or reset can no longer leave a running dispatcher open.
+  An import keeps what its file does not mention (a file without dispatcher
+  settings used to reset every dispatcher's login and country filter), and a
+  running dispatcher whose login the new settings remove is stopped.
 - A judge's key that came over HTTPS is only replaced over HTTPS during a run,
   so nobody on the direct path can force plain HTTP on the second key request.
 - A line with a scheme ProxPulse cannot speak (`vless://`, `trojan://`, `ss://`,
@@ -88,6 +92,9 @@ All notable changes to ProxPulse. The format follows
 
 ### Fixed
 
+- A pool, history, schedule or preferences file that cannot be saved (a full
+  disk, a read-only folder) is reported in the status line and the error
+  log instead of being lost silently at the next launch.
 - A pool's scheduled webhook delivery, with retries up to about a minute, no
   longer holds back the other pools' schedules; it runs in the background.
 - Errors say what happened again (`timeout`, `connection refused`,

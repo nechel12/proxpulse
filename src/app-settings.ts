@@ -5,6 +5,7 @@ import {
   applySettings,
   clearSettings,
   collectSettings,
+  mergeImportedPrefs,
   parseSettingsFile,
   type PoolEntry,
   type PoolFileEntry,
@@ -30,9 +31,9 @@ type Deps = {
 type BackendPrefs = Required<PrefsUpdate>;
 
 /**
- * What a reset sets, and an import for what its file leaves out. The
- * dispatchers' filters and logins are included: the backend applies them to
- * running dispatchers at once.
+ * What a reset sets. The dispatchers' filters and logins are included: the
+ * backend applies them to running dispatchers at once, and stops one whose
+ * login this removes.
  */
 const DEFAULT_PREFS: PrefsUpdate = {
   closeToTray: false,
@@ -274,9 +275,12 @@ export class AppSettings {
     const ids = new Set([...this.deps.pools().map((p) => p.id), ...parsed.pools.map((p) => p.meta.id)]);
     applySettings(localStorage, parsed.storage, [...ids]);
     try {
-      const prefs = { ...DEFAULT_PREFS, ...parsed.prefs };
+      // What the file leaves out stays as it is: defaults in its place would
+      // drop the dispatchers' logins and filters.
+      const current = await invoke<BackendPrefs>("get_app_prefs");
+      const prefs = mergeImportedPrefs(parsed.prefs, current);
       await invoke("set_app_prefs", { prefs });
-      await applyPoolApi(prefs.poolApi).catch(() => { /* the port may be taken */ });
+      if (prefs.poolApi) await applyPoolApi(prefs.poolApi).catch(() => { /* the port may be taken */ });
       if (parsed.pool) await invoke("set_dispatch_pool", { items: parsed.pool });
       if (parsed.pools.length) {
         const restored = await invoke<PoolMeta[]>("restore_pools", { pools: parsed.pools.map((p) => p.meta) });

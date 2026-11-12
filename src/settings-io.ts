@@ -153,6 +153,25 @@ function pickDispatcher(raw: unknown): DispatcherPrefs | undefined {
   };
 }
 
+/**
+ * The preferences an import sets: the file's, over the current ones. A
+ * dispatcher the file describes without its filter and login (an older
+ * export) keeps the current ones, and named pools the file does not mention
+ * keep their dispatchers.
+ */
+export function mergeImportedPrefs(file: PrefsUpdate, current: PrefsUpdate): PrefsUpdate {
+  const keep = (d: DispatcherPrefs, old: DispatcherPrefs | undefined): DispatcherPrefs =>
+    d.options || !old?.options ? d : { ...d, options: old.options };
+  const out: PrefsUpdate = { ...file };
+  if (file.dispatcher) out.dispatcher = keep(file.dispatcher, current.dispatcher);
+  if (file.poolDispatchers) {
+    const merged: Record<string, DispatcherPrefs> = { ...(current.poolDispatchers ?? {}) };
+    for (const [id, d] of Object.entries(file.poolDispatchers)) merged[id] = keep(d, merged[id]);
+    out.poolDispatchers = merged;
+  }
+  return out;
+}
+
 function pickPrefs(raw: unknown): PrefsUpdate {
   if (!raw || typeof raw !== "object") return {};
   const src = raw as Record<string, unknown>;

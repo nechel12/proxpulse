@@ -2,8 +2,8 @@
 //! tray, starting hidden from autostart, and starting the dispatcher.
 
 use crate::commands::dispatch::{
-    normalize_listener, normalize_mode, start_proxy_inner, write_private_file, DispatchOptions,
-    DispatchState, MAIN_POOL,
+    normalize_listener, normalize_mode, report_save_error, start_proxy_inner, stop_proxy_inner,
+    write_private_file, DispatchOptions, DispatchState, MAIN_POOL,
 };
 use crate::commands::pool_api::PoolApiPrefs;
 use crate::commands::tray::refresh_tray_menu;
@@ -241,8 +241,15 @@ fn set_pool_dispatcher(prefs: &mut AppPrefs, pool: &str, dispatcher: DispatcherP
     }
 }
 
+/// A change made by the app itself, with no command to return an error to.
+async fn modify_prefs_reported(app: &AppHandle, change: impl FnOnce(&mut AppPrefs)) {
+    if let Err(e) = modify_prefs(app, change).await {
+        report_save_error(app, "preferences", &e);
+    }
+}
+
 pub(crate) async fn remember_dispatcher(app: &AppHandle, pool: &str, dispatcher: DispatcherPrefs) {
-    let _ = modify_prefs(app, |p| set_pool_dispatcher(p, pool, dispatcher)).await;
+    modify_prefs_reported(app, |p| set_pool_dispatcher(p, pool, dispatcher)).await;
 }
 
 pub(crate) async fn remember_dispatch_options(
@@ -250,7 +257,7 @@ pub(crate) async fn remember_dispatch_options(
     pool: &str,
     options: DispatchOptions,
 ) {
-    let _ = modify_prefs(app, |p| {
+    modify_prefs_reported(app, |p| {
         let mut dispatcher = pool_dispatcher(p, pool);
         dispatcher.options = options;
         set_pool_dispatcher(p, pool, dispatcher);
@@ -260,7 +267,7 @@ pub(crate) async fn remember_dispatch_options(
 
 /// Drop what a deleted pool left in the preferences.
 pub(crate) async fn forget_pool(app: &AppHandle, pool: &str) {
-    let _ = modify_prefs(app, |p| {
+    modify_prefs_reported(app, |p| {
         p.pool_dispatchers.remove(pool);
     })
     .await;
@@ -268,16 +275,27 @@ pub(crate) async fn forget_pool(app: &AppHandle, pool: &str) {
 
 /// Give every dispatcher the filter, sessions and login the preferences
 /// hold. A settings import or reset changes them, and a running dispatcher
-/// must not keep serving without the imported login until a restart.
+/// must not keep serving without the imported login until a restart. One
+/// whose login the new settings remove is stopped rather than left open to
+/// every local process: it is started again knowingly.
 pub(crate) async fn apply_dispatch_options(disp: &DispatchState, prefs: &AppPrefs) {
     for inner in disp.all() {
         let options = pool_dispatcher(prefs, &inner.id).options;
         let mut current = inner.options.lock().await;
-        if *current != options {
-            *current = options;
-            drop(current);
-            // Bindings made under the old countries may point at excluded upstreams.
-            inner.sticky.lock().await.clear();
+        if *current == options {
+            continue;
+        }
+        let opened = !current.auth_user.is_empty()
+            && options.auth_user.is_empty()
+            && inner.running.load(std::sync::atomic::Ordering::SeqCst);
+        *current = options;
+        drop(current);
+        // Bindings made under the old countries may point at excluded upstreams.
+        inner.sticky.lock().await.clear();
+        if opened {
+            stop_proxy_inner(&inner).await;
+            *inner.last_error.lock().await =
+                Some("stopped: the new settings have no login for it".to_string());
         }
     }
 }

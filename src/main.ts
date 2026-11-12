@@ -1479,6 +1479,12 @@ window.addEventListener("DOMContentLoaded", () => {
     if (failed.length === 0) notifier.latch.clear(`webhook@${id}`);
     else void notifier.alert(`webhook@${id}`, notifTitle("notif_webhook_t", id), formatWebhookResults(failed, t));
   }).catch(() => {});
+  // A file the backend could not save: what it holds is lost at the next
+  // launch unless the cause (a full disk, a read-only folder) is removed.
+  void listen<{ file: string; error: string }>("app://save-error", (e) => {
+    logErr(`save ${e.payload.file}: ${e.payload.error}`);
+    setStatusT("st_savefail", { e: `${e.payload.file}: ${e.payload.error}` });
+  }).catch(() => {});
   void listen("app://hidden-to-tray", () => {
     if (readFlag("pp-tray-hint", false)) return;
     void notifier.send(t("notif_tray_t"), t("notif_tray_b")).then((sent) => {

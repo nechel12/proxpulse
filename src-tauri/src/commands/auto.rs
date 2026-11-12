@@ -1,7 +1,7 @@
 use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckConfig, CheckState};
 use crate::commands::dispatch::{
-    backup_pool, pool_items, save_pool, store_pool, write_private_file, DispatchInner,
-    DispatchItem, DispatchPoolItem, DispatchState, MAIN_POOL,
+    backup_pool, pool_items, save_pool, save_reported, store_pool, write_private_file,
+    DispatchInner, DispatchItem, DispatchPoolItem, DispatchState, MAIN_POOL,
 };
 use crate::commands::import::fetch_url_text;
 use crate::commands::webhook::{
@@ -790,7 +790,7 @@ async fn save_schedule(app: &tauri::AppHandle, id: &str, auto: &AutoInner, disp:
     let Ok(bytes) = serde_json::to_vec(&file) else {
         return;
     };
-    let _ = tauri::async_runtime::spawn_blocking(move || write_private_file(&path, &bytes)).await;
+    save_reported(app, "schedule", move || write_private_file(&path, &bytes)).await;
 }
 
 /// Restore a pool's schedule state at startup.

@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Semaphore};
@@ -1141,7 +1141,7 @@ pub(crate) async fn backup_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInne
     }
     let items = pool_items(inner).await;
     let backup = pool_backup_path(&path);
-    let _ = tauri::async_runtime::spawn_blocking(move || write_pool_file(&backup, &items)).await;
+    save_reported(app, "pool backup", move || write_pool_file(&backup, &items)).await;
 }
 
 /// Write the pool atomically. The file holds proxy credentials.
@@ -1186,6 +1186,38 @@ pub(crate) fn read_pool_file(path: &Path) -> Vec<DispatchItem> {
         .unwrap_or_default()
 }
 
+#[derive(Clone, Serialize)]
+struct SaveError<'a> {
+    file: &'a str,
+    error: String,
+}
+
+/// Run a blocking save; a failure is reported to the interface instead of
+/// being dropped: what was not written is gone at the next launch, and the
+/// user should hear of a full disk or a read-only folder before that.
+pub(crate) async fn save_reported(
+    app: &tauri::AppHandle,
+    file: &'static str,
+    write: impl FnOnce() -> std::io::Result<()> + Send + 'static,
+) {
+    let error = match tauri::async_runtime::spawn_blocking(write).await {
+        Ok(Ok(())) => return,
+        Ok(Err(e)) => e.to_string(),
+        Err(e) => e.to_string(),
+    };
+    report_save_error(app, file, &error);
+}
+
+pub(crate) fn report_save_error(app: &tauri::AppHandle, file: &str, error: &str) {
+    let _ = app.emit(
+        "app://save-error",
+        SaveError {
+            file,
+            error: crate::http::short_error(error),
+        },
+    );
+}
+
 /// Persist the current pool so it survives restarts; scheduled checks would
 /// otherwise start from an empty pool after every launch.
 pub(crate) async fn save_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>) {
@@ -1199,7 +1231,7 @@ pub(crate) async fn save_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>
         return;
     }
     let items = pool_items(inner).await;
-    let _ = tauri::async_runtime::spawn_blocking(move || write_pool_file(&path, &items)).await;
+    save_reported(app, "pool", move || write_pool_file(&path, &items)).await;
 }
 
 pub(crate) async fn load_pool(app: &tauri::AppHandle, inner: &Arc<DispatchInner>) {

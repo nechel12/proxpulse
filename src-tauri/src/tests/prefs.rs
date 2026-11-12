@@ -126,3 +126,28 @@ async fn saved_options_reach_running_dispatchers() {
     assert_eq!(*named.options.lock().await, DispatchOptions::default());
     assert!(named.sticky.lock().await.is_empty());
 }
+
+#[tokio::test]
+async fn settings_without_a_login_stop_a_running_dispatcher_that_had_one() {
+    use std::sync::atomic::Ordering;
+    let disp = DispatchState::default();
+    let login = DispatchOptions {
+        auth_user: "u".into(),
+        auth_pass: "p".into(),
+        ..DispatchOptions::default()
+    };
+    *disp.inner.options.lock().await = login.clone();
+    disp.inner.running.store(true, Ordering::SeqCst);
+    let named = disp.add("p1");
+    *named.options.lock().await = login;
+
+    // A reset, or an import whose file has no dispatcher settings.
+    apply_dispatch_options(&disp, &AppPrefs::default()).await;
+
+    // The running one is stopped, not left open to every local process.
+    assert!(!disp.inner.running.load(Ordering::SeqCst));
+    assert!(disp.inner.last_error.lock().await.is_some());
+    // One that is not running just takes the new settings.
+    assert!(named.options.lock().await.auth_user.is_empty());
+    assert!(named.last_error.lock().await.is_none());
+}

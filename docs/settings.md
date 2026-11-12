@@ -20,8 +20,10 @@ The **Settings** tab holds the app-wide options:
 - **Data**: export, import and reset of the settings as a JSON file (it holds
   webhook URLs, the ip-api key, the dispatcher logins and the named pools'
   settings, and the pools with their credentials only when you choose so on
-  export; import adds the file's pools up to ten in total; running
-  dispatchers take an imported or reset login and country filter at once);
+  export; import adds the file's pools up to ten in total and leaves what
+  the file does not mention as it is; running dispatchers take an imported
+  or reset login and country filter at once, and one whose login that
+  removes is stopped rather than left open);
   **Copy** puts a diagnostics report (version, OS, install type, counters,
   recent errors) on the clipboard for bug reports; the error log; clearing
   the proxy history.
