@@ -3,6 +3,8 @@ export type AutoStatusEvent = {
   /** The pool whose schedule ran. */
   pool?: string;
   state: "fetching" | "running" | "done" | "stopped" | "skipped" | "empty" | "error" | "offline" | "suspect";
+  /** Proxies checked so far, in the progress reports of a running check. */
+  done?: number;
   alive: number;
   total: number;
   avgMs: number | null;
@@ -49,7 +51,9 @@ export class AutoStatusController {
     const pool = ev.pool ?? "main";
     if (ev.state === "fetching" || ev.state === "running") {
       show(() =>
-        ev.state === "fetching" ? this.deps.t("auto_fetching") : this.deps.t("auto_running", { n: ev.total }),
+        ev.state === "fetching" ? this.deps.t("auto_fetching")
+          : ev.done ? this.deps.t("auto_running_progress", { done: ev.done, total: ev.total })
+          : this.deps.t("auto_running", { n: ev.total }),
       );
       this.active.add(pool);
       if (ev.state === "running") this.inCheck.add(pool);

@@ -1049,6 +1049,22 @@ pub(crate) async fn run_checks(
     cancel: Arc<AtomicBool>,
     on_result: Option<&Channel<CheckEvent>>,
 ) -> Result<Vec<ProxyResult>, String> {
+    run_checks_reporting(proxies, cfg, geo_cache, cancel, on_result, None).await
+}
+
+/// Called with (done, total) after every finished proxy.
+pub(crate) type Progress<'a> = &'a (dyn Fn(usize, usize) + Sync);
+
+/// [`run_checks`] that also reports progress: a scheduled check has no
+/// result channel to count on.
+pub(crate) async fn run_checks_reporting(
+    proxies: Vec<String>,
+    cfg: CheckConfig,
+    geo_cache: Vec<GeoCacheEntry>,
+    cancel: Arc<AtomicBool>,
+    on_result: Option<&Channel<CheckEvent>>,
+    on_progress: Option<Progress<'_>>,
+) -> Result<Vec<ProxyResult>, String> {
     let cfg = cfg.sanitized();
     let flags = cfg.flags();
     let timeout = cfg.timeout();
@@ -1139,6 +1155,7 @@ pub(crate) async fn run_checks(
     let sem = Arc::new(Semaphore::new(conc));
     let mut set = tokio::task::JoinSet::new();
     let mut task_raw: HashMap<tokio::task::Id, String> = HashMap::new();
+    let total = jobs.len();
 
     for (raw, cands) in jobs {
         if cands.is_empty() {
@@ -1205,6 +1222,9 @@ pub(crate) async fn run_checks(
                     let _ = ch.send(CheckEvent::Result(Box::new(r.clone())));
                 }
                 out.push(r);
+                if let Some(report) = on_progress {
+                    report(out.len(), total);
+                }
             }
         }
     }

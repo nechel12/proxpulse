@@ -14,10 +14,17 @@ function page(): Record<string, El> {
 }
 
 /** The controller wired as main.ts wires it. */
-function controller(els: Record<string, El>, manual = () => false): AutoStatusController {
+function controller(
+  els: Record<string, El>,
+  manual = () => false,
+  shown: string[] = [],
+): AutoStatusController {
   const c: AutoStatusController = new AutoStatusController({
-    t: (key, params) => `${key}${params?.pool !== undefined ? `:${params.pool}` : ""}`,
-    setStatusText: () => {},
+    t: (key, params) =>
+      params?.pool !== undefined ? `${key}:${params.pool}`
+        : params?.done !== undefined ? `${key}:${params.done}/${params.total}`
+        : key,
+    setStatusText: (_id, render) => shown.push(render()),
     onChange: () => {
       const on = runButtons({ manual: manual(), starting: false, autoChecking: c.checking, autoRunning: c.running });
       els["btn-start"].disabled = !on.start;
@@ -89,6 +96,21 @@ describe("AutoStatusController", () => {
     expect(c.running).toBe(false);
     expect(els["btn-start"].disabled).toBe(false);
     expect(els["btn-stop"].disabled).toBe(true);
+  });
+});
+
+describe("scheduled check progress", () => {
+  it("shows how far a running check is", () => {
+    const shown: string[] = [];
+    const c = controller(page(), () => false, shown);
+    c.handle(ev("main", "running"));
+    expect(shown[shown.length - 1]).toBe("auto_running");
+    c.handle({ ...ev("main", "running"), done: 7, total: 20 });
+    expect(shown[shown.length - 1]).toBe("auto_running_progress:7/20");
+    // Still one running check, not a second one.
+    expect(c.checking).toBe(true);
+    c.handle(ev("main", "done"));
+    expect(c.checking).toBe(false);
   });
 });
 

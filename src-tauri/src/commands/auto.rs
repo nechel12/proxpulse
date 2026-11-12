@@ -1,4 +1,6 @@
-use crate::commands::check::{direct_reachable, run_checks, BusyGuard, CheckConfig, CheckState};
+use crate::commands::check::{
+    direct_reachable, run_checks_reporting, BusyGuard, CheckConfig, CheckState,
+};
 use crate::commands::dispatch::{
     backup_pool, pool_items, save_pool, save_reported, store_pool, write_private_file,
     DispatchInner, DispatchItem, DispatchPoolItem, DispatchState, MAIN_POOL,
@@ -150,6 +152,9 @@ impl AutoState {
 struct AutoStatus {
     pool: String,
     state: String,
+    /// Proxies checked so far, while the state is "running".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    done: Option<usize>,
     alive: usize,
     total: usize,
     avg_ms: Option<u64>,
@@ -274,6 +279,26 @@ async fn fetch_subscriptions(
     (fresh, results)
 }
 
+/// How often a running cycle reports its progress.
+const PROGRESS_EVERY: Duration = Duration::from_millis(500);
+
+/// "running" again, with how many proxies are checked so far.
+fn emit_auto_progress(app: &tauri::AppHandle, pool: &str, done: usize, total: usize) {
+    let _ = app.emit(
+        "auto://status",
+        AutoStatus {
+            pool: pool.to_string(),
+            state: "running".to_string(),
+            done: Some(done),
+            alive: 0,
+            total,
+            avg_ms: None,
+            error: None,
+            at: epoch_secs(),
+        },
+    );
+}
+
 fn emit_auto_status(
     app: &tauri::AppHandle,
     pool: &str,
@@ -288,6 +313,7 @@ fn emit_auto_status(
         AutoStatus {
             pool: pool.to_string(),
             state: state.to_string(),
+            done: None,
             alive,
             total,
             avg_ms,
@@ -564,12 +590,23 @@ async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
     let cfg = pool_check_config(&settings.check).sanitized();
     let timeout = cfg.timeout();
     let test_url = cfg.test_url.clone();
-    let result = run_checks(
+    // Progress for the interface, a couple of times a second at most.
+    let reported = std::sync::Mutex::new(std::time::Instant::now());
+    let progress = |done: usize, total: usize| {
+        let mut last = reported.lock().unwrap_or_else(|e| e.into_inner());
+        if done < total && last.elapsed() < PROGRESS_EVERY {
+            return;
+        }
+        *last = std::time::Instant::now();
+        emit_auto_progress(app, pool, done, total);
+    };
+    let result = run_checks_reporting(
         urls,
         cfg,
         pool_geo_cache(&pool_now),
         check.cancel.clone(),
         None,
+        Some(&progress),
     )
     .await;
     let canceled = check.cancel.load(Ordering::Relaxed);

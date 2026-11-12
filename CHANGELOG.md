@@ -54,6 +54,8 @@ All notable changes to ProxPulse. The format follows
 
 ### Added
 
+- A scheduled check shows its progress ("N of M") on the Auto and Dispatcher
+  tabs while it runs.
 - Answers whose signature could not be checked, because the judge's key could
   not be fetched, are marked `?unv`, with `unverified` in exports.
 - A note under the status line when the judge's key came over plain HTTP.

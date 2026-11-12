@@ -1,7 +1,7 @@
 //! Checks against local stub proxies: real reqwest errors and whole runs,
 //! with no request leaving the machine.
 
-use crate::commands::check::{run_checks, CheckConfig};
+use crate::commands::check::{run_checks, run_checks_reporting, CheckConfig};
 use crate::*;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -255,4 +255,30 @@ async fn a_cached_country_saves_the_geo_request() {
     assert!(r.skipped.is_empty(), "{:?}", r.skipped);
     // The two measured requests and no geo lookup through the proxy.
     assert_eq!(requests.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn progress_counts_every_proxy_up_to_the_total() {
+    let (addr, task) = stub(OK_PAGE).await;
+    // One working proxy and two lines that are no proxies at all.
+    let list = vec![
+        addr.to_string(),
+        "not a proxy".to_string(),
+        "also:not".to_string(),
+    ];
+    let seen = std::sync::Mutex::new(Vec::new());
+    let progress = |done: usize, total: usize| seen.lock().unwrap().push((done, total));
+    let out = run_checks_reporting(
+        list,
+        plain_config(TARGET_HTTP.to_string()),
+        Vec::new(),
+        Arc::new(AtomicBool::new(false)),
+        None,
+        Some(&progress),
+    )
+    .await
+    .unwrap();
+    task.abort();
+    assert_eq!(out.len(), 3);
+    assert_eq!(*seen.lock().unwrap(), vec![(1, 3), (2, 3), (3, 3)]);
 }
