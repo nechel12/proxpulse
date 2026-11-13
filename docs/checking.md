@@ -112,8 +112,9 @@ off); the text filter (Ctrl+F) and the **Protocol**, **Anonymity**,
 after Status, holds the exit IP, the marks below and the reason a proxy is
 dead; the row number and proxy columns stay in place while the table scrolls
 sideways, and every column header explains itself in a tooltip. A click selects a row, Ctrl+click and
-Shift+click select several, Ctrl+A selects all shown. Right-click opens
-actions for the selection: copy (with credentials), re-check, speed test, add
+Shift+click select several, Ctrl+A selects all shown; the arrow keys move
+the selection and Shift+arrows extend it. Right-click, the Menu key or
+Shift+F10 opens actions for the selection: copy (with credentials), re-check, speed test, add
 the alive ones to the pool, remove from the list (also Delete). **Re-check
 dead** checks only the dead proxies again and updates their rows in place.
 

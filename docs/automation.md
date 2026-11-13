@@ -25,6 +25,8 @@ The **Auto** tab re-checks the pool every N minutes; each
   for change-only webhooks, the same last-sent lists. **Check now** moves the
   schedule on like a scheduled check.
 - Scheduled checks never stop the dispatcher.
+- While a check runs, the Auto and Dispatcher tabs show how far it is
+  ("N of M"), and the Check tab says which pool holds the checker.
 - **Subscriptions** — up to 10 proxy list URLs are downloaded before every
   scheduled check; proxies not in the pool yet are checked with it, and the
   alive ones join it. The status shows how many each list had and how many
