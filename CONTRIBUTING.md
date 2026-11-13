@@ -79,9 +79,29 @@ src-tauri/src/judge_sig.rs          # judge answer signatures
 src-tauri/src/baseline.rs           # direct measurements a run compares answers with
 src-tauri/src/tests/*.rs            # backend tests
 scripts/*.mjs                       # version check, release description
+scripts/demo/                       # sample backend for `npm run demo` and screenshots
 .github/workflows/ci.yml            # checks on every push and PR
 .github/workflows/release.yml       # tagged release builds
 ```
+
+### Interface work and screenshots
+
+`npm run demo` serves the real frontend on `http://127.0.0.1:1430` with a
+sample backend (`scripts/demo/mock-tauri.js`, documentation addresses only),
+so the interface can be worked on and looked at without building the Rust
+side. `?demo=check`, `progress`, `dispatch` or `auto` picks a scene and
+`?lang=ru` or `en` the language.
+
+The screenshots in `docs/screenshots` are those scenes at the default window
+size, taken with a headless browser, for example:
+
+```sh
+msedge --headless=new --hide-scrollbars --window-size=1220,790 --virtual-time-budget=8000 \
+  --screenshot=docs/screenshots/main-en.png "http://127.0.0.1:1430/?demo=check&lang=en"
+```
+
+Retake `main-*` (`demo=check`) and `dispatcher-*` (`demo=dispatch`) in both
+languages when the interface changes visibly.
 
 ### Repository notes
 

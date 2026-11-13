@@ -11,6 +11,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "demo": "vite --config scripts/demo/vite.config.mjs",
     "build": "tsc && vite build",
     "tauri": "tauri",
     "build:unsigned": "tauri build --config src-tauri/tauri.unsigned.conf.json",

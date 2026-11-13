@@ -2,6 +2,8 @@
 
 **English** | [Русский](dispatcher.ru.md)
 
+![The Dispatcher tab](screenshots/dispatcher-en.png)
+
 The **Dispatcher** tab serves a local proxy on `127.0.0.1:1080` (or the next
 free port) and routes traffic through the alive pool. One port accepts HTTP
 and SOCKS5 (detected from the first byte), or only the selected protocol.

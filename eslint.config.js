@@ -18,6 +18,16 @@ export default defineConfig(
   {
     // Release and version scripts run on Node.
     files: ["scripts/**/*.mjs"],
-    languageOptions: { globals: { process: "readonly", console: "readonly" } },
+    languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly" } },
+  },
+  {
+    // The demo backend runs in the page.
+    files: ["scripts/demo/**/*.js"],
+    languageOptions: {
+      globals: {
+        window: "readonly", document: "readonly", location: "readonly", localStorage: "readonly",
+        URLSearchParams: "readonly", setTimeout: "readonly", Event: "readonly",
+      },
+    },
   },
 );

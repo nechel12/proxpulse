@@ -73,6 +73,9 @@ All notable changes to ProxPulse. The format follows
 
 ### Changed
 
+- New screenshots of the Check and Dispatcher tabs in both languages, taken
+  from the current interface with sample data; `npm run demo` serves that
+  interface for development.
 - The README is half as long and starts with who the app is for and a link to
   the latest release, with a short FAQ. The check target, deep checks,
   results table, export, dispatcher, pool API, schedules, webhooks, settings
