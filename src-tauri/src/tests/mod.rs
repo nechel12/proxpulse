@@ -1,3 +1,4 @@
+mod auto;
 mod check;
 mod dispatch;
 mod extract;
