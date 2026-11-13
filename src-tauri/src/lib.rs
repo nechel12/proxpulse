@@ -28,7 +28,7 @@ mod commands;
 use commands::app::{
     app_version, check_app_update, hide_to_tray, install_app_update, install_kind,
 };
-use commands::auto::{auto_scheduler_loop, run_auto_now, set_auto_config, AutoState};
+use commands::auto::{auto_scheduler_loop, run_auto_now, set_auto_config};
 use commands::check::{cancel_check, check_busy, check_direct, check_proxies, CheckState};
 use commands::dispatch::{
     get_dispatch_pool, load_pool, local_proxy_status, set_dispatch_options, set_dispatch_pool,
@@ -207,7 +207,6 @@ pub fn run() {
         .manage(DispatchState::default())
         .manage(CheckState::default())
         .manage(TrayState::default())
-        .manage(AutoState::default())
         .manage(PrefsState::default())
         .manage(HistoryState::default())
         .manage(PoolsState::default())

@@ -120,3 +120,27 @@ async fn another_pools_listener_is_not_an_upstream() {
     stop_proxy_inner(&named).await;
     assert!(!is_listener_port(bound));
 }
+
+#[test]
+fn a_pools_schedule_comes_and_goes_with_the_pool() {
+    use std::sync::atomic::Ordering;
+    let pools = DispatchState::default();
+    // Each pool has a schedule of its own, the main one included.
+    let named = pools.add("p1");
+    named.auto.next.store(42, Ordering::SeqCst);
+    assert_eq!(pools.inner.auto.next.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        pools
+            .pool(Some("p1"))
+            .unwrap()
+            .auto
+            .next
+            .load(Ordering::SeqCst),
+        42
+    );
+    // The scheduler walks the same registry, so a deleted pool is not run.
+    assert_eq!(pools.all().len(), 2);
+    pools.remove("p1");
+    assert_eq!(pools.all().len(), 1);
+    assert!(pools.pool(Some("p1")).is_err());
+}

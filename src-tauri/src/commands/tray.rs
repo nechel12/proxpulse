@@ -1,5 +1,5 @@
 use crate::commands::dispatch::DispatchState;
-use crate::{epoch_secs, AutoState};
+use crate::epoch_secs;
 use std::sync::atomic::Ordering;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::{Manager, State};
@@ -80,7 +80,6 @@ pub(crate) async fn refresh_tray_menu(app: &tauri::AppHandle) {
     let running = disp.inner.running.load(Ordering::SeqCst);
     let port = *disp.inner.port.lock().await;
     let info = tray.info.lock().await.clone();
-    let auto: State<AutoState> = app.state();
     let now = epoch_secs();
     let remaining = |v: u64| {
         if v == 0 {
@@ -89,7 +88,7 @@ pub(crate) async fn refresh_tray_menu(app: &tauri::AppHandle) {
             Some(v.saturating_sub(now))
         }
     };
-    let auto_next = remaining(auto.inner.next.load(Ordering::SeqCst));
+    let auto_next = remaining(disp.inner.auto.next.load(Ordering::SeqCst));
     let ru = info.lang == "ru";
     let dispatch_txt = if running {
         if ru {

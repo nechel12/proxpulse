@@ -2,7 +2,6 @@
 //! registry (`pools.json`) holds their ids and names; the main pool is always
 //! present and cannot be deleted.
 
-use crate::commands::auto::AutoState;
 use crate::commands::dispatch::{
     delete_pool_file, load_pool, stop_proxy_inner, write_private_file, DispatchState, MAIN_POOL,
 };
@@ -134,7 +133,6 @@ async fn add_runtime(app: &AppHandle, id: &str) {
     // A pool restored from a settings file keeps its filter and login: the
     // dispatcher's first start would otherwise save empty ones over them.
     *inner.options.lock().await = pool_dispatcher(&app.state::<PrefsState>().get(), id).options;
-    app.state::<AutoState>().add(id);
     load_pool(app, &inner).await;
     crate::commands::auto::load_schedule(app, id).await;
 }
@@ -202,7 +200,6 @@ pub(crate) async fn delete_pool(app: AppHandle, id: String) -> Result<(), String
         stop_proxy_inner(&inner).await;
         delete_pool_file(&app, &inner).await;
     }
-    app.state::<AutoState>().remove(&id);
     crate::commands::auto::delete_schedule(&app, &id);
     forget_pool(&app, &id).await;
     Ok(())

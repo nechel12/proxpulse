@@ -64,6 +64,9 @@ impl Default for AutoSettings {
     }
 }
 
+/// A pool's schedule. It lives in the pool's runtime
+/// ([`DispatchInner::auto`]), so there is one registry of pools, not two to
+/// keep in step.
 pub(crate) struct AutoInner {
     pub(crate) settings: Mutex<AutoSettings>,
     /// Unix time of the next scheduled check, 0 when the schedule is off.
@@ -81,7 +84,7 @@ pub(crate) struct AutoInner {
 }
 
 impl AutoInner {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             settings: Mutex::new(AutoSettings::default()),
             next: AtomicU64::new(0),
@@ -91,59 +94,6 @@ impl AutoInner {
             last_run: AtomicU64::new(0),
             offline: AtomicU32::new(0),
         }
-    }
-}
-
-/// One schedule per pool: the main one, reached directly by the tray, and
-/// the named pools by id.
-pub(crate) struct AutoState {
-    pub(crate) inner: Arc<AutoInner>,
-    extra: std::sync::RwLock<HashMap<String, Arc<AutoInner>>>,
-}
-
-impl Default for AutoState {
-    fn default() -> Self {
-        Self {
-            inner: Arc::new(AutoInner::new()),
-            extra: std::sync::RwLock::new(HashMap::new()),
-        }
-    }
-}
-
-impl AutoState {
-    pub(crate) fn pool(&self, id: Option<&str>) -> Result<Arc<AutoInner>, String> {
-        match id.unwrap_or(MAIN_POOL) {
-            MAIN_POOL => Ok(self.inner.clone()),
-            id => self
-                .extra
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(id)
-                .cloned()
-                .ok_or_else(|| "unknown pool".to_string()),
-        }
-    }
-
-    pub(crate) fn add(&self, id: &str) {
-        self.extra
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .entry(id.to_string())
-            .or_insert_with(|| Arc::new(AutoInner::new()));
-    }
-
-    pub(crate) fn remove(&self, id: &str) {
-        self.extra
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(id);
-    }
-
-    fn all(&self) -> Vec<(String, Arc<AutoInner>)> {
-        let mut out = vec![(MAIN_POOL.to_string(), self.inner.clone())];
-        let extra = self.extra.read().unwrap_or_else(|e| e.into_inner());
-        out.extend(extra.iter().map(|(id, a)| (id.clone(), a.clone())));
-        out
     }
 }
 
@@ -522,12 +472,10 @@ pub(crate) fn merge_auto_items(
 }
 
 async fn run_auto_cycle(app: &tauri::AppHandle, pool: &str) -> AutoOutcome {
-    let (Ok(auto), Ok(disp)) = (
-        app.state::<AutoState>().pool(Some(pool)),
-        app.state::<DispatchState>().pool(Some(pool)),
-    ) else {
+    let Ok(disp) = app.state::<DispatchState>().pool(Some(pool)) else {
         return AutoOutcome::Finished;
     };
+    let auto = disp.auto.clone();
     // This pool's cycle is already running ("Check now" during it): the
     // interface shows that one; a "skipped" here would end it there.
     if auto.running.swap(true, Ordering::SeqCst) {
@@ -832,12 +780,10 @@ async fn save_schedule(app: &tauri::AppHandle, id: &str, auto: &AutoInner, disp:
 
 /// Restore a pool's schedule state at startup.
 pub(crate) async fn load_schedule(app: &tauri::AppHandle, id: &str) {
-    let (Ok(auto), Ok(disp)) = (
-        app.state::<AutoState>().pool(Some(id)),
-        app.state::<DispatchState>().pool(Some(id)),
-    ) else {
+    let Ok(disp) = app.state::<DispatchState>().pool(Some(id)) else {
         return;
     };
+    let auto = disp.auto.clone();
     let Some(path) = schedule_path(app, id) else {
         return;
     };
@@ -899,8 +845,8 @@ pub(crate) async fn auto_scheduler_loop(app: tauri::AppHandle) {
         tokio::time::sleep(Duration::from_secs(1)).await;
         // Pools take turns; a cycle crowded out by another one is retried
         // a minute later like one crowded out by a manual check.
-        let pools = app.state::<AutoState>().all();
-        for (id, auto) in pools {
+        let pools = app.state::<DispatchState>().all();
+        for (id, auto) in pools.iter().map(|p| (p.id.clone(), p.auto.clone())) {
             if auto.running.load(Ordering::SeqCst) {
                 continue;
             }
@@ -946,9 +892,9 @@ fn sanitize_auto_settings(mut s: AutoSettings) -> AutoSettings {
 pub(crate) async fn set_auto_config(
     pool: Option<String>,
     settings: AutoSettings,
-    state: State<'_, AutoState>,
+    state: State<'_, DispatchState>,
 ) -> Result<(), String> {
-    let auto = state.pool(pool.as_deref())?;
+    let auto = state.pool(pool.as_deref())?.auto.clone();
     let s = sanitize_auto_settings(settings);
 
     let old = {
@@ -978,7 +924,7 @@ pub(crate) async fn run_auto_now(
     pool: Option<String>,
 ) -> Result<(), String> {
     let pool = pool.unwrap_or_else(|| MAIN_POOL.to_string());
-    let auto = app.state::<AutoState>().pool(Some(&pool))?;
+    let auto = app.state::<DispatchState>().pool(Some(&pool))?.auto.clone();
     tauri::async_runtime::spawn(async move {
         // Like a scheduled run, it moves the schedule on: a run due seconds
         // later would otherwise check the pool and post the webhooks again.

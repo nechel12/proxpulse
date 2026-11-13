@@ -109,9 +109,12 @@ pub(crate) async fn pool_items(inner: &Arc<DispatchInner>) -> Vec<DispatchPoolIt
         .collect()
 }
 
+/// A pool's runtime: its proxies, its dispatcher and its schedule.
 pub(crate) struct DispatchInner {
     /// Pool id: "main" or a named pool's id.
     pub(crate) id: String,
+    /// The pool's schedule.
+    pub(crate) auto: Arc<crate::commands::auto::AutoInner>,
     pub(crate) running: AtomicBool,
     pub(crate) port: Mutex<u16>,
     pub(crate) mode: Mutex<String>,
@@ -153,6 +156,7 @@ impl DispatchInner {
     pub(crate) fn new(id: &str) -> Self {
         Self {
             id: id.to_string(),
+            auto: Arc::new(crate::commands::auto::AutoInner::new()),
             running: AtomicBool::new(false),
             port: Mutex::new(1080),
             mode: Mutex::new("round-robin".to_string()),
