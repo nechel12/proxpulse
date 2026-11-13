@@ -132,6 +132,9 @@ export class AutoSettingsStore {
         // The shared check settings changed for every pool's schedule.
         const check = this.deps.readCheckSettings();
         for (const other of this.deps.otherPools()) push(other, storedAutoConfig(localStorage, other, check));
+        // The tray shows the webhook state: it follows the settings instead
+        // of being asked every few seconds.
+        void this.deps.updateTray();
       } catch (e) {
         logErr("auto-config: " + String(e).slice(0, 200));
       }

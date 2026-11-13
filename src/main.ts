@@ -1447,7 +1447,6 @@ function initAutoControls() {
     });
   });
   ($("btn-webhook-send") as HTMLButtonElement).addEventListener("click", () => void sendWebhook(true));
-  window.setInterval(() => void updateTray(), 5000);
 
   // Settings can be changed anywhere in the three panels; push a debounced
   // snapshot to the Rust scheduler.
